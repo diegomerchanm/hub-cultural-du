@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find C:Usersdmerchanhub-cultural-du -maxdepth 2 -type f -name *.md -o -name .cursor* -o -name *instructions*)",
+      "Bash(wc -l *.py)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}

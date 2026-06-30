@@ -45,7 +45,7 @@ def get_nlp(lang: str):
             return None
         import spacy
         print(f"  📦 Cargando spaCy: {model_name}")
-        _NLP[lang] = spacy.load(model_name, disable=["parser"])
+        _NLP[lang] = spacy.load(model_name, disable=["senter"])
     return _NLP[lang]
 
 
@@ -60,6 +60,36 @@ def detect_lang(text: str) -> str:
         return "unknown"
 
 
+def _is_valid_date_entity(text: str) -> bool:
+    """True si el texto es parseable como fecha real (no "siglo XX", "años 90", etc.)."""
+    try:
+        from dateutil import parser as dp
+        dp.parse(text, fuzzy=False)
+        return True
+    except Exception:
+        return False
+
+
+_URL_RE    = __import__("re").compile(r"https?://\S+|www\.\S+")
+_EMOJI_RE  = __import__("re").compile(
+    "[\U00010000-\U0010ffff"
+    "\U0001F600-\U0001F64F"
+    "\U0001F300-\U0001F5FF"
+    "\U0001F680-\U0001F6FF"
+    "\U00002702-\U000027B0"
+    "\U000024C2-\U0001F251]+",
+    flags=__import__("re").UNICODE,
+)
+
+
+def _is_noise_keyword(text: str) -> bool:
+    """True si el chunk es solo emojis, puntuación o una URL."""
+    clean = _URL_RE.sub("", text).strip()
+    clean = _EMOJI_RE.sub("", clean).strip()
+    # Queda vacío o es solo puntuación/espacios
+    return not clean or all(not c.isalnum() for c in clean)
+
+
 def extract_features(text: str, lang: str) -> dict:
     """Extrae entidades NER (tipo:texto) y noun chunks como keywords."""
     nlp = get_nlp(lang)
@@ -68,15 +98,33 @@ def extract_features(text: str, lang: str) -> dict:
 
     doc = nlp(text[:5000])
 
+    ALLOWED_ENT_TYPES = {"PER", "LOC", "GPE", "ORG", "DATE", "FAC"}
+
     entities = list({
         f"{ent.label_}:{ent.text.strip()}"
         for ent in doc.ents
-        if len(ent.text.strip()) > 1
+        if (
+            ent.label_ in ALLOWED_ENT_TYPES                # whitelist de tipos
+            and len(ent.text.strip()) > 1
+            and len(ent.text.strip().split()) <= 6         # máx 6 palabras
+            and len(ent.text.strip()) <= 60                # máx 60 caracteres
+            and "http" not in ent.text                     # sin URLs
+            and "/" not in ent.text                        # sin paths/URLs
+            and "\n" not in ent.text                       # sin saltos de línea
+            and (                                          # DATE parseable
+                ent.label_ != "DATE"
+                or _is_valid_date_entity(ent.text.strip())
+            )
+        )
     })
     keywords = list({
         chunk.text.lower().strip()
         for chunk in doc.noun_chunks
-        if len(chunk.text.strip()) > 2 and not chunk.text.startswith("#")
+        if (
+            len(chunk.text.strip()) > 2
+            and not chunk.text.startswith("#")
+            and not _is_noise_keyword(chunk.text)         # 2. sin emojis/URLs/puntuación
+        )
     })
     return {"entities": entities, "keywords": keywords}
 
