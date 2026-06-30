@@ -3,3 +3,4 @@ __pycache__/
 venv/
 data_raw/
 .apify_cost_log.json
+data_processed/
