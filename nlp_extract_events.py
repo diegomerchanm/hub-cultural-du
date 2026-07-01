@@ -1,16 +1,19 @@
 """
 Fase 4-B — Extracción de eventos culturales desde Post.caption.
 
-Pipeline por post:
-  1. Zero-shot classification (cross-encoder/nli-MiniLM2-L6-H768) → tipo de evento
-  2. NER spaCy → DATE, LOC/GPE, ORG
-  3. Score compuesto = classifier_score * 0.6 + hotness_normalizado * 0.4
-  4. Resolución inline → busca evento existente similar antes de crear
-  5. MERGE (:Event) + relaciones [:MENTIONS_EVENT], [:ORGANIZED], [:PARTICIPATED_IN],
-     [:SUPPORTED], [:LOCATED_AT], [:HAS_HASHTAG]
+Arquitectura de 2 capas:
+  Capa 1 — sentence-transformers (paraphrase-multilingual-MiniLM-L12-v2)
+            Embedding promedio de 100 frases de referencia.
+            Filtra candidatos por similitud coseno >= layer1_threshold.
+
+  Capa 2 — Zero-shot cross-encoder (cross-encoder/nli-MiniLM2-L6-H768)
+            Solo corre sobre candidatos de Capa 1.
+            Clasifica tipo de evento con taxonomía específica para
+            diáspora colombiana en París.
+
+Score final = layer2_score × 0.6 + hotness_norm × 0.4 × political_penalty
 
 Idempotente: marca cada post procesado con eventExtracted=true.
-Depende de nlp_enrich_nodes.py para captionLanguage (opcional pero recomendado).
 """
 
 import hashlib
@@ -38,55 +41,162 @@ if not all([NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD]):
 
 driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
 
-# ── 2. Taxonomía de etiquetas ─────────────────────────────────────────────────
-# Diseñada para la diáspora colombiana en París: corpus trilingüe ES/FR/EN
-# con contexto afrocolombian, andino, costeño e institucional-consular.
-#
-# Estructura: (label, categoria, penalización_política)
+# ── 2. Frases de referencia (Capa 1) ─────────────────────────────────────────
+EVENT_REFERENCES = [
+    # ── CONVOCATORIA DIRECTA ──────────────────────────────────────────────────
+    "Te invitamos a nuestro evento este sábado en París",
+    "Los esperamos este domingo en nuestra sede",
+    "Estás invitado a participar en nuestra próxima actividad",
+    "Únete a nosotros este fin de semana",
+    "Nos vemos el jueves en la Alianza Francesa",
+    "Rejoignez-nous ce samedi soir au centre culturel",
+    "Venez nombreux ce vendredi à la galerie",
+    "On vous attend ce weekend au consulat",
+    "Vous êtes invités à notre prochain événement",
+    "Join us this Saturday at the cultural center",
+    "We invite you to our next community gathering",
+    "See you next Friday at the embassy",
+    # ── APERTURA / INAUGURACIÓN ───────────────────────────────────────────────
+    "La exposición abre sus puertas este viernes en la galería",
+    "El restaurante inaugura su nueva carta este mes",
+    "La muestra estará disponible desde el próximo lunes",
+    "Abrimos nuestras puertas este sábado a las 6pm",
+    "La tienda abre este fin de semana con nueva colección",
+    "L'exposition ouvre ses portes vendredi prochain",
+    "La galerie inaugure sa nouvelle exposition ce mois-ci",
+    "Le festival ouvre ce weekend au parc de la Villette",
+    "The exhibition opens its doors next Thursday evening",
+    "Grand opening this Saturday, everyone is welcome",
+    # ── PROGRAMACIÓN / AGENDA ─────────────────────────────────────────────────
+    "La agenda cultural de junio en París",
+    "Programación del mes de julio para la comunidad colombiana",
+    "Estas son las actividades de la semana en la Alianza Francesa",
+    "Cartelera de eventos colombianos en Francia este mes",
+    "Agenda de conciertos y exposiciones para agosto",
+    "Le programme culturel du mois de juin à Paris",
+    "Voici notre agenda pour les prochaines semaines",
+    "Découvrez la programmation de juillet au centre culturel",
+    "This month's agenda at the Colombian consulate in Paris",
+    "Upcoming events for the Colombian community in France",
+    # ── FECHA Y LUGAR EXPLÍCITOS ──────────────────────────────────────────────
+    "El concierto es el sábado 15 de junio a las 8pm en la sala principal",
+    "El taller se realizará el próximo martes en la rue de Berri",
+    "La conferencia tendrá lugar el 20 de julio en el Instituto Francés",
+    "El festival colombiano es el domingo en el Parc de la Villette",
+    "Evento este viernes a las 7pm en la Alianza Francesa de París",
+    "Le concert aura lieu samedi 15 juin à 20h salle Pleyel",
+    "L'atelier se tiendra mardi prochain rue de Rivoli",
+    "La conférence aura lieu le 20 juillet à l'Institut Français",
+    "The concert is on Saturday June 15th at 8pm at the main hall",
+    "Workshop next Tuesday at the Colombian cultural center",
+    # ── INSCRIPCIÓN / REGISTRO ────────────────────────────────────────────────
+    "Inscríbete antes del viernes para reservar tu lugar",
+    "Cupos limitados para el taller del próximo mes",
+    "Regístrate ahora para el próximo encuentro comunitario",
+    "Las inscripciones están abiertas hasta el domingo",
+    "Reserva tu entrada para el concierto de este sábado",
+    "Inscrivez-vous avant vendredi pour réserver votre place",
+    "Les inscriptions sont ouvertes jusqu'à dimanche",
+    "Places limitées pour l'atelier du mois prochain",
+    "Register now for the upcoming community event",
+    "Book your tickets for this Saturday's concert",
+    # ── ENTRADA LIBRE ─────────────────────────────────────────────────────────
+    "Entrada libre este sábado a partir de las 6pm",
+    "El evento es gratuito y abierto a todo público",
+    "Acceso libre para la comunidad colombiana en Francia",
+    "Sin costo de entrada, todos son bienvenidos este domingo",
+    "Entrée libre ce samedi à partir de 18h",
+    "L'événement est gratuit et ouvert à tous",
+    "Accès libre pour la communauté colombienne en France",
+    "Free entry this Saturday from 6pm onwards",
+    "No registration needed, just show up this Sunday",
+    # ── RECORDATORIO / CUENTA REGRESIVA ──────────────────────────────────────
+    "Faltan 3 días para nuestro festival gastronómico",
+    "Este sábado es el gran día, no te lo pierdas",
+    "Último recordatorio para el evento de mañana",
+    "Quedan pocas horas para el concierto de esta noche",
+    "No olvides que mañana es la inauguración",
+    "Plus que 3 jours avant notre festival culturel",
+    "C'est ce samedi, ne manquez pas l'événement",
+    "Dernier rappel pour l'événement de demain soir",
+    "Only 3 days left until our cultural festival",
+    "Reminder: the concert is tomorrow night",
+    # ── MUSICAL ───────────────────────────────────────────────────────────────
+    "Concierto de música colombiana este viernes en París",
+    "El grupo de salsa se presenta este sábado en la sala",
+    "Noche de cumbia y vallenato en el centro cultural",
+    "Concert de musique colombienne vendredi soir à Paris",
+    "Soirée salsa et cumbia ce samedi au centre culturel",
+    # ── GASTRONÓMICO ──────────────────────────────────────────────────────────
+    "Feria gastronómica colombiana este domingo en el parque",
+    "Degustación de comida colombiana este sábado",
+    "Pop-up de cocina colombiana el próximo fin de semana",
+    "Festival de la gastronomie colombienne ce dimanche",
+    "Colombian food fair this weekend at the market",
+    # ── ARTÍSTICO ─────────────────────────────────────────────────────────────
+    "Vernissage de la exposición de arte colombiano este jueves",
+    "La instalación artística se inaugura el próximo viernes",
+    "Presentación de danza contemporánea colombiana este mes",
+    "Vernissage de l'exposition d'art colombien jeudi soir",
+    "Colombian contemporary dance performance this weekend",
+    # ── ACADÉMICO ─────────────────────────────────────────────────────────────
+    "Conferencia sobre la diáspora colombiana en Europa este martes",
+    "Panel de discusión sobre cultura e identidad colombiana",
+    "Taller de español para la comunidad latinoamericana",
+    "Conférence sur la diaspora colombienne en Europe mardi",
+    "Workshop on Colombian identity and culture in France",
+    # ── COMUNITARIO ───────────────────────────────────────────────────────────
+    "Encuentro de la comunidad colombiana en París este domingo",
+    "Reunión de connacionales colombianos en Francia",
+    "Picnic comunitario para colombianos en el parque este sábado",
+    "Rencontre de la communauté colombienne à Paris ce dimanche",
+    "Colombian community gathering in Paris this weekend",
+    # ── DEPORTIVO ─────────────────────────────────────────────────────────────
+    "Torneo de fútbol colombiano este fin de semana en París",
+    "Clases de salsa y baile colombiano este sábado",
+    "Tournoi de football colombien ce weekend à Paris",
+    "Colombian salsa dance class this Saturday evening",
+    # ── INSTITUCIONAL ─────────────────────────────────────────────────────────
+    "El consulado colombiano en París organiza una jornada especial",
+    "Jornada de atención consular extraordinaria este mes",
+    "Le consulat colombien organise une journée spéciale ce mois",
+    "Special consular service day at the Colombian embassy",
+]
+
+# ── 3. Taxonomía Capa 2 ───────────────────────────────────────────────────────
 _LABEL_META: list[tuple[str, str, float]] = [
-    # ── Música ────────────────────────────────────────────────────────────────
     ("concierto, recital o presentación musical en vivo",        "musical",       1.0),
-    # ── Artes visuales ────────────────────────────────────────────────────────
     ("exposición, muestra o vernissage de arte visual",          "visual",        1.0),
     ("instalación artística o intervención urbana",              "visual",        1.0),
-    # ── Artes escénicas ───────────────────────────────────────────────────────
     ("obra de teatro, danza o performance escénica",             "escenico",      1.0),
-    # ── Audiovisual ───────────────────────────────────────────────────────────
     ("proyección cinematográfica, documental o audiovisual",     "audiovisual",   1.0),
-    # ── Formación ─────────────────────────────────────────────────────────────
     ("taller, clase o formación creativa y artística",           "formacion",     1.0),
     ("residencia artística o convocatoria cultural",             "formacion",     1.0),
-    # ── Festival / celebración ────────────────────────────────────────────────
     ("festival, feria o celebración de la cultura colombiana",   "festival",      1.0),
-    # ── Comunidad / diáspora ──────────────────────────────────────────────────
     ("encuentro comunitario o evento de la diáspora colombiana", "comunitario",   1.0),
-    # ── Institucional / consular ──────────────────────────────────────────────
     ("evento del consulado, embajada o institución colombiana",  "institucional", 1.0),
-    # ── Académico / conferencias ──────────────────────────────────────────────
     ("conferencia, charla académica o panel cultural",           "academico",     1.0),
-    # ── Gastronomía ───────────────────────────────────────────────────────────
     ("evento gastronómico o muestra culinaria colombiana",       "gastronomico",  1.0),
-    # ── Político (penalizado, no eliminado) ───────────────────────────────────
     ("acto político, electoral o gubernamental",                 "politico",      0.2),
-    # ── Clases nulas (no evento) ──────────────────────────────────────────────
     ("publicación informativa, noticia o comunicado",            "nulo",          0.0),
     ("promoción comercial, oferta o publicidad",                 "nulo",          0.0),
     ("contenido personal, cotidiano o sin relación cultural",    "nulo",          0.0),
 ]
 
-EVENT_LABELS  = [lbl for lbl, _, _ in _LABEL_META]
-_CAT_MAP      = {lbl: cat  for lbl, cat, _  in _LABEL_META}
-_PEN_MAP      = {lbl: pen  for lbl, _, pen  in _LABEL_META}
-NULL_CATS     = {"nulo"}          # categorías que descartan el post
-HOTNESS_MAX   = 6.0               # cap para normalizar hotness a [0, 1]
+EVENT_LABELS = [lbl for lbl, _, _ in _LABEL_META]
+_CAT_MAP     = {lbl: cat for lbl, cat, _   in _LABEL_META}
+_PEN_MAP     = {lbl: pen for lbl, _, pen   in _LABEL_META}
+NULL_CATS    = {"nulo"}
+
+HOTNESS_MAX     = 6.0
 MIN_CAPTION_LEN = 40
+ZS_MODEL        = "cross-encoder/nli-MiniLM2-L6-H768"
+ST_MODEL        = "paraphrase-multilingual-MiniLM-L12-v2"
+LANG_TO_MODEL   = {"es": "es_core_news_lg", "en": "en_core_web_sm", "fr": "fr_core_news_lg"}
+_NLP: dict      = {}
+_ST_MODEL       = None   # sentence-transformer compartido entre capas
 
-ZS_MODEL     = "cross-encoder/nli-MiniLM2-L6-H768"
-ST_MODEL     = "paraphrase-multilingual-MiniLM-L12-v2"
-LANG_TO_MODEL = {"es": "es_core_news_lg", "en": "en_core_web_sm", "fr": "fr_core_news_lg"}
-_NLP: dict   = {}
-
-# ── 3. Helpers — NLP ──────────────────────────────────────────────────────────
+# ── 4. Helpers — modelos ──────────────────────────────────────────────────────
 def get_nlp(lang: str):
     if lang not in _NLP:
         model_name = LANG_TO_MODEL.get(lang)
@@ -98,6 +208,38 @@ def get_nlp(lang: str):
     return _NLP[lang]
 
 
+def get_st_model():
+    global _ST_MODEL
+    if _ST_MODEL is None:
+        from sentence_transformers import SentenceTransformer
+        print(f"  📦 Cargando sentence-transformers: {ST_MODEL}")
+        _ST_MODEL = SentenceTransformer(ST_MODEL)
+    return _ST_MODEL
+
+
+# ── 5. Capa 1 — embedding de referencia ──────────────────────────────────────
+_REF_EMBEDDING: Optional[list] = None
+
+def get_reference_embedding() -> list:
+    """Calcula (y cachea) el embedding promedio de EVENT_REFERENCES."""
+    global _REF_EMBEDDING
+    if _REF_EMBEDDING is not None:
+        return _REF_EMBEDDING
+    model = get_st_model()
+    embeddings = model.encode(EVENT_REFERENCES, show_progress_bar=False, batch_size=32)
+    _REF_EMBEDDING = embeddings.mean(axis=0).tolist()
+    return _REF_EMBEDDING
+
+
+def layer1_score(caption: str) -> float:
+    """Similitud coseno entre caption y el embedding de referencia."""
+    model = get_st_model()
+    emb   = model.encode([caption[:512]], show_progress_bar=False)[0]
+    ref   = get_reference_embedding()
+    return float(1.0 - cosine_dist(emb, ref))
+
+
+# ── 6. Helpers — NLP ─────────────────────────────────────────────────────────
 def detect_text_lang(text: str) -> str:
     try:
         from langdetect import detect
@@ -108,7 +250,7 @@ def detect_text_lang(text: str) -> str:
 
 
 def extract_ner(text: str, lang: str) -> dict:
-    nlp = get_nlp(lang)
+    nlp    = get_nlp(lang)
     result = {"dates": [], "locations": [], "orgs": []}
     if not nlp:
         return result
@@ -129,19 +271,18 @@ def extract_ner(text: str, lang: str) -> dict:
     return result
 
 
-# ── 4. Helpers — fechas ───────────────────────────────────────────────────────
+# ── 7. Helpers — fechas y scores ──────────────────────────────────────────────
 def parse_date_safe(raw: str) -> Optional[str]:
     if not raw or len(raw.strip()) < 3:
         return None
     try:
         from dateutil import parser as dp
-        dt = dp.parse(raw, fuzzy=True, dayfirst=True)
-        return dt.strftime("%Y-%m-%d")
+        return dp.parse(raw, fuzzy=True, dayfirst=True).strftime("%Y-%m-%d")
     except Exception:
         return None
 
 
-def dates_close(d1: Optional[str], d2: Optional[str], window: int = 3) -> bool:
+def dates_close(d1: Optional[str], d2: Optional[str], window: int) -> bool:
     if not d1 or not d2:
         return True
     try:
@@ -152,48 +293,34 @@ def dates_close(d1: Optional[str], d2: Optional[str], window: int = 3) -> bool:
         return True
 
 
-# ── 5. Scores ─────────────────────────────────────────────────────────────────
 def compute_hotness(likes: int, comments: int, timestamp_str: str) -> float:
     try:
-        ts = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+        ts       = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
         days_ago = max(0, (datetime.now(timezone.utc) - ts).days)
     except Exception:
         days_ago = 180
     recency = max(0.0, 1.0 - days_ago / 730.0)
-    return round(
-        math.log1p(likes)    * 0.4 +
-        math.log1p(comments) * 0.3 +
-        recency * 2.0        * 0.3,
-        4,
-    )
+    return round(math.log1p(likes) * 0.4 + math.log1p(comments) * 0.3 + recency * 2.0 * 0.3, 4)
 
 
-def compute_event_score(classifier_score: float, hotness: float, political_penalty: float) -> float:
-    """
-    Score compuesto final del evento:
-      eventScore = (classifier_score * 0.6 + hotness_norm * 0.4) * political_penalty
-
-    political_penalty = 1.0 para eventos culturales, 0.2 para políticos.
-    """
+def compute_event_score(layer2_score: float, hotness: float, penalty: float) -> float:
     hotness_norm = min(hotness / HOTNESS_MAX, 1.0)
-    raw = classifier_score * 0.6 + hotness_norm * 0.4
-    return round(raw * political_penalty, 4)
+    return round((layer2_score * 0.6 + hotness_norm * 0.4) * penalty, 4)
 
 
-# ── 6. ID estable para eventos ────────────────────────────────────────────────
+# ── 8. ID estable para eventos ────────────────────────────────────────────────
 def make_event_id(event_type: str, raw_date: str, loc_name: str) -> str:
     key = f"{event_type}|{(raw_date or '').strip()}|{(loc_name or '').lower().strip()}"
     return "evt_" + hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
 
 
-# ── 7. Resolver inline ────────────────────────────────────────────────────────
-def find_similar_event(candidate: dict, cache: list, threshold: float, date_window: int) -> Optional[str]:
-    cand_emb = candidate.get("embedding")
+# ── 9. Resolver inline ────────────────────────────────────────────────────────
+def find_similar_event(candidate: dict, cache: list, sim_thr: float, date_window: int) -> Optional[str]:
+    cand_emb  = candidate.get("embedding")
     if not cand_emb:
         return None
     cand_loc  = (candidate.get("locationName") or "").lower().strip()
     cand_date = candidate.get("eventDate")
-
     for existing in cache:
         exist_emb = existing.get("embedding")
         if not exist_emb:
@@ -203,13 +330,12 @@ def find_similar_event(candidate: dict, cache: list, threshold: float, date_wind
             continue
         if not dates_close(cand_date, existing.get("eventDate"), date_window):
             continue
-        sim = 1.0 - cosine_dist(cand_emb, exist_emb)
-        if sim >= threshold:
+        if float(1.0 - cosine_dist(cand_emb, exist_emb)) >= sim_thr:
             return existing["id"]
     return None
 
 
-# ── 8. Neo4j — cache ──────────────────────────────────────────────────────────
+# ── 10. Neo4j — cache ─────────────────────────────────────────────────────────
 def load_events_cache(session) -> list:
     rows = session.run("""
         MATCH (e:Event)
@@ -222,38 +348,38 @@ def load_events_cache(session) -> list:
     return rows
 
 
-# ── 9. Neo4j — crear o enriquecer evento ─────────────────────────────────────
+# ── 11. Neo4j — crear o enriquecer evento ────────────────────────────────────
 def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
     target_id = existing_id or event["id"]
 
     if existing_id:
         session.run("""
             MATCH (e:Event {id: $id})
-            SET e.eventScore  = CASE WHEN $score > e.eventScore  THEN $score  ELSE e.eventScore  END,
+            SET e.eventScore   = CASE WHEN $score   > e.eventScore   THEN $score   ELSE e.eventScore   END,
                 e.hotnessScore = CASE WHEN $hotness > e.hotnessScore THEN $hotness ELSE e.hotnessScore END,
                 e.postCount    = coalesce(e.postCount, 0) + 1
         """, id=existing_id, score=event["eventScore"], hotness=event["hotnessScore"])
     else:
         session.run("""
             MERGE (e:Event {id: $id})
-            SET e.title         = $title,
-                e.type          = $type,
-                e.category      = $category,
-                e.rawDate       = $rawDate,
-                e.eventDate     = $eventDate,
-                e.locationName  = $locationName,
-                e.hotnessScore  = $hotnessScore,
-                e.eventScore    = $eventScore,
-                e.confidence    = $confidence,
-                e.postCount     = 1,
-                e.embedding     = $embedding,
-                e.createdAt     = $createdAt
+            SET e.title        = $title,
+                e.type         = $type,
+                e.category     = $category,
+                e.rawDate      = $rawDate,
+                e.eventDate    = $eventDate,
+                e.locationName = $locationName,
+                e.hotnessScore = $hotnessScore,
+                e.eventScore   = $eventScore,
+                e.confidence   = $confidence,
+                e.layer1Score  = $layer1Score,
+                e.postCount    = 1,
+                e.embedding    = $embedding,
+                e.createdAt    = $createdAt
         """, **{k: event[k] for k in [
             "id", "title", "type", "category", "rawDate", "eventDate",
             "locationName", "hotnessScore", "eventScore", "confidence",
-            "embedding", "createdAt",
+            "layer1Score", "embedding", "createdAt",
         ]})
-
         if event.get("locationName"):
             session.run("""
                 MATCH (e:Event {id: $eid})
@@ -261,14 +387,11 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
                 MERGE (e)-[:LOCATED_AT]->(l)
             """, eid=target_id, loc=event["locationName"])
 
-    # [:MENTIONS_EVENT] Post → Event
     session.run("""
-        MATCH (p:Post {id: $pid})
-        MATCH (e:Event {id: $eid})
+        MATCH (p:Post {id: $pid}) MATCH (e:Event {id: $eid})
         MERGE (p)-[:MENTIONS_EVENT]->(e)
     """, pid=post["id"], eid=target_id)
 
-    # Hashtags
     for tag in (post.get("hashtags") or []):
         if tag:
             session.run("""
@@ -277,15 +400,12 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
                 MERGE (e)-[:HAS_HASHTAG]->(h)
             """, eid=target_id, tag=tag.lower())
 
-    # Autor → [:PARTICIPATED_IN]
     if post.get("author"):
         session.run("""
-            MATCH (a:Account {username: $username})
-            MATCH (e:Event {id: $eid})
+            MATCH (a:Account {username: $username}) MATCH (e:Event {id: $eid})
             MERGE (a)-[:PARTICIPATED_IN]->(e)
         """, username=post["author"], eid=target_id)
 
-    # Primer ORG → [:ORGANIZED]
     if event.get("organizerOrg"):
         result = session.run("""
             MATCH (a:Account)
@@ -295,42 +415,40 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
         """, org=event["organizerOrg"]).single()
         if result:
             session.run("""
-                MATCH (a:Account {username: $username})
-                MATCH (e:Event {id: $eid})
+                MATCH (a:Account {username: $username}) MATCH (e:Event {id: $eid})
                 MERGE (a)-[:ORGANIZED]->(e)
             """, username=result["username"], eid=target_id)
 
-    # Tagged → [:PARTICIPATED_IN]
     for tu in (post.get("taggedUsers") or []):
         session.run("""
-            MATCH (a:Account {username: $username})
-            MATCH (e:Event {id: $eid})
+            MATCH (a:Account {username: $username}) MATCH (e:Event {id: $eid})
             MERGE (a)-[:PARTICIPATED_IN]->(e)
         """, username=tu, eid=target_id)
 
-    # Mentions → [:SUPPORTED]
     for mention in (post.get("mentions") or []):
         session.run("""
-            MATCH (a:Account {username: $username})
-            MATCH (e:Event {id: $eid})
+            MATCH (a:Account {username: $username}) MATCH (e:Event {id: $eid})
             MERGE (a)-[:SUPPORTED]->(e)
         """, username=mention, eid=target_id)
 
 
-# ── 10. Pipeline principal ────────────────────────────────────────────────────
+# ── 12. Pipeline principal ────────────────────────────────────────────────────
 def run_extraction(
-    threshold: float     = 0.45,
-    max_posts: int       = 50,
-    batch_size: int      = 20,
-    date_window: int     = 3,
-    sim_threshold: float = 0.82,
-    dry_run: bool        = False,
+    layer1_threshold: float = 0.45,
+    layer2_threshold: float = 0.40,
+    max_posts: int          = 50,
+    batch_size: int         = 20,
+    date_window: int        = 3,
+    sim_threshold: float    = 0.82,
+    dry_run: bool           = False,
 ):
-    print("\n🎭 Fase 4-B — Extracción de Eventos")
+    print("\n🎭 Fase 4-B — Extracción de Eventos (2 capas)")
     print("=" * 60)
-    print(f"  threshold={threshold}  max_posts={max_posts or '∞'}  "
-          f"batch={batch_size}  sim≥{sim_threshold}  date±{date_window}d")
+    print(f"  L1≥{layer1_threshold}  L2≥{layer2_threshold}  "
+          f"max_posts={max_posts or '∞'}  batch={batch_size}  "
+          f"sim≥{sim_threshold}  date±{date_window}d")
 
+    # Cargar posts
     limit_clause = f"LIMIT {max_posts}" if max_posts > 0 else ""
     with driver.session() as session:
         posts = session.run(f"""
@@ -338,13 +456,13 @@ def run_extraction(
             WHERE p.caption IS NOT NULL
               AND size(p.caption) >= {MIN_CAPTION_LEN}
               AND (p.eventExtracted IS NULL OR p.eventExtracted = false)
-            RETURN p.id             AS id,
-                   p.caption        AS caption,
-                   p.likesCount     AS likes,
-                   p.commentsCount  AS comments,
-                   p.timestamp      AS timestamp,
-                   p.hashtags       AS hashtags,
-                   a.username       AS author,
+            RETURN p.id            AS id,
+                   p.caption       AS caption,
+                   p.likesCount    AS likes,
+                   p.commentsCount AS comments,
+                   p.timestamp     AS timestamp,
+                   p.hashtags      AS hashtags,
+                   a.username      AS author,
                    collect(DISTINCT [(p)-[:TAGS_USER]->(tu) | tu.username])[0] AS taggedUsers,
                    collect(DISTINCT [(p)-[:MENTIONS]->(m)   | m.username])[0]  AS mentions
             {limit_clause}
@@ -354,73 +472,124 @@ def run_extraction(
         print("  ✅ No hay posts pendientes.")
         return
 
-    print(f"\n  🔍 {len(posts)} posts a clasificar")
+    print(f"\n  🔍 {len(posts)} posts cargados")
 
-    print(f"\n  📦 Cargando ZS classifier: {ZS_MODEL}")
+    # Inicializar modelos
+    st_model = get_st_model()
+    print("  📐 Calculando embedding de referencia (100 frases)...")
+    ref_emb = get_reference_embedding()
+    print(f"  ✅ Embedding de referencia listo  (dim={len(ref_emb)})")
+
+    # ── Capa 1 — scoring masivo ───────────────────────────────────────────────
+    print(f"\n  🔵 Capa 1 — similitud coseno contra referencia...")
+    all_captions = [p["caption"][:512] for p in posts]
+    all_embs     = st_model.encode(all_captions, show_progress_bar=True, batch_size=32)
+
+    layer1_scores = [
+        float(1.0 - cosine_dist(emb, ref_emb))
+        for emb in all_embs
+    ]
+
+    candidates_idx = [i for i, s in enumerate(layer1_scores) if s >= layer1_threshold]
+    rejected_l1    = len(posts) - len(candidates_idx)
+    print(f"  ✅ Capa 1: {len(candidates_idx)} candidatos  "
+          f"({rejected_l1} descartados, L1<{layer1_threshold})")
+
+    # ── Capa 2 — zero-shot sobre candidatos ──────────────────────────────────
+    print(f"\n  🟠 Capa 2 — zero-shot classification ({ZS_MODEL})...")
     from transformers import pipeline as hf_pipeline
     classifier = hf_pipeline("zero-shot-classification", model=ZS_MODEL, device=-1)
-
-    print(f"  📦 Cargando sentence-transformers: {ST_MODEL}")
-    from sentence_transformers import SentenceTransformer
-    st_model = SentenceTransformer(ST_MODEL)
 
     with driver.session() as session:
         cache = load_events_cache(session)
 
     created       = 0
     enriched      = 0
-    skipped       = 0
-    processed_ids: list = []
-    dry_counts:   dict  = defaultdict(int)
-    diag_records: list  = []          # siempre acumulado en dry-run
+    skipped_l1    = rejected_l1
+    skipped_l2    = 0
+    processed_ids = [posts[i]["id"] for i in range(len(posts)) if i not in set(candidates_idx)]
+    dry_counts:   dict = defaultdict(int)
+    diag_all:     list = []   # todos los posts — para distribución L1
+    diag_cands:   list = []   # solo candidatos L1 — para distribución L2 y ejemplos
 
-    for i in tqdm(range(0, len(posts), batch_size), desc="  posts"):
-        batch      = posts[i: i + batch_size]
-        captions   = [p["caption"][:512] for p in batch]
-        zs_results = classifier(captions, EVENT_LABELS, multi_label=False)
+    # Registrar los rechazados de Capa 1 en diag_all
+    for i, post in enumerate(posts):
+        if i not in set(candidates_idx):
+            diag_all.append({
+                "caption":     post["caption"],
+                "author":      post.get("author", ""),
+                "layer1":      layer1_scores[i],
+                "layer2":      None,
+                "hotness":     compute_hotness(
+                                   post.get("likes", 0) or 0,
+                                   post.get("comments", 0) or 0,
+                                   post.get("timestamp", "") or "",
+                               ),
+                "event_score": 0.0,
+                "category":    "—",
+                "decision":    "descartado-L1",
+                "loc_name":    "",
+                "raw_date":    "",
+                "top3":        [],
+            })
+
+    # Procesar candidatos en batches para Capa 2
+    cand_posts  = [posts[i] for i in candidates_idx]
+    cand_embs   = [all_embs[i] for i in candidates_idx]
+    cand_l1     = [layer1_scores[i] for i in candidates_idx]
+
+    for bi in tqdm(range(0, len(cand_posts), batch_size), desc="  Capa 2"):
+        batch       = cand_posts[bi: bi + batch_size]
+        batch_embs  = cand_embs[bi: bi + batch_size]
+        batch_l1    = cand_l1[bi: bi + batch_size]
+        captions_zs = [p["caption"][:512] for p in batch]
+
+        zs_results  = classifier(captions_zs, EVENT_LABELS, multi_label=False)
         if isinstance(zs_results, dict):
             zs_results = [zs_results]
 
-        for post, zs in zip(batch, zs_results):
-            top_label = zs["labels"][0]
-            top_score = zs["scores"][0]
-            category  = _CAT_MAP.get(top_label, "nulo")
-            penalty   = _PEN_MAP.get(top_label, 0.0)
-            is_event  = category not in NULL_CATS and top_score >= threshold
+        for post, emb, l1, zs in zip(batch, batch_embs, batch_l1, zs_results):
+            top_label   = zs["labels"][0]
+            top_score   = zs["scores"][0]
+            category    = _CAT_MAP.get(top_label, "nulo")
+            penalty     = _PEN_MAP.get(top_label, 0.0)
+            is_event    = category not in NULL_CATS and top_score >= layer2_threshold
 
-            hotness = compute_hotness(
+            lang        = detect_text_lang(post["caption"])
+            ner         = extract_ner(post["caption"], lang)
+            raw_date    = ner["dates"][0]     if ner["dates"]     else None
+            loc_name    = ner["locations"][0] if ner["locations"] else None
+            org_name    = ner["orgs"][0]      if ner["orgs"]      else None
+            event_date  = parse_date_safe(raw_date)
+
+            hotness     = compute_hotness(
                 post.get("likes", 0) or 0,
                 post.get("comments", 0) or 0,
                 post.get("timestamp", "") or "",
             )
             event_score = compute_event_score(top_score, hotness, penalty) if is_event else 0.0
 
-            # NER siempre en dry-run para mostrar location en diagnóstico
-            lang      = detect_text_lang(post["caption"])
-            ner       = extract_ner(post["caption"], lang)
-            raw_date  = ner["dates"][0]      if ner["dates"]     else None
-            loc_name  = ner["locations"][0]  if ner["locations"] else None
-            org_name  = ner["orgs"][0]       if ner["orgs"]      else None
-            event_date = parse_date_safe(raw_date)
+            record = {
+                "caption":     post["caption"],
+                "author":      post.get("author", ""),
+                "layer1":      l1,
+                "layer2":      top_score,
+                "hotness":     hotness,
+                "event_score": event_score,
+                "category":    category,
+                "decision":    "EVENTO" if is_event else "no evento",
+                "loc_name":    loc_name or "",
+                "raw_date":    raw_date or "",
+                "top3":        list(zip(zs["labels"][:3], zs["scores"][:3])),
+            }
+            diag_all.append(record)
+            diag_cands.append(record)
 
-            if dry_run:
-                diag_records.append({
-                    "caption":     post["caption"],
-                    "author":      post.get("author", ""),
-                    "top3":        list(zip(zs["labels"][:3], zs["scores"][:3])),
-                    "decision":    "EVENTO" if is_event else "no evento",
-                    "category":    category,
-                    "top_score":   top_score,
-                    "hotness":     hotness,
-                    "event_score": event_score,
-                    "loc_name":    loc_name or "",
-                    "raw_date":    raw_date or "",
-                })
-                if is_event:
-                    dry_counts[category] += 1
+            if is_event:
+                dry_counts[category] += 1
 
             if not is_event:
-                skipped += 1
+                skipped_l2 += 1
                 processed_ids.append(post["id"])
                 continue
 
@@ -428,9 +597,9 @@ def run_extraction(
                 processed_ids.append(post["id"])
                 continue
 
-            emb_text  = f"{post['caption'][:200]} {top_label} {raw_date or ''} {loc_name or ''}"
-            embedding = st_model.encode([emb_text], show_progress_bar=False)[0].tolist()
-            event_id  = make_event_id(top_label, raw_date or "", loc_name or "")
+            emb_text   = f"{post['caption'][:200]} {top_label} {raw_date or ''} {loc_name or ''}"
+            event_emb  = st_model.encode([emb_text], show_progress_bar=False)[0].tolist()
+            event_id   = make_event_id(top_label, raw_date or "", loc_name or "")
 
             candidate = {
                 "id":           event_id,
@@ -443,13 +612,13 @@ def run_extraction(
                 "hotnessScore": hotness,
                 "eventScore":   event_score,
                 "confidence":   round(top_score, 4),
-                "embedding":    embedding,
+                "layer1Score":  round(l1, 4),
+                "embedding":    event_emb,
                 "organizerOrg": org_name,
                 "createdAt":    datetime.now(timezone.utc).isoformat(),
             }
 
             existing_id = find_similar_event(candidate, cache, sim_threshold, date_window)
-
             with driver.session() as session:
                 upsert_event(session, candidate, post, existing_id)
 
@@ -465,11 +634,11 @@ def run_extraction(
                     "id":           event_id,
                     "eventDate":    event_date or "",
                     "locationName": loc_name or "",
-                    "embedding":    embedding,
+                    "embedding":    event_emb,
                 })
             processed_ids.append(post["id"])
 
-        if not dry_run and processed_ids:
+        if not dry_run:
             with driver.session() as session:
                 session.run("""
                     UNWIND $ids AS pid
@@ -486,91 +655,96 @@ def run_extraction(
             """, ids=processed_ids)
 
     # ── Resumen ───────────────────────────────────────────────────────────────
+    detected = [r for r in diag_cands if r["decision"] == "EVENTO"]
     print(f"\n{'═'*60}")
-    print(f"  ✅ Posts procesados : {len(posts)}")
-    if dry_run:
-        total_ev = sum(dry_counts.values())
-        print(f"  🎭 Eventos detectados: {total_ev}")
-        print(f"  ⏭️  Sin evento        : {skipped}")
-        if dry_counts:
-            print("\n  Por categoría:")
-            for cat, n in sorted(dry_counts.items(), key=lambda x: -x[1]):
-                print(f"    {n:>4}  {cat}")
-    else:
+    print(f"  ✅ Posts procesados    : {len(posts)}")
+    print(f"  🔵 Descartados Capa 1  : {skipped_l1}  (L1<{layer1_threshold})")
+    print(f"  🟠 Candidatos Capa 2   : {len(cand_posts)}")
+    print(f"  ⏭️  Descartados Capa 2  : {skipped_l2}")
+    print(f"  🎭 Eventos detectados  : {len(detected)}")
+    if not dry_run:
         print(f"  🆕 Eventos creados     : {created}")
         print(f"  🔄 Eventos enriquecidos: {enriched}")
-        print(f"  ⏭️  Sin evento          : {skipped}")
+    if dry_counts:
+        print("\n  Por categoría:")
+        for cat, n in sorted(dry_counts.items(), key=lambda x: -x[1]):
+            print(f"    {n:>4}  {cat}")
 
-    # ── Diagnóstico (solo dry-run) ────────────────────────────────────────────
-    if dry_run and diag_records:
-        detected   = [r for r in diag_records if r["decision"] == "EVENTO"]
-        rejected   = [r for r in diag_records if r["decision"] == "no evento"]
-        false_neg  = [r for r in rejected
-                      if _CAT_MAP.get(r["top3"][0][0], "nulo") not in NULL_CATS]
-        all_cls    = [r["top_score"]   for r in diag_records]
-        all_hot    = [r["hotness"]     for r in diag_records]
-        all_ev     = [r["event_score"] for r in detected]
+    if not dry_run or not diag_cands:
+        return
 
-        # ── 1. Todos los eventos detectados ───────────────────────────────────
-        print(f"\n{'═'*60}")
-        print(f"  🎭 EVENTOS DETECTADOS ({len(detected)})")
-        print(f"{'═'*60}")
-        for i, r in enumerate(sorted(detected, key=lambda x: -x["event_score"]), 1):
-            print(f"\n  [{i:02d}] @{r['author']}  cat={r['category']}")
-            print(f"       score={r['event_score']:.3f}  cls={r['top_score']:.3f}  "
-                  f"hot={r['hotness']:.2f}  loc={r['loc_name'] or '-'}  "
-                  f"date={r['raw_date'] or '-'}")
-            print(f"       Label  : {r['top3'][0][0]}")
-            print(f"       Caption: {r['caption'].replace(chr(10), ' ')}")
+    # ── DIAGNÓSTICO (dry-run) ─────────────────────────────────────────────────
 
-        # ── 2. Distribuciones de scores ───────────────────────────────────────
+    # 1. Todos los eventos detectados
+    print(f"\n{'═'*60}")
+    print(f"  🎭 EVENTOS DETECTADOS ({len(detected)}) — ordenados por eventScore")
+    print(f"{'═'*60}")
+    for i, r in enumerate(sorted(detected, key=lambda x: -x["event_score"]), 1):
+        print(f"\n  [{i:02d}] @{r['author']}  cat={r['category']}")
+        print(f"       eventScore={r['event_score']:.3f}  "
+              f"L1={r['layer1']:.3f}  L2={r['layer2']:.3f}  hot={r['hotness']:.2f}")
+        print(f"       loc={r['loc_name'] or '-'}  date={r['raw_date'] or '-'}")
+        print(f"       Label  : {r['top3'][0][0] if r['top3'] else '-'}")
+        print(f"       Caption: {r['caption'].replace(chr(10), ' ')}")
+
+    # 2. Distribución de scores L1 y L2
+    l1_all   = [r["layer1"] for r in diag_all]
+    l2_cands = [r["layer2"] for r in diag_cands if r["layer2"] is not None]
+    ev_scores = [r["event_score"] for r in detected]
+
+    print(f"\n{'─'*60}")
+    print("  📊 DIAGNÓSTICO — Distribución de scores")
+    print(f"{'─'*60}")
+    print(f"  Capa 1 — similitud coseno (todos los posts, N={len(l1_all)}):")
+    print(f"    min={min(l1_all):.3f}  max={max(l1_all):.3f}  avg={sum(l1_all)/len(l1_all):.3f}")
+    if l2_cands:
+        print(f"  Capa 2 — ZS confidence (candidatos L1, N={len(l2_cands)}):")
+        print(f"    min={min(l2_cands):.3f}  max={max(l2_cands):.3f}  avg={sum(l2_cands)/len(l2_cands):.3f}")
+    if ev_scores:
+        print(f"  Event score compuesto (eventos aceptados, N={len(ev_scores)}):")
+        print(f"    min={min(ev_scores):.3f}  max={max(ev_scores):.3f}  avg={sum(ev_scores)/len(ev_scores):.3f}")
+
+    # 3. Top-5 falsos negativos (pasaron L1 pero no L2, label no nulo)
+    false_neg = [
+        r for r in diag_cands
+        if r["decision"] == "no evento"
+        and _CAT_MAP.get(r["top3"][0][0] if r["top3"] else "", "nulo") not in NULL_CATS
+    ]
+    top5_fn = sorted(false_neg, key=lambda x: -(x["layer2"] or 0))[:5]
+    if top5_fn:
         print(f"\n{'─'*60}")
-        print("  📊 DIAGNÓSTICO — Distribución de scores")
+        print(f"  🔍 TOP-5 POSIBLES FALSOS NEGATIVOS (L2<{layer2_threshold}, label no nulo)")
         print(f"{'─'*60}")
-        print(f"  Classifier score (todos los posts):")
-        print(f"    min={min(all_cls):.3f}  max={max(all_cls):.3f}  avg={sum(all_cls)/len(all_cls):.3f}")
-        print(f"  Hotness raw:")
-        print(f"    min={min(all_hot):.3f}  max={max(all_hot):.3f}  avg={sum(all_hot)/len(all_hot):.3f}")
-        if all_ev:
-            print(f"  Event score compuesto (solo aceptados):")
-            print(f"    min={min(all_ev):.3f}  max={max(all_ev):.3f}  avg={sum(all_ev)/len(all_ev):.3f}")
-        print(f"  Rechazados por score<{threshold} con label no-nulo: {len(false_neg)}")
+        for i, r in enumerate(top5_fn, 1):
+            print(f"\n  [{i}] @{r['author']}  L1={r['layer1']:.3f}  "
+                  f"L2={r['layer2']:.3f}  hot={r['hotness']:.2f}  cat={r['category']}")
+            print(f"      Label  : {r['top3'][0][0] if r['top3'] else '-'}")
+            print(f"      Caption: {r['caption'].replace(chr(10), ' ')}")
+            print(f"      Top-3  :")
+            for label, score in r["top3"]:
+                marker = "◀" if label == r["top3"][0][0] else " "
+                print(f"               {score:.3f}  {label} {marker}")
 
-        # ── 3. Top-5 rechazados con mayor score — posibles falsos negativos ───
-        top5_fn = sorted(false_neg, key=lambda x: -x["top_score"])[:5]
-        if top5_fn:
-            print(f"\n{'─'*60}")
-            print(f"  🔍 TOP-5 POSIBLES FALSOS NEGATIVOS (score<{threshold}, label no nulo)")
-            print(f"{'─'*60}")
-            for i, r in enumerate(top5_fn, 1):
-                print(f"\n  [{i}] @{r['author']}  cls={r['top_score']:.3f}  "
-                      f"hot={r['hotness']:.2f}  cat={r['category']}")
-                print(f"      Label  : {r['top3'][0][0]}")
-                print(f"      Caption: {r['caption'].replace(chr(10), ' ')}")
-                print(f"      Top-3  :")
-                for label, score in r["top3"]:
-                    marker = "◀" if label == r["top3"][0][0] else " "
-                    print(f"               {score:.3f}  {label} {marker}")
-
-        # ── 4. 10 ejemplos aleatorios (todos, eventos y no-eventos) ───────────
-        print(f"\n{'─'*60}")
-        print("  🎲 10 EJEMPLOS ALEATORIOS (mezcla de eventos y no-eventos)")
-        print(f"{'─'*60}")
-        sample = random.sample(diag_records, min(10, len(diag_records)))
-        for i, r in enumerate(sample, 1):
-            preview = r["caption"][:100].replace("\n", " ")
-            print(f"\n  [{i:02d}] {r['decision'].upper()}  cat={r['category']}  "
-                  f"eventScore={r['event_score']:.3f}  hot={r['hotness']:.2f}  "
-                  f"@{r['author']}")
-            print(f"       Caption : {preview!r}")
+    # 4. 10 ejemplos aleatorios
+    print(f"\n{'─'*60}")
+    print("  🎲 10 EJEMPLOS ALEATORIOS (candidatos Capa 1)")
+    print(f"{'─'*60}")
+    sample = random.sample(diag_cands, min(10, len(diag_cands)))
+    for i, r in enumerate(sample, 1):
+        preview = r["caption"][:100].replace("\n", " ")
+        print(f"\n  [{i:02d}] {r['decision'].upper()}  cat={r['category']}  @{r['author']}")
+        print(f"       L1={r['layer1']:.3f}  L2={r['layer2']:.3f}  "
+              f"eventScore={r['event_score']:.3f}  hot={r['hotness']:.2f}")
+        print(f"       Caption : {preview!r}")
+        if r["top3"]:
             print(f"       Top-3   :")
             for label, score in r["top3"]:
                 marker = "◀" if label == r["top3"][0][0] else " "
                 print(f"                {score:.3f}  {label} {marker}")
-        print(f"{'─'*60}")
+    print(f"{'─'*60}")
 
 
-# ── 11. CLI ───────────────────────────────────────────────────────────────────
+# ── 13. CLI ───────────────────────────────────────────────────────────────────
 app = typer.Typer(add_completion=False)
 
 
@@ -578,11 +752,15 @@ app = typer.Typer(add_completion=False)
 def main(
     threshold: float = typer.Option(
         0.45, "--threshold",
-        help="Confianza mínima del clasificador ZS para considerar evento.",
+        help="Threshold de similitud coseno para Capa 1 (sentence-transformers).",
+    ),
+    layer2_threshold: float = typer.Option(
+        0.40, "--layer2-threshold",
+        help="Confianza mínima ZS para Capa 2 (cross-encoder).",
     ),
     sim_threshold: float = typer.Option(
         0.82, "--sim-threshold",
-        help="Similitud coseno mínima para deduplicar eventos.",
+        help="Similitud coseno para deduplicar eventos existentes.",
     ),
     date_window: int = typer.Option(
         3, "--date-window",
@@ -594,25 +772,30 @@ def main(
     ),
     batch_size: int = typer.Option(
         20, "--batch-size",
-        help="Posts por lote en ZS classification.",
+        help="Posts por lote en Capa 2 (zero-shot).",
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run",
-        help="Clasificar y mostrar diagnóstico sin escribir en Neo4j.",
+        help="Clasificar y mostrar diagnóstico completo sin escribir en Neo4j.",
     ),
 ):
     """
-    Fase 4-B: detecta eventos culturales en Post.caption y crea nodos (:Event).
+    Fase 4-B: extracción de eventos en 2 capas.
 
-    Score final = classifier_score × 0.6 + hotness_norm × 0.4 × penalización_política.
-    Recomendado: ejecutar nlp_enrich_nodes.py primero.
-    Para deduplicar eventos existentes: nlp_event_resolver.py
+    Capa 1: sentence-transformers filtra candidatos por similitud coseno
+    contra embedding promedio de 100 frases de referencia (--threshold).
+
+    Capa 2: zero-shot cross-encoder clasifica tipo de evento solo sobre
+    los candidatos de Capa 1 (--layer2-threshold).
+
+    eventScore = layer2_score × 0.6 + hotness_norm × 0.4 × political_penalty
     """
     driver.verify_connectivity()
     print("✅ Conexión Neo4j OK\n")
 
     run_extraction(
-        threshold=threshold,
+        layer1_threshold=threshold,
+        layer2_threshold=layer2_threshold,
         max_posts=max_posts,
         batch_size=batch_size,
         date_window=date_window,
