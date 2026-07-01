@@ -395,15 +395,26 @@ def run_extraction(
             )
             event_score = compute_event_score(top_score, hotness, penalty) if is_event else 0.0
 
+            # NER siempre en dry-run para mostrar location en diagnóstico
+            lang      = detect_text_lang(post["caption"])
+            ner       = extract_ner(post["caption"], lang)
+            raw_date  = ner["dates"][0]      if ner["dates"]     else None
+            loc_name  = ner["locations"][0]  if ner["locations"] else None
+            org_name  = ner["orgs"][0]       if ner["orgs"]      else None
+            event_date = parse_date_safe(raw_date)
+
             if dry_run:
                 diag_records.append({
                     "caption":     post["caption"],
+                    "author":      post.get("author", ""),
                     "top3":        list(zip(zs["labels"][:3], zs["scores"][:3])),
                     "decision":    "EVENTO" if is_event else "no evento",
                     "category":    category,
                     "top_score":   top_score,
                     "hotness":     hotness,
                     "event_score": event_score,
+                    "loc_name":    loc_name or "",
+                    "raw_date":    raw_date or "",
                 })
                 if is_event:
                     dry_counts[category] += 1
@@ -413,12 +424,9 @@ def run_extraction(
                 processed_ids.append(post["id"])
                 continue
 
-            lang      = detect_text_lang(post["caption"])
-            ner       = extract_ner(post["caption"], lang)
-            raw_date  = ner["dates"][0]      if ner["dates"]     else None
-            loc_name  = ner["locations"][0]  if ner["locations"] else None
-            org_name  = ner["orgs"][0]       if ner["orgs"]      else None
-            event_date = parse_date_safe(raw_date)
+            if dry_run:
+                processed_ids.append(post["id"])
+                continue
 
             emb_text  = f"{post['caption'][:200]} {top_label} {raw_date or ''} {loc_name or ''}"
             embedding = st_model.encode([emb_text], show_progress_bar=False)[0].tolist()
@@ -441,17 +449,6 @@ def run_extraction(
             }
 
             existing_id = find_similar_event(candidate, cache, sim_threshold, date_window)
-
-            if dry_run:
-                action = "ENRICH" if existing_id else "CREATE"
-                print(
-                    f"  [dry-run] {action:<6} | score={event_score:.3f} "
-                    f"(cls={top_score:.2f} hot={hotness:.2f}) "
-                    f"| {category:<14} | loc={loc_name or '-'} | {raw_date or '-'}"
-                )
-                dry_counts[category] += 0  # ya contado arriba
-                processed_ids.append(post["id"])
-                continue
 
             with driver.session() as session:
                 upsert_event(session, candidate, post, existing_id)
@@ -506,32 +503,65 @@ def run_extraction(
 
     # ── Diagnóstico (solo dry-run) ────────────────────────────────────────────
     if dry_run and diag_records:
+        detected   = [r for r in diag_records if r["decision"] == "EVENTO"]
+        rejected   = [r for r in diag_records if r["decision"] == "no evento"]
+        false_neg  = [r for r in rejected
+                      if _CAT_MAP.get(r["top3"][0][0], "nulo") not in NULL_CATS]
         all_cls    = [r["top_score"]   for r in diag_records]
         all_hot    = [r["hotness"]     for r in diag_records]
-        all_ev     = [r["event_score"] for r in diag_records if r["decision"] == "EVENTO"]
-        false_neg  = [r for r in diag_records
-                      if r["decision"] == "no evento"
-                      and _CAT_MAP.get(r["top3"][0][0], "nulo") not in NULL_CATS]
+        all_ev     = [r["event_score"] for r in detected]
 
+        # ── 1. Todos los eventos detectados ───────────────────────────────────
+        print(f"\n{'═'*60}")
+        print(f"  🎭 EVENTOS DETECTADOS ({len(detected)})")
+        print(f"{'═'*60}")
+        for i, r in enumerate(sorted(detected, key=lambda x: -x["event_score"]), 1):
+            print(f"\n  [{i:02d}] @{r['author']}  cat={r['category']}")
+            print(f"       score={r['event_score']:.3f}  cls={r['top_score']:.3f}  "
+                  f"hot={r['hotness']:.2f}  loc={r['loc_name'] or '-'}  "
+                  f"date={r['raw_date'] or '-'}")
+            print(f"       Label  : {r['top3'][0][0]}")
+            print(f"       Caption: {r['caption'].replace(chr(10), ' ')}")
+
+        # ── 2. Distribuciones de scores ───────────────────────────────────────
         print(f"\n{'─'*60}")
-        print("  📊 DIAGNÓSTICO")
+        print("  📊 DIAGNÓSTICO — Distribución de scores")
         print(f"{'─'*60}")
-        print(f"  Classifier score (label ganador):")
+        print(f"  Classifier score (todos los posts):")
         print(f"    min={min(all_cls):.3f}  max={max(all_cls):.3f}  avg={sum(all_cls)/len(all_cls):.3f}")
-        print(f"  Hotness (raw):")
+        print(f"  Hotness raw:")
         print(f"    min={min(all_hot):.3f}  max={max(all_hot):.3f}  avg={sum(all_hot)/len(all_hot):.3f}")
         if all_ev:
-            print(f"  Event score compuesto (solo eventos aceptados):")
+            print(f"  Event score compuesto (solo aceptados):")
             print(f"    min={min(all_ev):.3f}  max={max(all_ev):.3f}  avg={sum(all_ev)/len(all_ev):.3f}")
-        print(f"  Posibles falsos negativos (score<{threshold}, no nulos): {len(false_neg)}")
+        print(f"  Rechazados por score<{threshold} con label no-nulo: {len(false_neg)}")
 
-        print(f"\n  10 ejemplos aleatorios:")
+        # ── 3. Top-5 rechazados con mayor score — posibles falsos negativos ───
+        top5_fn = sorted(false_neg, key=lambda x: -x["top_score"])[:5]
+        if top5_fn:
+            print(f"\n{'─'*60}")
+            print(f"  🔍 TOP-5 POSIBLES FALSOS NEGATIVOS (score<{threshold}, label no nulo)")
+            print(f"{'─'*60}")
+            for i, r in enumerate(top5_fn, 1):
+                print(f"\n  [{i}] @{r['author']}  cls={r['top_score']:.3f}  "
+                      f"hot={r['hotness']:.2f}  cat={r['category']}")
+                print(f"      Label  : {r['top3'][0][0]}")
+                print(f"      Caption: {r['caption'].replace(chr(10), ' ')}")
+                print(f"      Top-3  :")
+                for label, score in r["top3"]:
+                    marker = "◀" if label == r["top3"][0][0] else " "
+                    print(f"               {score:.3f}  {label} {marker}")
+
+        # ── 4. 10 ejemplos aleatorios (todos, eventos y no-eventos) ───────────
+        print(f"\n{'─'*60}")
+        print("  🎲 10 EJEMPLOS ALEATORIOS (mezcla de eventos y no-eventos)")
         print(f"{'─'*60}")
         sample = random.sample(diag_records, min(10, len(diag_records)))
         for i, r in enumerate(sample, 1):
             preview = r["caption"][:100].replace("\n", " ")
             print(f"\n  [{i:02d}] {r['decision'].upper()}  cat={r['category']}  "
-                  f"eventScore={r['event_score']:.3f}  hotness={r['hotness']:.2f}")
+                  f"eventScore={r['event_score']:.3f}  hot={r['hotness']:.2f}  "
+                  f"@{r['author']}")
             print(f"       Caption : {preview!r}")
             print(f"       Top-3   :")
             for label, score in r["top3"]:
