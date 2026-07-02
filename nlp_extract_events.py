@@ -1,17 +1,19 @@
 """
 Fase 4-B — Extracción de eventos culturales desde Post.caption.
 
-Arquitectura de 2 capas:
+Arquitectura de 3 capas:
   Capa 1 — sentence-transformers (paraphrase-multilingual-MiniLM-L12-v2)
-            Embedding promedio de 100 frases de referencia.
-            Filtra candidatos por similitud coseno >= layer1_threshold.
+            Similitud coseno MÁXIMA contra 100 frases de referencia (no promedio).
+            Filtra candidatos por max_sim >= layer1_threshold.
 
-  Capa 2 — Zero-shot cross-encoder (cross-encoder/nli-MiniLM2-L6-H768)
-            Solo corre sobre candidatos de Capa 1.
-            Clasifica tipo de evento con taxonomía específica para
-            diáspora colombiana en París.
+  Capa 2a — Detección binaria (mDeBERTa-v3-base-xnli-multilingual-nli-2mil7)
+             ¿Es un evento con fecha/lugar? Descarta definitivamente si no.
 
-Score final = layer2_score × 0.6 + hotness_norm × 0.4 × political_penalty
+  Capa 2b — Tipificación multi-label (mismo modelo)
+             Solo corre sobre los que pasaron 2a.
+             Asigna tipo de evento con 12 labels culturales.
+
+Score final = (layer2_score × 0.6 + hotness_norm × 0.4) × political_penalty
 
 Idempotente: marca cada post procesado con eventExtracted=true.
 """
@@ -20,13 +22,17 @@ import hashlib
 import math
 import os
 import random
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 
+import numpy as np
+
 import typer
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
+from neo4j.exceptions import SessionExpired, ServiceUnavailable
 from scipy.spatial.distance import cosine as cosine_dist
 from tqdm import tqdm
 
@@ -39,7 +45,25 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 if not all([NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD]):
     raise ValueError("Error: credenciales Neo4j ausentes en .env")
 
-driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
+driver = GraphDatabase.driver(
+    NEO4J_URI,
+    auth=(NEO4J_USERNAME, NEO4J_PASSWORD),
+    keep_alive=True,
+    max_connection_lifetime=1800,   # reciclar conexiones cada 30 min
+)
+
+
+def neo4j_run_with_retry(query, params=None, retries=3):
+    """Ejecuta una query con reintento automático si la sesión expira."""
+    for attempt in range(retries):
+        try:
+            with driver.session() as session:
+                return session.run(query, **(params or {})).data()
+        except (SessionExpired, ServiceUnavailable) as e:
+            if attempt < retries - 1:
+                print(f"  ⚠️  Conexión Neo4j caída, reintentando ({attempt+1}/{retries})...")
+            else:
+                raise
 
 # ── 2. Frases de referencia (Capa 1) ─────────────────────────────────────────
 EVENT_REFERENCES = [
@@ -190,11 +214,21 @@ NULL_CATS    = {"nulo"}
 
 HOTNESS_MAX     = 6.0
 MIN_CAPTION_LEN = 40
-ZS_MODEL        = "cross-encoder/nli-MiniLM2-L6-H768"
+ZS_MODEL        = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
 ST_MODEL        = "paraphrase-multilingual-MiniLM-L12-v2"
 LANG_TO_MODEL   = {"es": "es_core_news_lg", "en": "en_core_web_sm", "fr": "fr_core_news_lg"}
+# Fecha de corte fija del estudio — ancla recencia, no datetime.now()
+STUDY_CUTOFF    = datetime(2026, 7, 1, tzinfo=timezone.utc)
 _NLP: dict      = {}
 _ST_MODEL       = None   # sentence-transformer compartido entre capas
+
+# Labels para Capa 2a (detección binaria)
+BINARY_LABELS = [
+    "un evento cultural con fecha o lugar específico",
+    "contenido sin ningún evento anunciado",
+]
+# Labels para Capa 2b (tipificación) — excluye nulo
+EVENT_LABELS_CULTURAL = [lbl for lbl, cat, _ in _LABEL_META if cat not in NULL_CATS]
 
 # ── 4. Helpers — modelos ──────────────────────────────────────────────────────
 def get_nlp(lang: str):
@@ -217,26 +251,31 @@ def get_st_model():
     return _ST_MODEL
 
 
-# ── 5. Capa 1 — embedding de referencia ──────────────────────────────────────
-_REF_EMBEDDING: Optional[list] = None
+# ── 5. Capa 1 — matriz de embeddings de referencia ───────────────────────────
+_REF_EMBEDDINGS = None   # np.ndarray (100, 384), normalizado
 
-def get_reference_embedding() -> list:
-    """Calcula (y cachea) el embedding promedio de EVENT_REFERENCES."""
-    global _REF_EMBEDDING
-    if _REF_EMBEDDING is not None:
-        return _REF_EMBEDDING
+def get_reference_embeddings() -> np.ndarray:
+    """Calcula (y cachea) la matriz normalizada de embeddings de EVENT_REFERENCES."""
+    global _REF_EMBEDDINGS
+    if _REF_EMBEDDINGS is not None:
+        return _REF_EMBEDDINGS
     model = get_st_model()
-    embeddings = model.encode(EVENT_REFERENCES, show_progress_bar=False, batch_size=32)
-    _REF_EMBEDDING = embeddings.mean(axis=0).tolist()
-    return _REF_EMBEDDING
+    _REF_EMBEDDINGS = model.encode(
+        EVENT_REFERENCES,
+        normalize_embeddings=True,
+        show_progress_bar=False,
+        batch_size=32,
+    )
+    return _REF_EMBEDDINGS
 
 
 def layer1_score(caption: str) -> float:
-    """Similitud coseno entre caption y el embedding de referencia."""
-    model = get_st_model()
-    emb   = model.encode([caption[:512]], show_progress_bar=False)[0]
-    ref   = get_reference_embedding()
-    return float(1.0 - cosine_dist(emb, ref))
+    """Similitud coseno MÁXIMA entre caption y las frases de referencia."""
+    model    = get_st_model()
+    cap_emb  = model.encode([caption[:512]], normalize_embeddings=True)[0]  # (384,)
+    ref_embs = get_reference_embeddings()                                    # (100, 384)
+    sims     = ref_embs @ cap_emb                                            # (100,)
+    return float(sims.max())
 
 
 # ── 6. Helpers — NLP ─────────────────────────────────────────────────────────
@@ -272,14 +311,58 @@ def extract_ner(text: str, lang: str) -> dict:
 
 
 # ── 7. Helpers — fechas y scores ──────────────────────────────────────────────
-def parse_date_safe(raw: str) -> Optional[str]:
-    if not raw or len(raw.strip()) < 3:
-        return None
+# Patrones de fecha para extracción previa antes de dateparser
+_DATE_RE = re.compile(
+    r"""
+    \b\d{1,2}[/\-]\d{1,2}(?:[/\-]\d{2,4})?\b          # DD/MM o DD/MM/YYYY
+    |\b\d{1,2}\s+de\s+[a-záéíóúüñ]+(?:\s+de\s+\d{4})?\b  # 15 de junio [de 2026]
+    |\b\d{1,2}\s+[a-záéíóúüñ]{4,}(?:\s+\d{4})?\b         # 15 juin / 15 june 2026
+    |\b(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo
+         |lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche
+         |monday|tuesday|wednesday|thursday|friday|saturday|sunday)
+       (?:\s+\d{1,2}(?:\s+de\s+[a-záéíóúüñ]+)?)?
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def extract_dates(text: str, post_timestamp: str) -> Optional[str]:
+    """Extrae y normaliza la primera fecha del texto, anclada al timestamp del post."""
+    import dateparser
+
     try:
-        from dateutil import parser as dp
-        return dp.parse(raw, fuzzy=True, dayfirst=True).strftime("%Y-%m-%d")
+        anchor = datetime.fromisoformat(post_timestamp.replace("Z", "+00:00")).replace(tzinfo=None)
     except Exception:
-        return None
+        anchor = STUDY_CUTOFF.replace(tzinfo=None)
+
+    settings = {
+        "PREFER_DAY_OF_MONTH": "first",
+        "RETURN_AS_TIMEZONE_AWARE": False,
+        "RELATIVE_BASE": anchor,
+        "PREFER_DATES_FROM": "future",
+        "LANGUAGES": ["es", "fr", "en"],
+    }
+
+    # Primero intenta sobre los fragmentos extraídos por regex (más preciso)
+    for match in _DATE_RE.finditer(text[:600]):
+        snippet = match.group(0).strip()
+        if len(snippet) < 3:
+            continue
+        parsed = dateparser.parse(snippet, settings=settings)
+        if parsed:
+            return parsed.strftime("%Y-%m-%d")
+
+    # Fallback: busca fechas en el texto completo
+    try:
+        from dateparser.search import search_dates
+        results = search_dates(text[:600], settings=settings, languages=["es", "fr", "en"])
+        if results:
+            return results[0][1].strftime("%Y-%m-%d")
+    except Exception:
+        pass
+
+    return None
 
 
 def dates_close(d1: Optional[str], d2: Optional[str], window: int) -> bool:
@@ -296,7 +379,7 @@ def dates_close(d1: Optional[str], d2: Optional[str], window: int) -> bool:
 def compute_hotness(likes: int, comments: int, timestamp_str: str) -> float:
     try:
         ts       = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-        days_ago = max(0, (datetime.now(timezone.utc) - ts).days)
+        days_ago = max(0, (STUDY_CUTOFF - ts).days)   # anclado a fecha de corte fija
     except Exception:
         days_ago = 180
     recency = max(0.0, 1.0 - days_ago / 730.0)
@@ -309,8 +392,9 @@ def compute_event_score(layer2_score: float, hotness: float, penalty: float) -> 
 
 
 # ── 8. ID estable para eventos ────────────────────────────────────────────────
-def make_event_id(event_type: str, raw_date: str, loc_name: str) -> str:
-    key = f"{event_type}|{(raw_date or '').strip()}|{(loc_name or '').lower().strip()}"
+def make_event_id(event_type: str, event_date: str, loc_name: str) -> str:
+    """ID estable basado en tipo, fecha ISO normalizada y ubicación."""
+    key = f"{event_type}|{(event_date or '').strip()}|{(loc_name or '').lower().strip()}"
     return "evt_" + hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
 
 
@@ -441,21 +525,26 @@ def run_extraction(
     date_window: int        = 3,
     sim_threshold: float    = 0.82,
     dry_run: bool           = False,
+    accounts: list[str]     = None,
 ):
     print("\n🎭 Fase 4-B — Extracción de Eventos (2 capas)")
     print("=" * 60)
     print(f"  L1≥{layer1_threshold}  L2≥{layer2_threshold}  "
           f"max_posts={max_posts or '∞'}  batch={batch_size}  "
           f"sim≥{sim_threshold}  date±{date_window}d")
+    if accounts:
+        print(f"  Filtro cuentas: {accounts}")
 
     # Cargar posts
     limit_clause = f"LIMIT {max_posts}" if max_posts > 0 else ""
+    account_filter = "AND a.username IN $accounts" if accounts else ""
     with driver.session() as session:
         posts = session.run(f"""
             MATCH (a:Account)-[:PUBLISHED]->(p:Post)
             WHERE p.caption IS NOT NULL
               AND size(p.caption) >= {MIN_CAPTION_LEN}
               AND (p.eventExtracted IS NULL OR p.eventExtracted = false)
+              {account_filter}
             RETURN p.id            AS id,
                    p.caption       AS caption,
                    p.likesCount    AS likes,
@@ -466,7 +555,7 @@ def run_extraction(
                    collect(DISTINCT [(p)-[:TAGS_USER]->(tu) | tu.username])[0] AS taggedUsers,
                    collect(DISTINCT [(p)-[:MENTIONS]->(m)   | m.username])[0]  AS mentions
             {limit_clause}
-        """).data()
+        """, accounts=accounts or []).data()
 
     if not posts:
         print("  ✅ No hay posts pendientes.")
@@ -476,29 +565,36 @@ def run_extraction(
 
     # Inicializar modelos
     st_model = get_st_model()
-    print("  📐 Calculando embedding de referencia (100 frases)...")
-    ref_emb = get_reference_embedding()
-    print(f"  ✅ Embedding de referencia listo  (dim={len(ref_emb)})")
+    print("  📐 Calculando embeddings de referencia (100 frases)...")
+    ref_embs = get_reference_embeddings()   # (100, 384) normalizado
+    print(f"  ✅ Embeddings de referencia listos  (shape={ref_embs.shape})")
 
-    # ── Capa 1 — scoring masivo ───────────────────────────────────────────────
-    print(f"\n  🔵 Capa 1 — similitud coseno contra referencia...")
+    # ── Capa 1 — scoring masivo con similitud máxima ──────────────────────────
+    print(f"\n  🔵 Capa 1 — similitud coseno máxima contra 100 referencias...")
     all_captions = [p["caption"][:512] for p in posts]
-    all_embs     = st_model.encode(all_captions, show_progress_bar=True, batch_size=32)
-
-    layer1_scores = [
-        float(1.0 - cosine_dist(emb, ref_emb))
-        for emb in all_embs
-    ]
+    all_embs     = st_model.encode(
+        all_captions,
+        normalize_embeddings=True,
+        show_progress_bar=True,
+        batch_size=32,
+    )                                        # (N, 384)
+    sims          = all_embs @ ref_embs.T   # (N, 100)
+    layer1_scores = sims.max(axis=1).tolist()  # (N,) — máximo, no promedio
 
     candidates_idx = [i for i, s in enumerate(layer1_scores) if s >= layer1_threshold]
     rejected_l1    = len(posts) - len(candidates_idx)
     print(f"  ✅ Capa 1: {len(candidates_idx)} candidatos  "
           f"({rejected_l1} descartados, L1<{layer1_threshold})")
 
-    # ── Capa 2 — zero-shot sobre candidatos ──────────────────────────────────
+    # ── Capa 2 — zero-shot (2a detección + 2b tipificación) ──────────────────
     print(f"\n  🟠 Capa 2 — zero-shot classification ({ZS_MODEL})...")
     from transformers import pipeline as hf_pipeline
-    classifier = hf_pipeline("zero-shot-classification", model=ZS_MODEL, device=-1)
+    classifier = hf_pipeline(
+        "zero-shot-classification",
+        model=ZS_MODEL,
+        device=-1,
+    )
+    HYP_TMPL = "Esta publicación anuncia {}."
 
     with driver.session() as session:
         cache = load_events_cache(session)
@@ -544,43 +640,73 @@ def run_extraction(
         batch_l1    = cand_l1[bi: bi + batch_size]
         captions_zs = [p["caption"][:512] for p in batch]
 
-        zs_results  = classifier(captions_zs, EVENT_LABELS, multi_label=False)
-        if isinstance(zs_results, dict):
-            zs_results = [zs_results]
+        # ── Capa 2a — detección binaria ──────────────────────────────────────
+        det_results = classifier(
+            captions_zs,
+            BINARY_LABELS,
+            hypothesis_template=HYP_TMPL,
+            multi_label=False,
+        )
+        if isinstance(det_results, dict):
+            det_results = [det_results]
 
-        for post, emb, l1, zs in zip(batch, batch_embs, batch_l1, zs_results):
-            top_label   = zs["labels"][0]
-            top_score   = zs["scores"][0]
-            category    = _CAT_MAP.get(top_label, "nulo")
-            penalty     = _PEN_MAP.get(top_label, 0.0)
-            is_event    = category not in NULL_CATS and top_score >= layer2_threshold
+        # ── Capa 2b — tipificación solo sobre eventos detectados ──────────────
+        event_indices = [
+            j for j, dr in enumerate(det_results)
+            if dr["labels"][0] == BINARY_LABELS[0] and dr["scores"][0] >= layer2_threshold
+        ]
+        type_map: dict = {}
+        if event_indices:
+            typ_list = classifier(
+                [captions_zs[j] for j in event_indices],
+                EVENT_LABELS_CULTURAL,
+                hypothesis_template=HYP_TMPL,
+                multi_label=True,
+            )
+            if isinstance(typ_list, dict):
+                typ_list = [typ_list]
+            for j, tr in zip(event_indices, typ_list):
+                type_map[j] = tr
 
-            lang        = detect_text_lang(post["caption"])
-            ner         = extract_ner(post["caption"], lang)
-            raw_date    = ner["dates"][0]     if ner["dates"]     else None
-            loc_name    = ner["locations"][0] if ner["locations"] else None
-            org_name    = ner["orgs"][0]      if ner["orgs"]      else None
-            event_date  = parse_date_safe(raw_date)
+        for idx, (post, emb, l1, det) in enumerate(zip(batch, batch_embs, batch_l1, det_results)):
+            det_score = det["scores"][0]
+            is_event  = det["labels"][0] == BINARY_LABELS[0] and det_score >= layer2_threshold
+
+            # Tipo desde Capa 2b
+            typ       = type_map.get(idx)
+            top_label = typ["labels"][0]  if typ else (EVENT_LABELS_CULTURAL[0] if is_event else EVENT_LABELS[-1])
+            type_score = typ["scores"][0] if typ else det_score
+            top3       = list(zip(typ["labels"][:3], typ["scores"][:3])) if typ else []
+
+            category  = _CAT_MAP.get(top_label, "nulo") if is_event else "nulo"
+            penalty   = _PEN_MAP.get(top_label, 0.0)    if is_event else 0.0
+
+            lang       = detect_text_lang(post["caption"])
+            ner        = extract_ner(post["caption"], lang)
+            loc_name   = ner["locations"][0] if ner["locations"] else None
+            org_name   = ner["orgs"][0]      if ner["orgs"]      else None
+            # FIX 2: fechas ancladas al timestamp del post, no a datetime.now()
+            event_date = extract_dates(post["caption"], post.get("timestamp", "") or "")
 
             hotness     = compute_hotness(
                 post.get("likes", 0) or 0,
                 post.get("comments", 0) or 0,
                 post.get("timestamp", "") or "",
             )
-            event_score = compute_event_score(top_score, hotness, penalty) if is_event else 0.0
+            event_score = compute_event_score(det_score, hotness, penalty) if is_event else 0.0
 
             record = {
                 "caption":     post["caption"],
                 "author":      post.get("author", ""),
                 "layer1":      l1,
-                "layer2":      top_score,
+                "layer2":      det_score,     # score de detección 2a
                 "hotness":     hotness,
                 "event_score": event_score,
                 "category":    category,
                 "decision":    "EVENTO" if is_event else "no evento",
                 "loc_name":    loc_name or "",
-                "raw_date":    raw_date or "",
-                "top3":        list(zip(zs["labels"][:3], zs["scores"][:3])),
+                "raw_date":    event_date or "",
+                "top3":        top3,          # tipos de Capa 2b
             }
             diag_all.append(record)
             diag_cands.append(record)
@@ -597,21 +723,22 @@ def run_extraction(
                 processed_ids.append(post["id"])
                 continue
 
-            emb_text   = f"{post['caption'][:200]} {top_label} {raw_date or ''} {loc_name or ''}"
-            event_emb  = st_model.encode([emb_text], show_progress_bar=False)[0].tolist()
-            event_id   = make_event_id(top_label, raw_date or "", loc_name or "")
+            emb_text  = f"{post['caption'][:200]} {top_label} {event_date or ''} {loc_name or ''}"
+            event_emb = st_model.encode([emb_text], normalize_embeddings=True, show_progress_bar=False)[0].tolist()
+            # FIX make_event_id usa event_date ISO, no raw_date
+            event_id  = make_event_id(top_label, event_date or "", loc_name or "")
 
             candidate = {
                 "id":           event_id,
                 "title":        top_label.title(),
                 "type":         top_label,
                 "category":     category,
-                "rawDate":      raw_date or "",
+                "rawDate":      event_date or "",
                 "eventDate":    event_date or "",
                 "locationName": loc_name or "",
                 "hotnessScore": hotness,
                 "eventScore":   event_score,
-                "confidence":   round(top_score, 4),
+                "confidence":   round(det_score, 4),
                 "layer1Score":  round(l1, 4),
                 "embedding":    event_emb,
                 "organizerOrg": org_name,
@@ -639,20 +766,18 @@ def run_extraction(
             processed_ids.append(post["id"])
 
         if not dry_run:
-            with driver.session() as session:
-                session.run("""
-                    UNWIND $ids AS pid
-                    MATCH (p:Post {id: pid})
-                    SET p.eventExtracted = true
-                """, ids=processed_ids[-len(batch):])
-
-    if not dry_run and processed_ids:
-        with driver.session() as session:
-            session.run("""
+            neo4j_run_with_retry("""
                 UNWIND $ids AS pid
                 MATCH (p:Post {id: pid})
                 SET p.eventExtracted = true
-            """, ids=processed_ids)
+            """, {"ids": processed_ids[-len(batch):]})
+
+    if not dry_run and processed_ids:
+        neo4j_run_with_retry("""
+            UNWIND $ids AS pid
+            MATCH (p:Post {id: pid})
+            SET p.eventExtracted = true
+        """, {"ids": processed_ids})
 
     # ── Resumen ───────────────────────────────────────────────────────────────
     detected = [r for r in diag_cands if r["decision"] == "EVENTO"]
@@ -778,6 +903,10 @@ def main(
         False, "--dry-run",
         help="Clasificar y mostrar diagnóstico completo sin escribir en Neo4j.",
     ),
+    accounts: Optional[str] = typer.Option(
+        None, "--accounts",
+        help="Cuentas a procesar separadas por coma, e.g. dichaparis,ivan_argote. Sin filtro = todas.",
+    ),
 ):
     """
     Fase 4-B: extracción de eventos en 2 capas.
@@ -788,10 +917,12 @@ def main(
     Capa 2: zero-shot cross-encoder clasifica tipo de evento solo sobre
     los candidatos de Capa 1 (--layer2-threshold).
 
-    eventScore = layer2_score × 0.6 + hotness_norm × 0.4 × political_penalty
+    eventScore = (layer2_score × 0.6 + hotness_norm × 0.4) × political_penalty
     """
     driver.verify_connectivity()
     print("✅ Conexión Neo4j OK\n")
+
+    accounts_list = [a.strip() for a in accounts.split(",")] if accounts else None
 
     run_extraction(
         layer1_threshold=threshold,
@@ -801,6 +932,7 @@ def main(
         date_window=date_window,
         sim_threshold=sim_threshold,
         dry_run=dry_run,
+        accounts=accounts_list,
     )
 
     driver.close()
