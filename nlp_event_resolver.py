@@ -13,6 +13,7 @@ Idempotente: fusionar duplicados no genera nuevos duplicados.
 """
 
 import os
+import random
 from collections import defaultdict
 from datetime import datetime
 from typing import Optional
@@ -22,6 +23,7 @@ from dotenv import load_dotenv
 from neo4j import GraphDatabase
 from scipy.spatial.distance import cosine as cosine_dist
 from tqdm import tqdm
+from unidecode import unidecode
 
 # ── 1. Credenciales ───────────────────────────────────────────────────────────
 load_dotenv()
@@ -40,6 +42,14 @@ OUTGOING_REL_TYPES = ["LOCATED_AT", "HAS_HASHTAG"]
 
 
 # ── 2. Helpers ────────────────────────────────────────────────────────────────
+def normalize_loc(loc: Optional[str]) -> str:
+    """Normaliza locationName: lowercase + strip + quitar acentos.
+
+    Garantiza que "París", "Paris" y "paris" caigan en el mismo grupo.
+    """
+    return unidecode((loc or "").lower().strip())
+
+
 def dates_close(d1: Optional[str], d2: Optional[str], window: int) -> bool:
     if not d1 or not d2:
         return True  # sin fecha → no excluir por fecha
@@ -128,7 +138,7 @@ def merge_events(session, canonical_id: str, dup_id: str, dry_run: bool) -> int:
 
 # ── 5. Encontrar y resolver duplicados ────────────────────────────────────────
 def resolve_duplicates(
-    threshold: float = 0.82,
+    threshold: float = 0.75,
     date_window: int = 3,
     dry_run: bool = False,
 ) -> tuple[int, int]:
@@ -152,18 +162,19 @@ def resolve_duplicates(
         print("  ✅ Menos de 2 eventos con embedding — nada que resolver.")
         return 0, 0
 
-    # Agrupar por locationName (None → grupo especial "")
+    # Agrupar por locationName normalizado (None → grupo especial "")
+    # normalize_loc: lowercase + strip + unidecode → "París" = "Paris" = "paris"
     by_location: dict = defaultdict(list)
     for e in with_emb:
-        loc = (e.get("locationName") or "").lower().strip()
-        by_location[loc].append(e)
+        by_location[normalize_loc(e.get("locationName"))].append(e)
 
     print(f"  🗺️  {len(by_location)} grupos de localización")
 
     # IDs ya fusionados en esta sesión (para evitar doble fusión)
-    merged_ids: set = set()
-    n_pairs     = 0
+    merged_ids:   set  = set()
+    n_pairs      = 0
     n_redirected = 0
+    near_misses: list  = []   # pares que pasan loc+fecha pero sim < threshold
 
     for loc_key, group in tqdm(by_location.items(), desc="  Localizaciones"):
         if len(group) < 2:
@@ -183,7 +194,18 @@ def resolve_duplicates(
                     continue
 
                 sim = cosine_sim(ea["embedding"], eb["embedding"])
+
                 if sim < threshold:
+                    # Guardar para muestra de calibración en dry-run
+                    if dry_run:
+                        near_misses.append({
+                            "sim":    sim,
+                            "loc":    loc_key,
+                            "date_a": ea.get("eventDate"),
+                            "date_b": eb.get("eventDate"),
+                            "title_a": ea.get("title", ea["id"]),
+                            "title_b": eb.get("title", eb["id"]),
+                        })
                     continue
 
                 # Canónico = el de mayor hotnessScore
@@ -204,6 +226,19 @@ def resolve_duplicates(
                 n_pairs      += 1
                 n_redirected += redirected
                 merged_ids.add(duplicate["id"])
+
+    # ── Muestra de calibración (dry-run) ──────────────────────────────────────
+    if dry_run and near_misses:
+        sample = random.sample(near_misses, min(5, len(near_misses)))
+        sample.sort(key=lambda x: -x["sim"])
+        print(f"\n  📐 MUESTRA DE CALIBRACIÓN — 5 pares bajo threshold={threshold}")
+        print(f"  (pasaron loc+fecha, sim < {threshold} — útiles para ajustar umbral)")
+        print(f"  {'─'*60}")
+        for r in sample:
+            print(f"  sim={r['sim']:.3f}  loc='{r['loc']}'  "
+                  f"dates={r['date_a']} / {r['date_b']}")
+            print(f"    A: {r['title_a']}")
+            print(f"    B: {r['title_b']}")
 
     return n_pairs, n_redirected
 
@@ -254,7 +289,7 @@ app = typer.Typer(add_completion=False)
 @app.command()
 def main(
     threshold: float = typer.Option(
-        0.82, "--threshold", help="Similitud coseno mínima para considerar duplicado."
+        0.75, "--threshold", help="Similitud coseno mínima para considerar duplicado."
     ),
     date_window: int = typer.Option(
         3, "--date-window", help="Ventana de días para considerar misma fecha."
@@ -272,7 +307,7 @@ def main(
     Criterio de duplicado:
       • misma locationName (o sin location en alguno)
       • fecha dentro de ±date_window días
-      • similitud coseno del embedding > threshold (default 0.82)
+      • similitud coseno del embedding > threshold (default 0.75)
 
     Canónico = evento con mayor hotnessScore.
     """
