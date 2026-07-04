@@ -6,12 +6,20 @@ Arquitectura de 3 capas:
             Similitud coseno MÁXIMA contra 100 frases de referencia (no promedio).
             Filtra candidatos por max_sim >= layer1_threshold.
 
-  Capa 2a — Detección binaria (mDeBERTa-v3-base-xnli-multilingual-nli-2mil7)
+  Capa 2a — Detección binaria (multilingual-MiniLMv2-L6-mnli-xnli, ligero)
+             NLI batcheado con una sola hipótesis → P(entailment).
              ¿Es un evento con fecha/lugar? Descarta definitivamente si no.
+             NOTA: se usa el MiniLMv2 multilingüe y NO cross-encoder/
+             nli-deberta-v3-small porque este último es monolingüe inglés
+             (SNLI/MNLI) y fallaría con captions es/fr.
 
-  Capa 2b — Tipificación multi-label (mismo modelo)
-             Solo corre sobre los que pasaron 2a.
+  Capa 2b — Tipificación multi-label (mDeBERTa-v3-base-xnli, batcheado)
+             Solo corre sobre los que pasaron 2a (fracción pequeña).
              Asigna tipo de evento con 12 labels culturales.
+             --light-typing permite usar el modelo ligero también aquí.
+
+Optimizaciones CPU: batch inference en 2a/2b, truncado a 256 tokens,
+torch multi-thread, cache de embeddings de referencia en ref_embeddings.npz.
 
 Score final = (layer2_score × 0.6 + hotness_norm × 0.4) × political_penalty
 
@@ -23,6 +31,7 @@ import math
 import os
 import random
 import re
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
@@ -214,19 +223,23 @@ NULL_CATS    = {"nulo"}
 
 HOTNESS_MAX     = 6.0
 MIN_CAPTION_LEN = 40
-ZS_MODEL        = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
+# Capa 2a — detección binaria: modelo NLI multilingüe LIGERO (6 capas).
+# ⚠️ No sustituir por cross-encoder/nli-deberta-v3-small: es inglés-only.
+DET_MODEL       = "MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli"
+# Capa 2b — tipificación: modelo base multilingüe (mejor calidad).
+TYPE_MODEL      = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
+ZS_MODEL        = TYPE_MODEL   # compat: nombre usado en logs
 ST_MODEL        = "paraphrase-multilingual-MiniLM-L12-v2"
+MAX_NLI_TOKENS  = 256          # truncado de captions para NLI (velocidad CPU)
+REF_CACHE_PATH  = "ref_embeddings.npz"
 LANG_TO_MODEL   = {"es": "es_core_news_lg", "en": "en_core_web_sm", "fr": "fr_core_news_lg"}
 # Fecha de corte fija del estudio — ancla recencia, no datetime.now()
 STUDY_CUTOFF    = datetime(2026, 7, 1, tzinfo=timezone.utc)
 _NLP: dict      = {}
 _ST_MODEL       = None   # sentence-transformer compartido entre capas
 
-# Labels para Capa 2a (detección binaria)
-BINARY_LABELS = [
-    "un evento cultural con fecha o lugar específico",
-    "contenido sin ningún evento anunciado",
-]
+# Capa 2a: la detección binaria ya no usa labels de pipeline ZS —
+# ver DET_HYPOTHESIS + detect_events_batch() (una hipótesis, batcheado).
 # Labels para Capa 2b (tipificación) — excluye nulo
 EVENT_LABELS_CULTURAL = [lbl for lbl, cat, _ in _LABEL_META if cat not in NULL_CATS]
 
@@ -251,14 +264,90 @@ def get_st_model():
     return _ST_MODEL
 
 
-# ── 5. Capa 1 — matriz de embeddings de referencia ───────────────────────────
+# ── 4b. Capa 2a — detector NLI binario batcheado ─────────────────────────────
+DET_HYPOTHESIS = "Esta publicación anuncia un evento cultural con fecha o lugar."
+
+_DET = None  # (tokenizer, model) cargados una sola vez
+
+
+def get_detector():
+    global _DET
+    if _DET is None:
+        import torch
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        torch.set_num_threads(os.cpu_count() or 4)
+        print(f"  📦 Cargando detector NLI ligero: {DET_MODEL}")
+        tok = AutoTokenizer.from_pretrained(DET_MODEL)
+        mdl = AutoModelForSequenceClassification.from_pretrained(DET_MODEL)
+        mdl.eval()
+        _DET = (tok, mdl)
+    return _DET
+
+
+def detect_events_batch(captions: list[str], batch_size: int = 32) -> list[float]:
+    """P(evento) por caption, procesando en lotes.
+
+    Una sola hipótesis por caption (en lugar de 2 labels del pipeline ZS)
+    → mitad de forward-passes. Score = P(entailment) normalizado contra
+    P(contradiction), igual que hace el pipeline zero-shot por label.
+    """
+    import torch
+    tok, mdl = get_detector()
+    ent_idx = mdl.config.label2id.get("entailment", 0)
+    con_idx = mdl.config.label2id.get("contradiction", 2)
+
+    scores: list[float] = []
+    with torch.inference_mode():
+        for i in range(0, len(captions), batch_size):
+            chunk  = captions[i: i + batch_size]
+            inputs = tok(
+                chunk,
+                [DET_HYPOTHESIS] * len(chunk),
+                truncation=True,
+                max_length=MAX_NLI_TOKENS,
+                padding=True,
+                return_tensors="pt",
+            )
+            logits = mdl(**inputs).logits                    # (B, 3)
+            pair   = logits[:, [con_idx, ent_idx]]           # (B, 2)
+            probs  = pair.softmax(dim=-1)[:, 1]              # P(entail | ent∨contra)
+            scores.extend(probs.tolist())
+    return scores
+
+
+# ── 5. Capa 1 — matriz de embeddings de referencia (con cache en disco) ──────
 _REF_EMBEDDINGS = None   # np.ndarray (100, 384), normalizado
 
+
+def _ref_cache_key() -> str:
+    """Hash de frases + modelo: invalida el cache si cambia cualquiera de los dos."""
+    payload = ST_MODEL + "\n" + "\n".join(EVENT_REFERENCES)
+    return hashlib.md5(payload.encode("utf-8")).hexdigest()
+
+
 def get_reference_embeddings() -> np.ndarray:
-    """Calcula (y cachea) la matriz normalizada de embeddings de EVENT_REFERENCES."""
+    """Matriz normalizada de embeddings de EVENT_REFERENCES.
+
+    Orden de resolución: memoria → disco (ref_embeddings.npz) → cómputo.
+    El cache en disco evita cargar el sentence-transformer solo para las
+    referencias y se invalida automáticamente si cambian frases o modelo.
+    """
     global _REF_EMBEDDINGS
     if _REF_EMBEDDINGS is not None:
         return _REF_EMBEDDINGS
+
+    key = _ref_cache_key()
+    if os.path.exists(REF_CACHE_PATH):
+        try:
+            data = np.load(REF_CACHE_PATH, allow_pickle=False)
+            if str(data["key"]) == key:
+                _REF_EMBEDDINGS = data["embs"]
+                print(f"  💾 Embeddings de referencia leídos de {REF_CACHE_PATH}")
+                return _REF_EMBEDDINGS
+            print("  ♻️  Cache de referencias obsoleto — recalculando")
+        except Exception:
+            pass  # cache corrupto → recalcular
+
     model = get_st_model()
     _REF_EMBEDDINGS = model.encode(
         EVENT_REFERENCES,
@@ -266,6 +355,10 @@ def get_reference_embeddings() -> np.ndarray:
         show_progress_bar=False,
         batch_size=32,
     )
+    try:
+        np.savez(REF_CACHE_PATH, embs=_REF_EMBEDDINGS, key=np.array(key))
+    except Exception as e:
+        print(f"  ⚠️  No se pudo guardar {REF_CACHE_PATH}: {e}")
     return _REF_EMBEDDINGS
 
 
@@ -341,22 +434,22 @@ def extract_dates(text: str, post_timestamp: str) -> Optional[str]:
         "RETURN_AS_TIMEZONE_AWARE": False,
         "RELATIVE_BASE": anchor,
         "PREFER_DATES_FROM": "future",
-        "LANGUAGES": ["es", "fr", "en"],
     }
+    langs = ["es", "fr", "en"]
 
     # Primero intenta sobre los fragmentos extraídos por regex (más preciso)
     for match in _DATE_RE.finditer(text[:600]):
         snippet = match.group(0).strip()
         if len(snippet) < 3:
             continue
-        parsed = dateparser.parse(snippet, settings=settings)
+        parsed = dateparser.parse(snippet, languages=langs, settings=settings)
         if parsed:
             return parsed.strftime("%Y-%m-%d")
 
     # Fallback: busca fechas en el texto completo
     try:
         from dateparser.search import search_dates
-        results = search_dates(text[:600], settings=settings, languages=["es", "fr", "en"])
+        results = search_dates(text[:600], languages=langs, settings=settings)
         if results:
             return results[0][1].strftime("%Y-%m-%d")
     except Exception:
@@ -521,12 +614,14 @@ def run_extraction(
     layer1_threshold: float = 0.45,
     layer2_threshold: float = 0.40,
     max_posts: int          = 50,
-    batch_size: int         = 20,
+    batch_size: int         = 32,
     date_window: int        = 3,
     sim_threshold: float    = 0.82,
     dry_run: bool           = False,
     accounts: list[str]     = None,
+    light_typing: bool      = False,
 ):
+    t_start = time.time()
     print("\n🎭 Fase 4-B — Extracción de Eventos (2 capas)")
     print("=" * 60)
     print(f"  L1≥{layer1_threshold}  L2≥{layer2_threshold}  "
@@ -586,14 +681,6 @@ def run_extraction(
     print(f"  ✅ Capa 1: {len(candidates_idx)} candidatos  "
           f"({rejected_l1} descartados, L1<{layer1_threshold})")
 
-    # ── Capa 2 — zero-shot (2a detección + 2b tipificación) ──────────────────
-    print(f"\n  🟠 Capa 2 — zero-shot classification ({ZS_MODEL})...")
-    from transformers import pipeline as hf_pipeline
-    classifier = hf_pipeline(
-        "zero-shot-classification",
-        model=ZS_MODEL,
-        device=-1,
-    )
     HYP_TMPL = "Esta publicación anuncia {}."
 
     with driver.session() as session:
@@ -603,14 +690,15 @@ def run_extraction(
     enriched      = 0
     skipped_l1    = rejected_l1
     skipped_l2    = 0
-    processed_ids = [posts[i]["id"] for i in range(len(posts)) if i not in set(candidates_idx)]
+    cand_set      = set(candidates_idx)   # una sola vez, no dentro del loop
+    processed_ids = [posts[i]["id"] for i in range(len(posts)) if i not in cand_set]
     dry_counts:   dict = defaultdict(int)
     diag_all:     list = []   # todos los posts — para distribución L1
     diag_cands:   list = []   # solo candidatos L1 — para distribución L2 y ejemplos
 
     # Registrar los rechazados de Capa 1 en diag_all
     for i, post in enumerate(posts):
-        if i not in set(candidates_idx):
+        if i not in cand_set:
             diag_all.append({
                 "caption":     post["caption"],
                 "author":      post.get("author", ""),
@@ -629,58 +717,62 @@ def run_extraction(
                 "top3":        [],
             })
 
-    # Procesar candidatos en batches para Capa 2
-    cand_posts  = [posts[i] for i in candidates_idx]
-    cand_embs   = [all_embs[i] for i in candidates_idx]
-    cand_l1     = [layer1_scores[i] for i in candidates_idx]
+    # Candidatos de Capa 1
+    cand_posts    = [posts[i] for i in candidates_idx]
+    cand_embs     = [all_embs[i] for i in candidates_idx]
+    cand_l1       = [layer1_scores[i] for i in candidates_idx]
+    cand_captions = [p["caption"][:1200] for p in cand_posts]  # el tokenizer trunca a MAX_NLI_TOKENS
 
-    for bi in tqdm(range(0, len(cand_posts), batch_size), desc="  Capa 2"):
-        batch       = cand_posts[bi: bi + batch_size]
-        batch_embs  = cand_embs[bi: bi + batch_size]
-        batch_l1    = cand_l1[bi: bi + batch_size]
-        captions_zs = [p["caption"][:512] for p in batch]
+    # ── Capa 2a — detección binaria BATCHEADA (modelo ligero) ────────────────
+    print(f"\n  🟠 Capa 2a — detección binaria batcheada ({DET_MODEL})...")
+    t0 = time.time()
+    det_scores     = detect_events_batch(cand_captions, batch_size=batch_size)
+    is_event_flags = [s >= layer2_threshold for s in det_scores]
+    pos_idx        = [j for j, f in enumerate(is_event_flags) if f]
+    print(f"  ✅ Capa 2a: {len(pos_idx)} positivos / {len(cand_posts)} candidatos"
+          f"  ({time.time() - t0:.1f}s, batch={batch_size})")
 
-        # ── Capa 2a — detección binaria ──────────────────────────────────────
-        det_results = classifier(
-            captions_zs,
-            BINARY_LABELS,
+    # ── Capa 2b — tipificación multi-label SOLO sobre positivos ──────────────
+    type_map: dict = {}
+    if pos_idx:
+        type_model_name = DET_MODEL if light_typing else TYPE_MODEL
+        print(f"  🟣 Capa 2b — tipificación ({type_model_name}) sobre {len(pos_idx)} posts...")
+        t0 = time.time()
+        from transformers import pipeline as hf_pipeline
+        type_clf = hf_pipeline("zero-shot-classification", model=type_model_name, device=-1)
+        typ_list = type_clf(
+            [cand_captions[j] for j in pos_idx],
+            EVENT_LABELS_CULTURAL,
             hypothesis_template=HYP_TMPL,
-            multi_label=False,
+            multi_label=True,
+            batch_size=8,          # 12 labels × B pares por forward
+            truncation=True,
         )
-        if isinstance(det_results, dict):
-            det_results = [det_results]
+        if isinstance(typ_list, dict):
+            typ_list = [typ_list]
+        type_map = dict(zip(pos_idx, typ_list))
+        print(f"  ✅ Capa 2b lista  ({time.time() - t0:.1f}s)")
 
-        # ── Capa 2b — tipificación solo sobre eventos detectados ──────────────
-        event_indices = [
-            j for j, dr in enumerate(det_results)
-            if dr["labels"][0] == BINARY_LABELS[0] and dr["scores"][0] >= layer2_threshold
-        ]
-        type_map: dict = {}
-        if event_indices:
-            typ_list = classifier(
-                [captions_zs[j] for j in event_indices],
-                EVENT_LABELS_CULTURAL,
-                hypothesis_template=HYP_TMPL,
-                multi_label=True,
-            )
-            if isinstance(typ_list, dict):
-                typ_list = [typ_list]
-            for j, tr in zip(event_indices, typ_list):
-                type_map[j] = tr
+    # ── Persistencia + NER (solo eventos, o todo en dry-run) ─────────────────
+    since_last_mark = 0
+    for j in tqdm(range(len(cand_posts)), desc="  Eventos"):
+        post, emb, l1 = cand_posts[j], cand_embs[j], cand_l1[j]
+        det_score = det_scores[j]
+        is_event  = is_event_flags[j]
 
-        for idx, (post, emb, l1, det) in enumerate(zip(batch, batch_embs, batch_l1, det_results)):
-            det_score = det["scores"][0]
-            is_event  = det["labels"][0] == BINARY_LABELS[0] and det_score >= layer2_threshold
+        # Tipo desde Capa 2b
+        typ        = type_map.get(j)
+        top_label  = typ["labels"][0]  if typ else EVENT_LABELS_CULTURAL[0]
+        type_score = typ["scores"][0] if typ else det_score
+        top3       = list(zip(typ["labels"][:3], typ["scores"][:3])) if typ else []
 
-            # Tipo desde Capa 2b
-            typ       = type_map.get(idx)
-            top_label = typ["labels"][0]  if typ else (EVENT_LABELS_CULTURAL[0] if is_event else EVENT_LABELS[-1])
-            type_score = typ["scores"][0] if typ else det_score
-            top3       = list(zip(typ["labels"][:3], typ["scores"][:3])) if typ else []
+        category = _CAT_MAP.get(top_label, "nulo") if is_event else "nulo"
+        penalty  = _PEN_MAP.get(top_label, 0.0)    if is_event else 0.0
 
-            category  = _CAT_MAP.get(top_label, "nulo") if is_event else "nulo"
-            penalty   = _PEN_MAP.get(top_label, 0.0)    if is_event else 0.0
-
+        # NER + fechas solo cuando hace falta (eventos, o todo en dry-run
+        # para diagnóstico) — evita pasar spaCy/langdetect por cada candidato.
+        loc_name = org_name = event_date = None
+        if is_event or dry_run:
             lang       = detect_text_lang(post["caption"])
             ner        = extract_ner(post["caption"], lang)
             loc_name   = ner["locations"][0] if ner["locations"] else None
@@ -688,89 +780,93 @@ def run_extraction(
             # FIX 2: fechas ancladas al timestamp del post, no a datetime.now()
             event_date = extract_dates(post["caption"], post.get("timestamp", "") or "")
 
-            hotness     = compute_hotness(
-                post.get("likes", 0) or 0,
-                post.get("comments", 0) or 0,
-                post.get("timestamp", "") or "",
-            )
-            event_score = compute_event_score(det_score, hotness, penalty) if is_event else 0.0
+        hotness     = compute_hotness(
+            post.get("likes", 0) or 0,
+            post.get("comments", 0) or 0,
+            post.get("timestamp", "") or "",
+        )
+        event_score = compute_event_score(det_score, hotness, penalty) if is_event else 0.0
 
-            record = {
-                "caption":     post["caption"],
-                "author":      post.get("author", ""),
-                "layer1":      l1,
-                "layer2":      det_score,     # score de detección 2a
-                "hotness":     hotness,
-                "event_score": event_score,
-                "category":    category,
-                "decision":    "EVENTO" if is_event else "no evento",
-                "loc_name":    loc_name or "",
-                "raw_date":    event_date or "",
-                "top3":        top3,          # tipos de Capa 2b
-            }
-            diag_all.append(record)
-            diag_cands.append(record)
+        record = {
+            "caption":     post["caption"],
+            "author":      post.get("author", ""),
+            "layer1":      l1,
+            "layer2":      det_score,     # score de detección 2a
+            "hotness":     hotness,
+            "event_score": event_score,
+            "category":    category,
+            "decision":    "EVENTO" if is_event else "no evento",
+            "loc_name":    loc_name or "",
+            "raw_date":    event_date or "",
+            "top3":        top3,          # tipos de Capa 2b
+        }
+        diag_all.append(record)
+        diag_cands.append(record)
 
-            if is_event:
-                dry_counts[category] += 1
+        if is_event:
+            dry_counts[category] += 1
 
-            if not is_event:
-                skipped_l2 += 1
-                processed_ids.append(post["id"])
-                continue
+        if not is_event:
+            skipped_l2 += 1
+            processed_ids.append(post["id"])
+            since_last_mark += 1
+            continue
 
-            if dry_run:
-                processed_ids.append(post["id"])
-                continue
+        if dry_run:
+            processed_ids.append(post["id"])
+            continue
 
-            emb_text  = f"{post['caption'][:200]} {top_label} {event_date or ''} {loc_name or ''}"
-            event_emb = st_model.encode([emb_text], normalize_embeddings=True, show_progress_bar=False)[0].tolist()
-            # FIX make_event_id usa event_date ISO, no raw_date
-            event_id  = make_event_id(top_label, event_date or "", loc_name or "")
+        emb_text  = f"{post['caption'][:200]} {top_label} {event_date or ''} {loc_name or ''}"
+        event_emb = st_model.encode([emb_text], normalize_embeddings=True, show_progress_bar=False)[0].tolist()
+        # FIX make_event_id usa event_date ISO, no raw_date
+        event_id  = make_event_id(top_label, event_date or "", loc_name or "")
 
-            candidate = {
+        candidate = {
+            "id":           event_id,
+            "title":        top_label.title(),
+            "type":         top_label,
+            "category":     category,
+            "rawDate":      event_date or "",
+            "eventDate":    event_date or "",
+            "locationName": loc_name or "",
+            "hotnessScore": hotness,
+            "eventScore":   event_score,
+            "confidence":   round(det_score, 4),
+            "layer1Score":  round(l1, 4),
+            "embedding":    event_emb,
+            "organizerOrg": org_name,
+            "createdAt":    datetime.now(timezone.utc).isoformat(),
+        }
+
+        existing_id = find_similar_event(candidate, cache, sim_threshold, date_window)
+        with driver.session() as session:
+            upsert_event(session, candidate, post, existing_id)
+
+        if existing_id:
+            enriched += 1
+            for e in cache:
+                if e["id"] == existing_id:
+                    e["hotnessScore"] = max(e.get("hotnessScore", 0), hotness)
+                    break
+        else:
+            created += 1
+            cache.append({
                 "id":           event_id,
-                "title":        top_label.title(),
-                "type":         top_label,
-                "category":     category,
-                "rawDate":      event_date or "",
                 "eventDate":    event_date or "",
                 "locationName": loc_name or "",
-                "hotnessScore": hotness,
-                "eventScore":   event_score,
-                "confidence":   round(det_score, 4),
-                "layer1Score":  round(l1, 4),
                 "embedding":    event_emb,
-                "organizerOrg": org_name,
-                "createdAt":    datetime.now(timezone.utc).isoformat(),
-            }
+            })
+        processed_ids.append(post["id"])
+        since_last_mark += 1
 
-            existing_id = find_similar_event(candidate, cache, sim_threshold, date_window)
-            with driver.session() as session:
-                upsert_event(session, candidate, post, existing_id)
-
-            if existing_id:
-                enriched += 1
-                for e in cache:
-                    if e["id"] == existing_id:
-                        e["hotnessScore"] = max(e.get("hotnessScore", 0), hotness)
-                        break
-            else:
-                created += 1
-                cache.append({
-                    "id":           event_id,
-                    "eventDate":    event_date or "",
-                    "locationName": loc_name or "",
-                    "embedding":    event_emb,
-                })
-            processed_ids.append(post["id"])
-
-        if not dry_run:
+        # Marcado incremental cada ~100 posts (resumibilidad si el proceso muere)
+        if not dry_run and since_last_mark >= 100:
             neo4j_run_with_retry("""
                 UNWIND $ids AS pid
                 MATCH (p:Post {id: pid})
                 SET p.eventExtracted = true
-            """, {"ids": processed_ids[-len(batch):]})
+            """, {"ids": processed_ids[-since_last_mark:]})
+            since_last_mark = 0
 
     if not dry_run and processed_ids:
         neo4j_run_with_retry("""
@@ -782,6 +878,7 @@ def run_extraction(
     # ── Resumen ───────────────────────────────────────────────────────────────
     detected = [r for r in diag_cands if r["decision"] == "EVENTO"]
     print(f"\n{'═'*60}")
+    print(f"  ⏱️  Tiempo total        : {time.time() - t_start:.1f}s")
     print(f"  ✅ Posts procesados    : {len(posts)}")
     print(f"  🔵 Descartados Capa 1  : {skipped_l1}  (L1<{layer1_threshold})")
     print(f"  🟠 Candidatos Capa 2   : {len(cand_posts)}")
@@ -896,8 +993,8 @@ def main(
         help="Límite de posts a procesar. 0 = todos. Default 50 para testing rápido.",
     ),
     batch_size: int = typer.Option(
-        20, "--batch-size",
-        help="Posts por lote en Capa 2 (zero-shot).",
+        32, "--batch-size",
+        help="Tamaño de lote para la inferencia NLI de Capa 2a.",
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run",
@@ -907,15 +1004,19 @@ def main(
         None, "--accounts",
         help="Cuentas a procesar separadas por coma, e.g. dichaparis,ivan_argote. Sin filtro = todas.",
     ),
+    light_typing: bool = typer.Option(
+        False, "--light-typing",
+        help="Usar el modelo ligero (MiniLMv2-L6) también en Capa 2b. Más rápido, algo menos preciso.",
+    ),
 ):
     """
     Fase 4-B: extracción de eventos en 2 capas.
 
     Capa 1: sentence-transformers filtra candidatos por similitud coseno
-    contra embedding promedio de 100 frases de referencia (--threshold).
+    máxima contra 100 frases de referencia (--threshold).
 
-    Capa 2: zero-shot cross-encoder clasifica tipo de evento solo sobre
-    los candidatos de Capa 1 (--layer2-threshold).
+    Capa 2a: NLI multilingüe ligero batcheado — detección binaria (--layer2-threshold).
+    Capa 2b: mDeBERTa-XNLI multi-label — tipificación solo sobre positivos.
 
     eventScore = (layer2_score × 0.6 + hotness_norm × 0.4) × political_penalty
     """
@@ -933,6 +1034,7 @@ def main(
         sim_threshold=sim_threshold,
         dry_run=dry_run,
         accounts=accounts_list,
+        light_typing=light_typing,
     )
 
     driver.close()
