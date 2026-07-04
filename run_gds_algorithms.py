@@ -1,6 +1,10 @@
+import math
 import os
-from neo4j import GraphDatabase
+
+import numpy as np
 from dotenv import load_dotenv
+from neo4j import GraphDatabase
+from scipy.stats import rankdata
 
 # ── 1. Credenciales ───────────────────────────────────────────────────────────
 load_dotenv()
@@ -204,47 +208,119 @@ def run_betweenness(session):
     for r in result:
         print(f"  @{r['username']:<34} {r['followers'] or 0:>10,} {r['pageRank'] or 0:>10.4f} {r['betweenness']:>12.2f}")
 
-# ── 10. Score de relevancia cultural compuesto ───────────────────────────────
+# ── 10. Score de relevancia cultural compuesto (normalizado) ─────────────────
+# Pesos originales 35/25/20 (PR/Deg/Bet) renormalizados a suma 1 tras excluir
+# followers del score: 0.4375 / 0.3125 / 0.25 — se preservan las proporciones.
+SCORE_WEIGHTS = {"pageRank": 0.35 / 0.80, "degree": 0.25 / 0.80, "betweenness": 0.20 / 0.80}
+
+
+def _pct_rank(values: np.ndarray) -> np.ndarray:
+    """Percentile rank en (0, 1] — robusto a outliers y a escalas distintas."""
+    return rankdata(values, method="average") / len(values)
+
+
 def compute_cultural_relevance(session):
-    print("\n⭐ Calculando score de relevancia cultural...")
-    session.run("""
+    """Score compuesto con normalización por percentil rank.
+
+    FIX: la versión anterior sumaba métricas SIN normalizar — betweenness
+    (10²–10⁵) dominaba y los pesos nominales eran ficticios. Ahora cada
+    componente se convierte a percentil (0-1] antes de ponderar.
+
+    log(followers) se EXCLUYE del score y se reporta como dimensión
+    separada (popularityScore): popularidad de plataforma ≠ centralidad
+    estructural en la red comunitaria. La divergencia entre ambas es en
+    sí un resultado (cuentas pequeñas pero estructuralmente centrales).
+    """
+    print("\n⭐ Calculando score de relevancia cultural (percentile rank)...")
+
+    rows = session.run("""
         MATCH (a:Account:Public)
         WHERE a.pageRankScore IS NOT NULL
-        WITH a,
-            // Normalización simple entre 0-1 por propiedad
-            coalesce(a.pageRankScore, 0)     AS pr,
-            coalesce(a.degreeCentrality, 0)  AS deg,
-            coalesce(a.betweennessScore, 0)  AS bet,
-            coalesce(a.followersCount, 0)    AS fol,
-            // Penalización política
-            CASE WHEN a:Political OR coalesce(a.politicalScore, 0) > 3
-                 THEN 0.1 ELSE 1.0 END AS politicalPenalty
-        SET a.culturalRelevanceScore = 
-            politicalPenalty * (
-                (pr  * 0.35) +
-                (deg * 0.25) +
-                (bet * 0.20) +
-                (log(fol + 1) * 0.20)
-            )
-    """)
+        RETURN a.username                        AS username,
+               coalesce(a.pageRankScore, 0.0)    AS pr,
+               coalesce(a.degreeCentrality, 0.0) AS deg,
+               coalesce(a.betweennessScore, 0.0) AS bet,
+               coalesce(a.followersCount, 0)     AS fol,
+               (a:Political)                     AS political,
+               coalesce(a.politicalScore, 0)     AS politicalScore
+    """).data()
+    if not rows:
+        print("  ⚠️  Sin nodos con métricas — corre primero los algoritmos.")
+        return
+
+    n = len(rows)
+    pr_pct  = _pct_rank(np.array([r["pr"]  for r in rows], dtype=float))
+    deg_pct = _pct_rank(np.array([r["deg"] for r in rows], dtype=float))
+    bet_pct = _pct_rank(np.array([r["bet"] for r in rows], dtype=float))
+    # Percentil de log(followers+1) — dimensión separada, NO entra al score.
+    # (El rank de log(x) == rank de x por monotonicidad; se deja log por claridad.)
+    pop_pct = _pct_rank(np.array([math.log1p(r["fol"]) for r in rows], dtype=float))
+
+    updates = []
+    for i, r in enumerate(rows):
+        penalty = 0.1 if (r["political"] or r["politicalScore"] > 3) else 1.0
+        score = penalty * (
+            SCORE_WEIGHTS["pageRank"]    * pr_pct[i]
+            + SCORE_WEIGHTS["degree"]      * deg_pct[i]
+            + SCORE_WEIGHTS["betweenness"] * bet_pct[i]
+        )
+        updates.append({
+            "username":       r["username"],
+            "score":          round(float(score), 6),
+            "pageRankPct":    round(float(pr_pct[i]), 6),
+            "degreePct":      round(float(deg_pct[i]), 6),
+            "betweennessPct": round(float(bet_pct[i]), 6),
+            "popularity":     round(float(pop_pct[i]), 6),
+        })
+
+    # Write-back en batch (un solo round-trip por lote)
+    for start in range(0, len(updates), 500):
+        session.run("""
+            UNWIND $rows AS row
+            MATCH (a:Account {username: row.username})
+            SET a.culturalRelevanceScore = row.score,
+                a.pageRankPct            = row.pageRankPct,
+                a.degreePct              = row.degreePct,
+                a.betweennessPct         = row.betweennessPct,
+                a.popularityScore        = row.popularity
+        """, rows=updates[start:start + 500])
+    print(f"  ✅ {n} cuentas actualizadas (componentes en percentil 0-1)")
 
     result = session.run("""
         MATCH (a:Account:Public)
         WHERE a.culturalRelevanceScore IS NOT NULL
         AND NOT a:Political
         RETURN a.username AS username,
-               a.fullName AS fullName,
                a.followersCount AS followers,
                a.communityId AS community,
-               round(a.culturalRelevanceScore, 6) AS score
+               round(a.culturalRelevanceScore, 4) AS score,
+               round(a.popularityScore, 4)        AS popularity
         ORDER BY score DESC
         LIMIT 20
     """)
-    print("\n  🌟 Top 20 — Relevancia Cultural (score compuesto):")
-    print(f"  {'Username':<35} {'Followers':>10} {'Community':>10} {'Score':>12}")
-    print(f"  {'-'*72}")
+    print("\n  🌟 Top 20 — Relevancia Cultural (percentile rank, sin followers):")
+    print(f"  {'Username':<35} {'Followers':>10} {'Community':>10} {'Score':>8} {'Popular.':>9}")
+    print(f"  {'-'*80}")
     for r in result:
-        print(f"  @{r['username']:<34} {r['followers'] or 0:>10,} {r['community'] or '?':>10} {r['score']:>12.6f}")
+        print(f"  @{r['username']:<34} {r['followers'] or 0:>10,} {r['community'] or '?':>10}"
+              f" {r['score']:>8.4f} {r['popularity']:>9.4f}")
+
+    # Dimensión separada: divergencia estructura vs popularidad
+    result = session.run("""
+        MATCH (a:Account:Public)
+        WHERE a.culturalRelevanceScore IS NOT NULL AND NOT a:Political
+        RETURN a.username AS username,
+               round(a.culturalRelevanceScore, 4) AS score,
+               round(a.popularityScore, 4)        AS popularity,
+               round(a.culturalRelevanceScore - a.popularityScore, 4) AS delta
+        ORDER BY delta DESC
+        LIMIT 10
+    """)
+    print("\n  🔎 Top 10 — Centralidad estructural > popularidad (brokers discretos):")
+    print(f"  {'Username':<35} {'Score':>8} {'Popular.':>9} {'Δ':>8}")
+    print(f"  {'-'*64}")
+    for r in result:
+        print(f"  @{r['username']:<34} {r['score']:>8.4f} {r['popularity']:>9.4f} {r['delta']:>8.4f}")
 
 # ── 11. Main ──────────────────────────────────────────────────────────────────
 def main():
@@ -273,7 +349,9 @@ def main():
     print("   · pageRankScore")
     print("   · communityId")
     print("   · betweennessScore")
-    print("   · culturalRelevanceScore")
+    print("   · culturalRelevanceScore   (percentile rank, sin followers)")
+    print("   · pageRankPct / degreePct / betweennessPct")
+    print("   · popularityScore          (dimensión separada)")
 
 if __name__ == "__main__":
     main()
