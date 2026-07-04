@@ -26,6 +26,8 @@ pip install -r requirements.txt
 python extract_profiles.py                  # Phase 1: scrape pending profiles (cost-aware)
 python load_to_neo4j.py                     # Phase 2: ingest data_raw/*.json into Neo4j
 python run_gds_algorithms.py                # Phase 3: graph algorithms + cultural relevance score
+python run_network_analysis.py run-all      # Phase 3-alt: análisis LOCAL (igraph/leidenalg) — sin GDS ni puerto 7687
+python run_network_analysis.py analyze      #   solo métricas, 100% offline desde data_processed/*.csv
 python nlp_enrich_nodes.py                  # Phase 4-A: bio + caption → lang/NER/keywords
 python nlp_extract_events.py                # Phase 4-B: detect events → :Event nodes
 python nlp_event_resolver.py                # Phase 4-C: dedup existing :Event nodes
@@ -67,11 +69,9 @@ NEO4J_PASSWORD=...
 - **Incremental processing:** `extract_profiles.py` queries Neo4j for accounts not yet scraped, making re-runs idempotent.
 - **Cost control:** Apify usage is tracked in `.apify_cost_log.json` (gitignored). Always check estimated cost before running large extractions.
 - **Political filtering:** 13 political accounts are hardcoded in `run_gds_algorithms.py` and down-weighted in the Cultural Relevance Score. Changes to this list require deliberate review.
-- **Cultural Relevance Score formula:** 35% PageRank + 25% Degree Centrality + 20% Betweenness + 20% log(followers) − political penalty.
+- **Cultural Relevance Score formula:** componentes normalizados por **percentile rank** (0-1] antes de ponderar: 43.75% PageRank + 31.25% Degree + 25% Betweenness (proporciones 35:25:20 originales), × political penalty. `log(followers)` fue **excluido del score** y se reporta como dimensión separada (`popularityScore`); también se persisten `pageRankPct`/`degreePct`/`betweennessPct`.
+- **Análisis local (run_network_analysis.py):** alternativa a GDS que corre offline (el puerto 7687 suele estar bloqueado y AuraDB estándar no trae GDS). Exporta a `data_processed/*.csv`, corre igraph/leidenalg (PageRank y betweenness EXACTOS, Leiden γ=0.5/1.0/1.5 con seed=42, WCC, k-core, participation coefficient, E-I index por tipo de actor) y escribe de vuelta con `UNWIND` en lotes. Red **multiplex**: capa social (MENTIONS/TAGS_USER/COAUTHORED_BY proyectadas autor→post→target, pues en el grafo crudo salen del Post) separada de la algorítmica (RELATED_TO, sufijo `Algo`). Tipología de actores curable en `data_processed/actor_types.csv`.
 - **GDS graph projection:** Named `"red-cultural"` — must be dropped before re-projecting (`gds.graph.drop("red-cultural")`).
 - **raw data:** `data_raw/` is gitignored; JSON files are named `profile_<username>.json`.
 - **NLP scripts are all idempotent:** each checks for a `NULL` sentinel property before processing (`bioLanguage`, `captionLanguage`, `eventExtracted`, `lat`).
-- **NLP models:** spaCy lazy-loads per language (`es_core_news_lg` / `en_core_web_sm` / `fr_core_news_lg`). Entities stored as `"TYPE:texto"` strings (e.g. `"ORG:Ministerio de Cultura"`). Embeddings via `paraphrase-multilingual-MiniLM-L12-v2` stored as float lists, compatible with Neo4j vector indexes.
-- **Event extraction flow:** zero-shot ZS (`cross-encoder/nli-MiniLM2-L6-H768`) classifies caption → NER extracts DATE/LOC/ORG → hotness score → inline resolver checks cosine similarity > 0.82 + location match + date ±3 days before creating `:Event` node. Event IDs are MD5 hashes of `type|raw_date|location`.
-- **Event resolver (standalone):** groups `:Event` nodes by `locationName`, compares pairs by date window then cosine similarity, merges duplicates by redirecting all relationships explicitly (no APOC). Canonical = higher `hotnessScore`.
-- **Geocoding:** `enrich_locations.py` uses Nominatim (1.1 s/req rate limit). Paris arrondissements detected from postal code 750XX. Hierarchy: `Location -[:LOCATED_IN]-> Arrondissement -[:LOCATED_IN]-> City -[:LOCATED_IN]-> Country`. Sessions logged in `.geocoding_log.json` (gitignored).
+- **NLP models:*
