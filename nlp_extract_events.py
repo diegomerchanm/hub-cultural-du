@@ -13,10 +13,10 @@ Arquitectura de 3 capas:
              nli-deberta-v3-small porque este último es monolingüe inglés
              (SNLI/MNLI) y fallaría con captions es/fr.
 
-  Capa 2b — Tipificación multi-label (mDeBERTa-v3-base-xnli, batcheado)
+  Capa 2b — Tipificación multi-label (multilingual-MiniLMv2, batcheado)
              Solo corre sobre los que pasaron 2a (fracción pequeña).
              Asigna tipo de evento con 12 labels culturales.
-             --light-typing permite usar el modelo ligero también aquí.
+             --high-quality activa mDeBERTa-v3 (más lento, mejor precisión).
 
 Optimizaciones CPU: batch inference en 2a/2b, truncado a 256 tokens,
 torch multi-thread, cache de embeddings de referencia en ref_embeddings.npz.
@@ -619,7 +619,7 @@ def run_extraction(
     sim_threshold: float    = 0.82,
     dry_run: bool           = False,
     accounts: list[str]     = None,
-    light_typing: bool      = False,
+    high_quality: bool      = False,
 ):
     t_start = time.time()
     print("\n🎭 Fase 4-B — Extracción de Eventos (2 capas)")
@@ -735,7 +735,7 @@ def run_extraction(
     # ── Capa 2b — tipificación multi-label SOLO sobre positivos ──────────────
     type_map: dict = {}
     if pos_idx:
-        type_model_name = DET_MODEL if light_typing else TYPE_MODEL
+        type_model_name = TYPE_MODEL if high_quality else DET_MODEL
         print(f"  🟣 Capa 2b — tipificación ({type_model_name}) sobre {len(pos_idx)} posts...")
         t0 = time.time()
         from transformers import pipeline as hf_pipeline
@@ -1004,9 +1004,9 @@ def main(
         None, "--accounts",
         help="Cuentas a procesar separadas por coma, e.g. dichaparis,ivan_argote. Sin filtro = todas.",
     ),
-    light_typing: bool = typer.Option(
-        False, "--light-typing",
-        help="Usar el modelo ligero (MiniLMv2-L6) también en Capa 2b. Más rápido, algo menos preciso.",
+    high_quality: bool = typer.Option(
+        False, "--high-quality",
+        help="Usar mDeBERTa-v3-base en Capa 2b. Más preciso, más lento. Por defecto se usa MiniLMv2-L6.",
     ),
 ):
     """
@@ -1016,7 +1016,8 @@ def main(
     máxima contra 100 frases de referencia (--threshold).
 
     Capa 2a: NLI multilingüe ligero batcheado — detección binaria (--layer2-threshold).
-    Capa 2b: mDeBERTa-XNLI multi-label — tipificación solo sobre positivos.
+    Capa 2b: MiniLMv2-L6 multi-label — tipificación solo sobre positivos.
+             Usar --high-quality para activar mDeBERTa-v3-base (más lento).
 
     eventScore = (layer2_score × 0.6 + hotness_norm × 0.4) × political_penalty
     """
@@ -1034,7 +1035,7 @@ def main(
         sim_threshold=sim_threshold,
         dry_run=dry_run,
         accounts=accounts_list,
-        light_typing=light_typing,
+        high_quality=high_quality,
     )
 
     driver.close()
