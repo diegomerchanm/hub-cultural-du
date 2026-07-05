@@ -48,6 +48,11 @@ C = {
     "panel_border": "#e7e2d8",
 }
 
+REL_COLORS = {
+    "MENTIONS":  "#2f5aa8",
+    "TAGS_USER": "#e0b02e",
+}
+
 EVENT_COLORS = {
     "musical": "#2f5aa8",
     "visual": "#c49a2c",
@@ -98,8 +103,9 @@ def fetch_data():
         with driver.session() as s:
             events = _run(s, """
                 MATCH (e:Event)
+                WHERE NOT 'Rejected' IN labels(e)
                 OPTIONAL MATCH (a:Account)-[:PARTICIPATED_IN|ORGANIZED]->(e)
-                RETURN e.id AS id, e.title AS title, e.eventType AS eventType,
+                RETURN e.id AS id, e.title AS title, e.category AS eventType,
                        e.eventDate AS eventDate, e.locationName AS locationName,
                        e.hotnessScore AS hotnessScore,
                        collect(DISTINCT a.username)[0..5] AS accounts
@@ -107,18 +113,24 @@ def fetch_data():
                 LIMIT 20
             """)
             network = _run(s, """
-                MATCH (e:Event)
-                OPTIONAL MATCH (a:Account)-[:PARTICIPATED_IN|ORGANIZED|SUPPORTED]->(e)
-                RETURN e.id AS eid, e.title AS etitle, e.eventType AS etype,
-                       collect(DISTINCT a.username)[0..8] AS accounts
-                LIMIT 12
+                MATCH (a:Account)-[:PUBLISHED]->(p:Post)-[r:MENTIONS|TAGS_USER]->(b:Account)
+                WHERE a <> b
+                WITH a, b, type(r) AS relType, count(*) AS weight
+                RETURN a.username AS source,
+                       coalesce(a.culturalRelevanceScore, 0.0) AS sourceScore,
+                       b.username AS target,
+                       coalesce(b.culturalRelevanceScore, 0.0) AS targetScore,
+                       relType, weight
+                ORDER BY weight DESC
+                LIMIT 100
             """)
             locations = _run(s, """
                 MATCH (l:Location)
                 WHERE l.lat IS NOT NULL AND l.lon IS NOT NULL
                 OPTIONAL MATCH (l)<-[:LOCATED_AT]-(p:Post)-[:MENTIONS_EVENT]->(e:Event)
+                WHERE NOT 'Rejected' IN labels(e)
                 RETURN l.name AS name, l.lat AS lat, l.lon AS lon,
-                       e.eventType AS eventType
+                       e.category AS eventType
                 LIMIT 50
             """)
             top_accounts = _run(s, """
@@ -126,7 +138,7 @@ def fetch_data():
                 WHERE a.followersCount IS NOT NULL
                 RETURN a.username AS username, a.followersCount AS followers,
                        a.culturalRelevanceScore AS score
-                ORDER BY coalesce(a.culturalRelevanceScore, 0) DESC
+                ORDER BY a.followersCount DESC
                 LIMIT 10
             """)
             top_hashtags = _run(s, """
@@ -136,10 +148,10 @@ def fetch_data():
                 LIMIT 10
             """)
             stats = {
-                "accounts": _run(s, "MATCH (a:Account) RETURN count(a) AS n")[0]["n"],
-                "posts": _run(s, "MATCH (p:Post) RETURN count(p) AS n")[0]["n"],
-                "events": _run(s, "MATCH (e:Event) RETURN count(e) AS n")[0]["n"],
-                "hashtags": _run(s, "MATCH (h:Hashtag) RETURN count(h) AS n")[0]["n"],
+                "accounts":  _run(s, "MATCH (a:Account) RETURN count(a) AS n")[0]["n"],
+                "posts":     _run(s, "MATCH (p:Post) RETURN count(p) AS n")[0]["n"],
+                "events":    _run(s, "MATCH (e:Event) WHERE NOT 'Rejected' IN labels(e) RETURN count(e) AS n")[0]["n"],
+                "hashtags":  _run(s, "MATCH (h:Hashtag) RETURN count(h) AS n")[0]["n"],
             }
             return {
                 "events": [dict(r) for r in events],
@@ -350,129 +362,125 @@ def build_events_section():
     ], style={"marginBottom": "36px"})
 
 
-def build_cytoscape_elements(active_filter=None):
-    network = DATA["network"]
+def build_cytoscape_elements():
+    edges   = DATA["network"]
     elements = []
-    seen_accounts = set()
+    seen_nodes: dict = {}   # username → max score seen
 
-    for row in network:
-        eid = row.get("eid") or ""
-        etitle = (row.get("etitle") or "")[:40]
-        etype = row.get("etype") or "cultural"
-        accounts = row.get("accounts") or []
-        color = event_color(etype)
+    for row in edges:
+        src = row.get("source")
+        tgt = row.get("target")
+        if not src or not tgt:
+            continue
+        seen_nodes[src] = max(seen_nodes.get(src, 0.0), float(row.get("sourceScore") or 0.0))
+        seen_nodes[tgt] = max(seen_nodes.get(tgt, 0.0), float(row.get("targetScore") or 0.0))
 
+    for username, score in seen_nodes.items():
+        # Node size: 24px base + up to 24px extra from percentile score
+        size = 24 + int(score * 24)
         elements.append({"data": {
-            "id": f"e_{eid}", "label": etitle, "type": "event",
-            "eventType": etype, "color": color,
+            "id":    f"a_{username}",
+            "label": f"@{username}",
+            "type":  "account",
+            "score": round(score, 3),
+            "size":  size,
         }})
 
-        for username in accounts:
-            if not username:
-                continue
-            if username not in seen_accounts:
-                seen_accounts.add(username)
-                elements.append({"data": {
-                    "id": f"a_{username}", "label": f"@{username}",
-                    "type": "account", "color": color,
-                }})
-            elements.append({"data": {
-                "source": f"a_{username}", "target": f"e_{eid}",
-                "eventType": etype, "color": color,
-            }})
+    for row in edges:
+        src = row.get("source")
+        tgt = row.get("target")
+        rel = row.get("relType") or "MENTIONS"
+        wt  = int(row.get("weight") or 1)
+        if not src or not tgt:
+            continue
+        elements.append({"data": {
+            "source":  f"a_{src}",
+            "target":  f"a_{tgt}",
+            "relType": rel,
+            "weight":  wt,
+            "color":   REL_COLORS.get(rel, C["sub"]),
+            "width":   min(1 + wt * 0.4, 6),
+        }})
 
     return elements
 
 
+_ACCOUNT_NODE_STYLE = {
+    "shape": "ellipse",
+    "width":  "data(size)",
+    "height": "data(size)",
+    "label":  "data(label)",
+    "background-color": "#ffffff",
+    "border-width": "2px",
+    "border-color": C["blue"],
+    "color": C["text"],
+    "font-size": "8px",
+    "font-family": FONT_MONO,
+    "text-valign": "bottom",
+    "text-halign": "center",
+    "text-margin-y": "4px",
+}
+
+_EDGE_STYLE = {
+    "line-color":   "data(color)",
+    "width":        "data(width)",
+    "opacity":      0.55,
+    "curve-style":  "bezier",
+    "target-arrow-shape": "triangle",
+    "target-arrow-color": "data(color)",
+    "arrow-scale":  0.7,
+}
+
+BASE_STYLESHEET = [
+    {"selector": "node[type='account']", "style": _ACCOUNT_NODE_STYLE},
+    {"selector": "edge",                 "style": _EDGE_STYLE},
+]
+
+
 def build_network_panel():
-    elements = build_cytoscape_elements()
-    present_types = sorted({
-        r.get("etype") or "cultural"
-        for r in DATA["network"] if r.get("etype")
-    })
+    elements   = build_cytoscape_elements()
+    rel_types  = sorted({r.get("relType") for r in DATA["network"] if r.get("relType")})
 
     chip_bar = html.Div(
         [html.Button(
-            etype, id={"type": "chip", "index": etype},
+            rel, id={"type": "chip", "index": rel},
             n_clicks=0,
             style={
                 "fontFamily": FONT_MONO, "fontSize": "11px",
                 "padding": "4px 12px", "borderRadius": "20px",
-                "border": f"1px solid {event_color(etype)}",
-                "background": event_color(etype) + "22",
+                "border": f"1px solid {REL_COLORS.get(rel, C['sub'])}",
+                "background": REL_COLORS.get(rel, C["sub"]) + "22",
                 "color": C["text"], "cursor": "pointer",
                 "marginRight": "6px", "marginBottom": "6px",
             },
-        ) for etype in present_types],
+        ) for rel in rel_types],
         style={"marginBottom": "12px", "display": "flex", "flexWrap": "wrap"},
     )
 
     cytoscape = cyto.Cytoscape(
         id="cyto-graph",
         elements=elements,
-        layout={"name": "cose", "animate": False, "nodeRepulsion": 6000},
+        layout={"name": "cose", "animate": False, "nodeRepulsion": 8000,
+                "idealEdgeLength": 80, "gravity": 0.25},
         style={"width": "100%", "height": "380px", "borderRadius": "12px",
                "background": C["panel_bg"]},
-        stylesheet=[
-            {
-                "selector": "node[type='event']",
-                "style": {
-                    "shape": "round-rectangle",
-                    "width": "60px", "height": "28px",
-                    "label": "data(label)",
-                    "background-color": "data(color)",
-                    "color": "#ffffff",
-                    "font-size": "9px",
-                    "font-family": FONT_MONO,
-                    "text-valign": "center",
-                    "text-halign": "center",
-                    "text-wrap": "wrap",
-                    "text-max-width": "55px",
-                },
-            },
-            {
-                "selector": "node[type='account']",
-                "style": {
-                    "shape": "ellipse",
-                    "width": "36px", "height": "36px",
-                    "label": "data(label)",
-                    "background-color": "#ffffff",
-                    "border-width": "2px",
-                    "border-color": "data(color)",
-                    "color": C["text"],
-                    "font-size": "8px",
-                    "font-family": FONT_MONO,
-                    "text-valign": "bottom",
-                    "text-halign": "center",
-                    "text-margin-y": "4px",
-                },
-            },
-            {
-                "selector": "edge",
-                "style": {
-                    "line-color": "data(color)",
-                    "opacity": 0.6,
-                    "width": 1.5,
-                    "curve-style": "bezier",
-                },
-            },
-        ],
+        stylesheet=BASE_STYLESHEET,
     )
 
     legend = html.Div(
         [html.Span([
             html.Span(style={
-                "display": "inline-block", "width": "10px", "height": "10px",
-                "borderRadius": "3px", "background": event_color(et),
-                "marginRight": "4px", "verticalAlign": "middle",
+                "display": "inline-block", "width": "28px", "height": "3px",
+                "background": REL_COLORS.get(rel, C["sub"]),
+                "marginRight": "5px", "verticalAlign": "middle",
             }),
-            html.Span(et, style={"fontFamily": FONT_MONO, "fontSize": "10px", "color": C["sub"]}),
-        ], style={"marginRight": "12px"}) for et in present_types],
+            html.Span(rel, style={"fontFamily": FONT_MONO, "fontSize": "10px", "color": C["sub"]}),
+        ], style={"marginRight": "18px"}) for rel in rel_types],
         style={"marginTop": "10px", "display": "flex", "flexWrap": "wrap"},
     )
 
     return html.Div([
-        html.H3("Red de actores", style={
+        html.H3("Red de cuentas (MENTIONS · TAGS_USER)", style={
             "fontFamily": FONT_SERIF, "fontSize": "16px", "color": C["text"],
             "margin": "0 0 12px 0",
         }),
@@ -696,7 +704,6 @@ def filter_graph(n_clicks_list, current_filter, chip_ids):
     if not ctx.triggered:
         return dash.no_update, dash.no_update
 
-    # Identify which chip was clicked
     triggered_id = ctx.triggered[0]["prop_id"]
     clicked_type = None
     for chip_id, n in zip(chip_ids, n_clicks_list):
@@ -705,120 +712,47 @@ def filter_graph(n_clicks_list, current_filter, chip_ids):
             clicked_type = id_str
             break
 
-    # Toggle: clicking active filter deactivates it
+    # Toggle: clicking the active filter resets it
     new_filter = None if clicked_type == current_filter else clicked_type
 
     if new_filter is None:
-        # Reset — all elements full opacity
-        stylesheet = [
-            {
-                "selector": "node[type='event']",
-                "style": {
-                    "shape": "round-rectangle",
-                    "width": "60px", "height": "28px",
-                    "label": "data(label)",
-                    "background-color": "data(color)",
-                    "color": "#ffffff",
-                    "font-size": "9px",
-                    "font-family": FONT_MONO,
-                    "text-valign": "center",
-                    "text-halign": "center",
-                    "text-wrap": "wrap",
-                    "text-max-width": "55px",
-                    "opacity": 1,
-                },
-            },
-            {
-                "selector": "node[type='account']",
-                "style": {
-                    "shape": "ellipse",
-                    "width": "36px", "height": "36px",
-                    "label": "data(label)",
-                    "background-color": "#ffffff",
-                    "border-width": "2px",
-                    "border-color": "data(color)",
-                    "color": C["text"],
-                    "font-size": "8px",
-                    "font-family": FONT_MONO,
-                    "text-valign": "bottom",
-                    "text-halign": "center",
-                    "text-margin-y": "4px",
-                    "opacity": 1,
-                },
-            },
-            {
-                "selector": "edge",
-                "style": {
-                    "line-color": "data(color)",
-                    "opacity": 0.6,
-                    "width": 1.5,
-                    "curve-style": "bezier",
-                },
-            },
-        ]
+        stylesheet = BASE_STYLESHEET
     else:
-        # Dim non-matching nodes and edges
+        highlight_color = REL_COLORS.get(new_filter, C["sub"])
         stylesheet = [
-            {
-                "selector": "node[type='event']",
-                "style": {
-                    "shape": "round-rectangle",
-                    "width": "60px", "height": "28px",
-                    "label": "data(label)",
-                    "background-color": "data(color)",
-                    "color": "#ffffff",
-                    "font-size": "9px",
-                    "font-family": FONT_MONO,
-                    "text-valign": "center",
-                    "text-halign": "center",
-                    "text-wrap": "wrap",
-                    "text-max-width": "55px",
-                    "opacity": 0.15,
-                },
-            },
-            {
-                "selector": "node[type='account']",
-                "style": {
-                    "shape": "ellipse",
-                    "width": "36px", "height": "36px",
-                    "label": "data(label)",
-                    "background-color": "#ffffff",
-                    "border-width": "2px",
-                    "border-color": "data(color)",
-                    "color": C["text"],
-                    "font-size": "8px",
-                    "font-family": FONT_MONO,
-                    "text-valign": "bottom",
-                    "text-halign": "center",
-                    "text-margin-y": "4px",
-                    "opacity": 0.15,
-                },
-            },
-            {
-                "selector": "edge",
-                "style": {
-                    "line-color": "data(color)",
-                    "opacity": 0.1,
-                    "width": 1.5,
-                    "curve-style": "bezier",
-                },
-            },
-            # Highlight matching event nodes
-            {
-                "selector": f"node[type='event'][eventType='{new_filter}']",
-                "style": {"opacity": 1},
-            },
-            # Highlight edges attached to matching events
-            {
-                "selector": f"edge[eventType='{new_filter}']",
-                "style": {"opacity": 0.8, "width": 2},
-            },
-            # Highlight account nodes connected to matching events (via edge eventType)
-            {
-                "selector": f"node[type='account']",
-                "style": {},  # handled by edge-based selection above
-            },
+            # All nodes dim by default
+            {"selector": "node[type='account']",
+             "style": {**_ACCOUNT_NODE_STYLE, "opacity": 0.15}},
+            # All edges dim by default
+            {"selector": "edge",
+             "style": {**_EDGE_STYLE, "opacity": 0.08}},
+            # Highlight edges of the selected relType
+            {"selector": f"edge[relType='{new_filter}']",
+             "style": {**_EDGE_STYLE, "opacity": 0.85,
+                       "line-color": highlight_color,
+                       "target-arrow-color": highlight_color,
+                       "width": 2.5}},
+            # Highlight nodes that have at least one active edge
+            # (Cytoscape CSS :selected approach — we target connected nodes via
+            #  the source/target data already in the graph; dim override lifted)
+            {"selector": f"node[type='account']:childless",
+             "style": {}},   # no-op; real lift is done server-side below
         ]
+        # Build set of node IDs touched by active-relType edges, then add
+        # per-node selectors to lift opacity only for those nodes.
+        touched = set()
+        for row in DATA["network"]:
+            if row.get("relType") == new_filter:
+                if row.get("source"):
+                    touched.add(f"a_{row['source']}")
+                if row.get("target"):
+                    touched.add(f"a_{row['target']}")
+        for node_id in touched:
+            stylesheet.append({
+                "selector": f"node[id='{node_id}']",
+                "style": {**_ACCOUNT_NODE_STYLE, "opacity": 1,
+                          "border-color": highlight_color},
+            })
 
     return stylesheet, new_filter
 
