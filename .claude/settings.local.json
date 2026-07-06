@@ -5,7 +5,19 @@
       "Bash(wc -l *.py)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(venv/Scripts/python -X utf8 load_to_neo4j.py)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(pip show:*)",
+      "Bash(ls venv/Scripts/python*)",
+      "Bash(ls .venv/Scripts/python*)",
+      "Bash(venv/Scripts/python.exe -c \"import sys; print\\(sys.executable, sys.version\\)\")",
+      "Bash(venv/Scripts/python.exe -m pip install python-igraph leidenalg)",
+      "Bash(git mv:*)",
+      "Bash(grep -rn \"extract_ig_profiles\\\\|extract_ig_posts\\\\|extract_ig_network\\\\|load_to_neo4j\\\\|run_network_analysis\\\\|nlp_enrich_nodes\\\\|nlp_extract_events\\\\|nlp_event_resolver\\\\|enrich_locations\\\\|dashboard_app\" --include=*.py --include=*.md --include=*.txt --include=*.sh .)",
+      "Bash(grep -rn \"extract_ig_profiles\\\\|extract_ig_posts\\\\|extract_ig_network\\\\|load_to_neo4j\\\\|run_network_analysis\\\\|nlp_enrich_nodes\\\\|nlp_extract_events\\\\|nlp_event_resolver\\\\|enrich_locations\\\\|dashboard_app\" --include=*.py --include=*.md .)"
     ]
   }
 }
