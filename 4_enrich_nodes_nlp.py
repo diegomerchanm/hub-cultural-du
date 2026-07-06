@@ -334,7 +334,7 @@ def main(
     """
     Fase 4-A: idioma + NER + keywords (+ embeddings opcionales).
 
-    Ejecutar ANTES de nlp_extract_events.py para pre-enriquecer captions.
+    Ejecutar ANTES de 4_enrich_events_extract.py para pre-enriquecer captions.
     """
     driver.verify_connectivity()
     print("✅ Conexión Neo4j OK\n")

@@ -33,7 +33,7 @@ flowchart TD
     APIFY --> E3
 
     %% ─── FASE 2 — INGESTA ────────────────────────────────────────────────────
-    subgraph FASE2["Fase 2 · Ingesta Neo4j  (load_to_neo4j.py)"]
+    subgraph FASE2["Fase 2 · Ingesta Neo4j  (2_build_graph.py)"]
         direction TB
         L1["load_profile()\nMERGE :Account\nSET :Public | :Private\nMERGE :Location  ──LOCATED_AT──▶ Account"]
         L2["load_posts()\nMERGE :Post  ──PUBLISHED──▶ Account\nMERGE :Hashtag  ──HAS_HASHTAG\nMERGE :Account  ──MENTIONS / TAGS_USER / COAUTHORED_BY\nMERGE :Location ──TAGGED_AT\nMERGE :Track    ──USES_MUSIC\nMERGE :Comment  ──WROTE / ON"]
@@ -73,7 +73,7 @@ flowchart TD
     G5 -. "SET en :Account" .-> N_ACC
 
     %% ─── FASE 4-A — ENRIQUECIMIENTO NLP ──────────────────────────────────────
-    subgraph FASE4A["Fase 4-A · NLP Enrichment  (nlp_enrich_nodes.py)"]
+    subgraph FASE4A["Fase 4-A · NLP Enrichment  (4_enrich_nodes_nlp.py)"]
         direction TB
         A1["detect_lang()  [langdetect]\n→ bioLanguage / captionLanguage"]
         A2["extract_features()  [spaCy ES/EN/FR]\n→ bioEntities / captionEntities\n→ bioKeywords / captionKeywords"]
@@ -86,7 +86,7 @@ flowchart TD
     A3 -. "SET en :Account\n    en :Post" .-> N_POST
 
     %% ─── FASE 4-B — EXTRACCIÓN DE EVENTOS ────────────────────────────────────
-    subgraph FASE4B["Fase 4-B · Event Extraction  (nlp_extract_events.py)"]
+    subgraph FASE4B["Fase 4-B · Event Extraction  (4_enrich_events_extract.py)"]
         direction TB
         B1["zero-shot  [cross-encoder/nli-MiniLM2-L6-H768]\n12 etiquetas culturales → tipo de evento + confianza"]
         B2["extract_ner()  [spaCy]\n→ DATE, LOC/GPE/FAC, ORG"]
@@ -104,7 +104,7 @@ flowchart TD
     end
 
     %% ─── FASE 4-C — DEDUPLICACIÓN ────────────────────────────────────────────
-    subgraph FASE4C["Fase 4-C · Event Resolver  (nlp_event_resolver.py)"]
+    subgraph FASE4C["Fase 4-C · Event Resolver  (4_enrich_events_resolve.py)"]
         direction TB
         C1["load_all_events()\ncargar :Event con embedding"]
         C2["Agrupar por locationName"]
@@ -117,7 +117,7 @@ flowchart TD
     C4 -. "elimina duplicados\nenriquece canónico" .-> NEO4J_EV
 
     %% ─── FASE 5 — GEOCODIFICACIÓN ────────────────────────────────────────────
-    subgraph FASE5["Fase 5 · Geo Enrichment  (enrich_locations.py)"]
+    subgraph FASE5["Fase 5 · Geo Enrichment  (4_enrich_locations.py)"]
         direction TB
         GEO1["geocode_location()  [Nominatim 1.1s/req]\nhasta 3 queries por Location\n→ lat, lon, city, country, arrondissement"]
         GEO2["write_location_geo()\nSET lat/lon/city/country/quartier/arrondissement"]

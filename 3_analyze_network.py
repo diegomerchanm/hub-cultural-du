@@ -17,10 +17,10 @@ Red MULTIPLEX — dos capas tratadas por separado:
                   social observado — se analiza aparte, no se mezcla).
 
 Uso (cada paso es independiente — `analyze` funciona OFFLINE desde CSV):
-  python run_network_analysis.py export      # Neo4j → data_processed/*.csv
-  python run_network_analysis.py analyze     # CSV → métricas → CSV
-  python run_network_analysis.py writeback   # métricas → Neo4j (UNWIND batch)
-  python run_network_analysis.py run-all     # los tres pasos en orden
+  python 3_analyze_network.py export      # Neo4j → data_processed/*.csv
+  python 3_analyze_network.py analyze     # CSV → métricas → CSV
+  python 3_analyze_network.py writeback   # métricas → Neo4j (UNWIND batch)
+  python 3_analyze_network.py run-all     # los tres pasos en orden
 
 Métricas por capa:
   PageRank exacto · Betweenness exacto (igraph, C) · Leiden multi-resolución

@@ -1,5 +1,5 @@
 """
-dashboard_app.py — Hub Cultural DU
+5_visualize_dashboard.py — Hub Cultural DU
 Cultural dashboard for the Colombian diaspora in Paris.
 Reads live data from Neo4j; falls back to empty/placeholder state if unavailable.
 """
