@@ -1,0 +1,32 @@
+{
+  "excluded": [
+    "Financial service", "Product/service", "Tour Agency",
+    "None,Real Estate Agent", "Politician",
+    "None,Consulate & Embassy", "None,Government organization",
+    "None,Government Website", "Government Agencies",
+    "None,Product/service"
+  ],
+  "secondary": [
+    "Language School", "None,Language School",
+    "None,Education", "None,College & university",
+    "Non-Profits & Religious Organizations",
+    "Non-Governmental Organization (NGO)",
+    "None,Non-Governmental Organization (NGO)",
+    "None,Organization", "None,Government Website",
+    "Government Agencies", "None,Consulate & Embassy"
+  ],
+  "primary": [
+    "Artist", "None,Artist", "None,Musician",
+    "Digital creator", "Restaurant", "Community",
+    "None,Community", "None,Event", "None,Art",
+    "None,Art Gallery", "Journalist", "Podcast",
+    "Public figure", "Entrepreneur", "None,Local business",
+    "None,Entrepreneur"
+  ],
+  "manual_overrides": {
+    "consuladocolparis": "secondary",
+    "latitud4podcast": "primary",
+    "morcharpentier": "primary",
+    "paisaenfrancia": "primary"
+  }
+}

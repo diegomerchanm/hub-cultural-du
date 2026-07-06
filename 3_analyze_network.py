@@ -33,6 +33,7 @@ sobreescribible con data_processed/actor_types.csv (columnas:
 username,actor_type) para la tipología curada ex ante de la mémoire.
 """
 
+import json
 import math
 import os
 import re
@@ -53,8 +54,9 @@ LAYERS       = {
     "social":      {"edges_csv": "edges_social.csv",      "suffix": ""},
     "algorithmic": {"edges_csv": "edges_algorithmic.csv", "suffix": "Algo"},
 }
-NODES_CSV    = "nodes.csv"
+NODES_CSV       = "nodes.csv"
 ACTOR_TYPES_CSV = "actor_types.csv"   # override manual opcional
+TIERS_CONFIG    = Path("config/account_tiers.json")
 
 # Heurística provisional de tipología de actores (curar en actor_types.csv)
 ACTOR_RULES = [
@@ -97,15 +99,18 @@ def export():
         print("\n📤 Exportando nodos...")
         nodes = session.run("""
             MATCH (a:Account)
-            RETURN a.username                     AS username,
-                   coalesce(a.fullName, '')       AS fullName,
-                   coalesce(a.followersCount, 0)  AS followers,
-                   (a:Political)                  AS political,
-                   (a:Public)                     AS public,
-                   coalesce(a.politicalScore, 0)  AS politicalScore
+            RETURN a.username                       AS username,
+                   coalesce(a.fullName, '')         AS fullName,
+                   coalesce(a.followersCount, 0)    AS followers,
+                   (a:Political)                    AS political,
+                   (a:Public)                       AS public,
+                   coalesce(a.politicalScore, 0)    AS politicalScore,
+                   a.businessCategory               AS businessCategory
         """).data()
-        pd.DataFrame(nodes).to_csv(OUT_DIR / NODES_CSV, index=False)
-        print(f"  ✅ {len(nodes):,} nodos → {OUT_DIR / NODES_CSV}")
+        nodes_df = pd.DataFrame(nodes)
+        nodes_df["tier"] = assign_tiers(nodes_df)
+        nodes_df.to_csv(OUT_DIR / NODES_CSV, index=False)
+        print(f"  ✅ {len(nodes_df):,} nodos → {OUT_DIR / NODES_CSV}")
 
         # Capa social: proyección Account→Account vía posts/IGTV del autor.
         print("\n📤 Exportando capa SOCIAL (autor→post→target)...")
@@ -154,6 +159,48 @@ def assign_actor_types(nodes_df: pd.DataFrame) -> pd.Series:
         return DEFAULT_ACTOR
 
     return nodes_df.apply(classify, axis=1)
+
+
+def assign_tiers(nodes_df: pd.DataFrame) -> pd.Series:
+    """Asigna tier (primary/secondary/excluded/unknown) basándose en businessCategory.
+
+    Orden de prioridad:
+      1. manual_overrides (por username)
+      2. excluded list  → "excluded"
+      3. primary list   → "primary"
+      4. secondary list → "secondary"
+      5. resto          → "unknown"
+    """
+    if not TIERS_CONFIG.exists():
+        print(f"  ⚠️  {TIERS_CONFIG} no encontrado — tier='unknown' para todos")
+        return pd.Series("unknown", index=nodes_df.index)
+
+    with open(TIERS_CONFIG, encoding="utf-8") as fh:
+        cfg = json.load(fh)
+
+    overrides  = cfg.get("manual_overrides", {})
+    excluded   = set(cfg.get("excluded",  []))
+    primary    = set(cfg.get("primary",   []))
+    secondary  = set(cfg.get("secondary", []))
+
+    def classify(row):
+        if row["username"] in overrides:
+            return overrides[row["username"]]
+        cat = row.get("businessCategory") or ""
+        if not cat or cat == "None":
+            return "unknown"
+        if cat in excluded:
+            return "excluded"
+        if cat in primary:
+            return "primary"
+        if cat in secondary:
+            return "secondary"
+        return "unknown"
+
+    result = nodes_df.apply(classify, axis=1)
+    dist   = result.value_counts().to_dict()
+    print("  🏷️  Tiers: " + ", ".join(f"{k}={v}" for k, v in sorted(dist.items())))
+    return result
 
 
 def build_igraph(edges_df: pd.DataFrame, directed: bool = True):
@@ -323,21 +370,55 @@ def analyze():
     if not nodes_path.exists():
         raise typer.Exit(f"Falta {nodes_path} — corre primero `export`.")
 
-    nodes_df = pd.read_csv(nodes_path).fillna({"fullName": ""})
+    nodes_df = pd.read_csv(nodes_path).fillna({"fullName": "", "businessCategory": ""})
     nodes_df["actorType"] = assign_actor_types(nodes_df)
     dist = nodes_df["actorType"].value_counts()
     print("  👥 Tipos de actor:", ", ".join(f"{k}={v}" for k, v in dist.items()))
+
+    # Si nodes.csv tiene columna tier (exportado con la nueva versión), la usa;
+    # si no (CSV legacy), la recalcula desde businessCategory.
+    if "tier" not in nodes_df.columns:
+        nodes_df["tier"] = assign_tiers(nodes_df)
+
+    # Subconjuntos por tier
+    active_tiers  = {"primary", "secondary"}
+    nodes_active  = nodes_df[nodes_df["tier"].isin(active_tiers) | (nodes_df["tier"] == "unknown")]
+    nodes_primary = nodes_df[nodes_df["tier"] == "primary"]
+
+    tier_dist = nodes_df["tier"].value_counts().to_dict()
+    print("  🏷️  Tiers en nodes.csv:", ", ".join(f"{k}={v}" for k, v in sorted(tier_dist.items())))
+    print(f"  🔵 Nodos para análisis principal (primary+secondary+unknown): {len(nodes_active):,}")
+    print(f"  🟡 Nodos para análisis primario: {len(nodes_primary):,}")
 
     for layer, cfg in LAYERS.items():
         edges_path = OUT_DIR / cfg["edges_csv"]
         if not edges_path.exists():
             print(f"  ⚠️  {edges_path} no existe — capa '{layer}' omitida.")
             continue
-        df = analyze_layer(layer, pd.read_csv(edges_path), nodes_df)
+        edges_df = pd.read_csv(edges_path)
+
+        # Análisis principal: primary + secondary + unknown (excluye excluded)
+        active_users = set(nodes_active["username"])
+        edges_active = edges_df[
+            edges_df["source"].isin(active_users) & edges_df["target"].isin(active_users)
+        ]
+        df = analyze_layer(layer, edges_active, nodes_active)
         if not df.empty:
             out = OUT_DIR / f"metrics_{layer}.csv"
             df.to_csv(out, index=False)
-            print(f"\n  💾 Métricas → {out}")
+            print(f"\n  💾 Métricas (principal) → {out}")
+
+        # Análisis primario: solo tier primary
+        if not nodes_primary.empty:
+            primary_users = set(nodes_primary["username"])
+            edges_primary = edges_df[
+                edges_df["source"].isin(primary_users) & edges_df["target"].isin(primary_users)
+            ]
+            df_p = analyze_layer(layer, edges_primary, nodes_primary)
+            if not df_p.empty:
+                out_p = OUT_DIR / f"metrics_{layer}_primary.csv"
+                df_p.to_csv(out_p, index=False)
+                print(f"  💾 Métricas (primary) → {out_p}")
 
     print("\n✅ Análisis completo. `writeback` para subir a Neo4j cuando haya red.")
 
