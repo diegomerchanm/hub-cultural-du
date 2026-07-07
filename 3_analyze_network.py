@@ -37,7 +37,9 @@ import json
 import math
 import os
 import re
+import shutil
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -317,8 +319,15 @@ def analyze_layer(layer: str, edges_df: pd.DataFrame, nodes_df: pd.DataFrame) ->
     print("  🔀 Participation coefficient (γ=1.0)...")
     part_coef = participation_coefficient(g_und, leiden_cols[1.0])
 
+    meta = nodes_df.set_index("username")
+
+    # tier como grouping principal (reemplaza actorType en E-I y top-10)
+    tiers = [meta["tier"].get(u, "unknown") if "tier" in meta.columns
+             else DEFAULT_ACTOR for u in g.vs["name"]]
+
     df = pd.DataFrame({
         "username":       g.vs["name"],
+        "tier":           tiers,
         "pageRank":       pagerank,
         "betweenness":    betweenness,
         "wccId":          wcc_id,
@@ -327,25 +336,18 @@ def analyze_layer(layer: str, edges_df: pd.DataFrame, nodes_df: pd.DataFrame) ->
         **{f"leidenG{str(gm).replace('.', '')}": leiden_cols[gm] for gm in GAMMAS},
     })
 
-    # E-I Index por tipo de actor y por comunidad (γ=1.0)
-    meta = nodes_df.set_index("username")
-    actor_types = [
-        meta["actorType"].get(u, DEFAULT_ACTOR) for u in g.vs["name"]
-    ]
-    df["actorType"] = actor_types
+    ei_global_tier, ei_by_tier = ei_index(g_und, tiers)
+    ei_global_comm, ei_by_comm = ei_index(g_und, leiden_cols[1.0])
 
-    ei_global_actor, ei_by_actor = ei_index(g_und, actor_types)
-    ei_global_comm, ei_by_comm   = ei_index(g_und, leiden_cols[1.0])
-
-    print(f"\n  🌐 E-I Index ({layer}) por TIPO DE ACTOR — global: {ei_global_actor:+.4f}")
-    for grp, val in sorted(ei_by_actor.items(), key=lambda x: x[1]):
-        n_grp = actor_types.count(grp)
+    print(f"\n  🌐 E-I Index ({layer}) por TIER — global: {ei_global_tier:+.4f}")
+    for grp, val in sorted(ei_by_tier.items(), key=lambda x: x[1]):
+        n_grp = tiers.count(grp)
         print(f"     {grp:<24} {val:+.4f}  (n={n_grp})")
     print(f"  🌐 E-I Index ({layer}) por COMUNIDAD γ=1.0 — global: {ei_global_comm:+.4f}")
 
     ei_rows = (
-        [{"layer": layer, "grouping": "actorType", "group": g_, "ei": v,
-          "ei_global": ei_global_actor} for g_, v in ei_by_actor.items()]
+        [{"layer": layer, "grouping": "tier", "group": g_, "ei": v,
+          "ei_global": ei_global_tier} for g_, v in ei_by_tier.items()]
         + [{"layer": layer, "grouping": "leidenG10", "group": g_, "ei": v,
             "ei_global": ei_global_comm} for g_, v in ei_by_comm.items()]
     )
@@ -354,18 +356,28 @@ def analyze_layer(layer: str, edges_df: pd.DataFrame, nodes_df: pd.DataFrame) ->
     # Top-10 conectores: participation alto + betweenness alto
     top = df.sort_values(["participation", "betweenness"], ascending=False).head(10)
     print(f"\n  🏆 Top 10 conectores entre comunidades ({layer}):")
-    print(f"  {'Username':<32} {'P':>6} {'Betw.':>10} {'kCore':>6} {'Tipo':<22}")
+    print(f"  {'Username':<32} {'P':>6} {'Betw.':>10} {'kCore':>6} {'Tier':<12}")
     for _, r in top.iterrows():
         print(f"  @{r['username']:<31} {r['participation']:>6.3f} "
-              f"{r['betweenness']:>10.1f} {r['kCore']:>6} {r['actorType']:<22}")
+              f"{r['betweenness']:>10.1f} {r['kCore']:>6} {r['tier']:<12}")
 
     return df
 
 
 # ── 3. ANALYZE ────────────────────────────────────────────────────────────────
 @app.command()
-def analyze():
-    """Corre todas las métricas por capa desde los CSV (100% offline)."""
+def analyze(
+    run_label: str = typer.Option(
+        "", "--run-label",
+        help="Etiqueta opcional para el directorio del run histórico "
+             "(e.g. 'baseline'). Se guarda en data_processed/runs/YYYYMMDD_HHMMSS_<label>/.",
+    ),
+):
+    """Corre todas las métricas por capa desde los CSV (100% offline).
+
+    Solo analiza nodos con tier=primary o tier=secondary (excluye excluded y unknown).
+    Guarda una copia histórica en data_processed/runs/YYYYMMDD_HHMMSS[_label]/.
+    """
     nodes_path = OUT_DIR / NODES_CSV
     if not nodes_path.exists():
         raise typer.Exit(f"Falta {nodes_path} — corre primero `export`.")
@@ -375,20 +387,26 @@ def analyze():
     dist = nodes_df["actorType"].value_counts()
     print("  👥 Tipos de actor:", ", ".join(f"{k}={v}" for k, v in dist.items()))
 
-    # Si nodes.csv tiene columna tier (exportado con la nueva versión), la usa;
-    # si no (CSV legacy), la recalcula desde businessCategory.
+    # tier: columna del CSV (si existe) o recalculada desde businessCategory
     if "tier" not in nodes_df.columns:
         nodes_df["tier"] = assign_tiers(nodes_df)
 
-    # Subconjuntos por tier
-    active_tiers  = {"primary", "secondary"}
-    nodes_active  = nodes_df[nodes_df["tier"].isin(active_tiers) | (nodes_df["tier"] == "unknown")]
-    nodes_primary = nodes_df[nodes_df["tier"] == "primary"]
-
     tier_dist = nodes_df["tier"].value_counts().to_dict()
     print("  🏷️  Tiers en nodes.csv:", ", ".join(f"{k}={v}" for k, v in sorted(tier_dist.items())))
-    print(f"  🔵 Nodos para análisis principal (primary+secondary+unknown): {len(nodes_active):,}")
-    print(f"  🟡 Nodos para análisis primario: {len(nodes_primary):,}")
+
+    # ── Filtro principal: solo primary + secondary ────────────────────────────
+    nodes_df = nodes_df[nodes_df["tier"].isin({"primary", "secondary"})].copy()
+    print(f"  🔵 Nodos en análisis (primary+secondary): {len(nodes_df):,}")
+    if nodes_df.empty:
+        print("  ⚠️  Ningún nodo con tier primary/secondary — abortando.")
+        raise typer.Exit(1)
+
+    # ── Directorio del run histórico ──────────────────────────────────────────
+    ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
+    slug  = f"{ts}_{run_label}" if run_label else ts
+    run_dir = OUT_DIR / "runs" / slug
+    run_dir.mkdir(parents=True, exist_ok=True)
+    print(f"  📁 Run histórico → {run_dir}")
 
     for layer, cfg in LAYERS.items():
         edges_path = OUT_DIR / cfg["edges_csv"]
@@ -397,28 +415,29 @@ def analyze():
             continue
         edges_df = pd.read_csv(edges_path)
 
-        # Análisis principal: primary + secondary + unknown (excluye excluded)
-        active_users = set(nodes_active["username"])
-        edges_active = edges_df[
-            edges_df["source"].isin(active_users) & edges_df["target"].isin(active_users)
+        # Filtrar aristas: ambos extremos deben estar en el conjunto filtrado
+        valid_users = set(nodes_df["username"])
+        edges_df = edges_df[
+            edges_df["source"].isin(valid_users) & edges_df["target"].isin(valid_users)
         ]
-        df = analyze_layer(layer, edges_active, nodes_active)
-        if not df.empty:
-            out = OUT_DIR / f"metrics_{layer}.csv"
-            df.to_csv(out, index=False)
-            print(f"\n  💾 Métricas (principal) → {out}")
 
-        # Análisis primario: solo tier primary
-        if not nodes_primary.empty:
-            primary_users = set(nodes_primary["username"])
-            edges_primary = edges_df[
-                edges_df["source"].isin(primary_users) & edges_df["target"].isin(primary_users)
-            ]
-            df_p = analyze_layer(layer, edges_primary, nodes_primary)
-            if not df_p.empty:
-                out_p = OUT_DIR / f"metrics_{layer}_primary.csv"
-                df_p.to_csv(out_p, index=False)
-                print(f"  💾 Métricas (primary) → {out_p}")
+        df = analyze_layer(layer, edges_df, nodes_df)
+        if df.empty:
+            continue
+
+        # Guardar en OUT_DIR (última ejecución) y en el run histórico
+        out = OUT_DIR / f"metrics_{layer}.csv"
+        df.to_csv(out, index=False)
+        df.to_csv(run_dir / f"metrics_{layer}.csv", index=False)
+        print(f"\n  💾 Métricas → {out}")
+
+        # Copiar el ei_index al run histórico también
+        ei_src = OUT_DIR / f"ei_index_{layer}.csv"
+        if ei_src.exists():
+            shutil.copy(ei_src, run_dir / f"ei_index_{layer}.csv")
+
+    # Guardar nodes.csv filtrado en el run histórico para reproducibilidad
+    nodes_df.to_csv(run_dir / "nodes_filtered.csv", index=False)
 
     print("\n✅ Análisis completo. `writeback` para subir a Neo4j cuando haya red.")
 
@@ -427,7 +446,7 @@ def analyze():
 # Mapeo columna CSV → propiedad Neo4j (la capa social usa nombres base;
 # la algorítmica lleva sufijo 'Algo' para no pisarla — red multiplex).
 WRITE_PROPS = ["pageRank", "betweenness", "wccId", "kCore", "participation",
-               "leidenG05", "leidenG10", "leidenG15", "actorType"]
+               "leidenG05", "leidenG10", "leidenG15", "tier"]
 PROP_RENAME = {"pageRank": "pageRankExact", "betweenness": "betweennessExact",
                "participation": "participationCoef"}
 

@@ -5,4 +5,5 @@ data_raw/
 .apify_cost_log.json
 .geocoding_log.json
 data_processed/
+data_processed/runs/
 ref_embeddings.npz
