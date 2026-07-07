@@ -17,7 +17,12 @@ Señales:
   - businessCategoryName → tier (config/account_tiers.json) como señal directa
   - businessAddress, locationName de posts, hashtags geográficos
   - Cuentas políticas: POLITICAL_ACCOUNTS leída de run_gds_algorithms.py (DD-012)
+  - Seeds V2 (config/seeds_v2.json, DD-022): rol 'seed_source' — fuente de
+    descubrimiento de red, NO objetivo cultural. Bloque A (diplomáticas):
+    keep=False siempre. Bloque B (instituciones culturales): scores deciden.
   - Para cuentas SIN perfil scrapeado: heurísticas + embedding del username
+
+Columna `role`: seed_source | target (keep=True) | context (keep=False)
 
 Input:   data_raw/profile_*.json · data_processed/nodes.csv · config/account_tiers.json
 Output:  data_processed/account_scores.csv (+ propiedades en Neo4j con --write-neo4j)
@@ -45,6 +50,7 @@ from dotenv import load_dotenv
 DATA_RAW       = Path("data_raw")
 DATA_PROCESSED = Path("data_processed")
 TIERS_FILE     = Path("config/account_tiers.json")
+SEEDS_FILE     = Path("config/seeds_v2.json")
 OUTPUT_CSV     = DATA_PROCESSED / "account_scores.csv"
 
 MODEL_NAME       = "paraphrase-multilingual-MiniLM-L12-v2"
@@ -88,7 +94,13 @@ USERNAME_CULT_TOKENS = [
 USERNAME_LATAM_TOKENS = [
     "colombia", "colombiano", "colombiana", "latino", "latina", "latam",
     "latinoamerica", "bogota", "medellin", "cali", "barranquilla",
-    "mexico", "peru", "chile", "argentina", "venezuela", "ecuador",
+    "mexico", "mexicano", "peru", "peruano", "chile", "chileno",
+    "argentina", "argentino", "venezuela", "venezolano",
+    "ecuador", "ecuatoriano", "brasil", "brazil", "brasileiro", "brasileira",
+    "cuba", "cubano", "cubana", "uruguay", "uruguayo", "panama",
+    "guatemala", "honduras", "dominicana", "dominicano", "quisqueya",
+    "bolivia", "boliviano", "costarica", "tico", "salvador", "nicaragua",
+    "paraguay", "caribe", "andino", "sudamerica", "suramerica",
 ]
 USERNAME_NEG_TOKENS = [
     "invest", "inmobiliaria", "immobilier", "realestate", "finance",
@@ -125,6 +137,10 @@ GEO_REFERENCES = [
     "au cœur de Paris", "dans le Marais", "sur les bords de la Seine",
     "rendez-vous à Belleville", "métro, boulot, salsa à Paris",
     "la diáspora colombiana en la región parisina",
+    # — pan-latino / portugués (seeds V2, DD-022)
+    "moro em Paris", "brasileiros na França", "vivendo na França",
+    "latinos na cidade luz", "mexicanos en Francia", "peruanos en París",
+    "argentinos en Francia", "la comunidad latina del hexágono",
 ]
 
 CULTURAL_REFERENCES = [
@@ -159,6 +175,14 @@ CULTURAL_REFERENCES = [
     "memoria e identidad migrante", "raíces afrocolombianas",
     "patrimonio cultural inmaterial", "lenguas y saberes indígenas",
     "el folclor colombiano viaja por el mundo",
+    # — pan-latino / portugués (seeds V2, DD-022)
+    "roda de samba e forró", "feijoada da comunidade brasileira",
+    "festa junina em Paris", "capoeira e cultura afro-brasileira",
+    "noche de mariachi y ranchera", "altar de día de muertos",
+    "ceviche y pisco, sabores del Perú", "peña folclórica andina",
+    "son cubano y rumba en vivo", "asado argentino entre amigos",
+    "carnaval latinoamericano en las calles", "candombe y murga uruguaya",
+    "cine mexicano contemporáneo", "literatura latinoamericana en traducción",
 ]
 
 # Anti-embeddings — el concepto de lo que NO queremos.
@@ -264,6 +288,23 @@ def load_political_accounts() -> set:
     return set()
 
 
+def load_seeds() -> dict:
+    """
+    handle → {tipo, bloque} desde config/seeds_v2.json (DD-022).
+    Bloque A (diplomáticas): fuente de descubrimiento, nunca objetivo cultural.
+    Bloque B (instituciones culturales): fuente + posible objetivo (scores deciden).
+    """
+    if not SEEDS_FILE.exists():
+        return {}
+    try:
+        with open(SEEDS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return {s["handle"]: s for s in data.get("seeds", []) if s.get("handle")}
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"⚠️  No se pudo leer {SEEDS_FILE}: {e}")
+        return {}
+
+
 def category_to_tier(category: Optional[str], username: str, tiers: dict) -> str:
     if username in tiers.get("manual_overrides", {}):
         return tiers["manual_overrides"][username]
@@ -358,6 +399,11 @@ class AccountClassifier:
         self.pos_refs = self._encode(CULTURAL_REFERENCES)
         self.neg_refs = self._encode(NEGATIVE_REFERENCES)
         self.political_accounts = load_political_accounts()
+        self.seeds = load_seeds()
+        if self.seeds:
+            n_a = sum(1 for s in self.seeds.values() if s.get("bloque") == "A")
+            print(f"🌱 Seeds V2: {len(self.seeds)} ({n_a} bloque A, "
+                  f"{len(self.seeds) - n_a} bloque B)")
 
     def _encode(self, texts: list) -> np.ndarray:
         emb = np.asarray(self.model.encode(texts, show_progress_bar=False))
@@ -482,6 +528,17 @@ class AccountClassifier:
             keep = False
             reasons.append("tier:excluded")
 
+        # Seeds V2 (DD-022): fuente de descubrimiento ≠ objetivo cultural.
+        # Bloque A (diplomáticas): keep=False siempre. Bloque B: scores deciden.
+        seed = self.seeds.get(username)
+        if seed:
+            if seed.get("bloque") == "A":
+                keep = False
+                reasons.append("seed_A:institucional(DD-022)")
+            else:
+                reasons.append("seed_B(DD-022)")
+        role = "seed_source" if seed else ("target" if keep else "context")
+
         return {
             "username": username,
             "geography_score": round(geography, 4),
@@ -490,6 +547,7 @@ class AccountClassifier:
             "tier": tier,
             "keep": keep,
             "reason": "; ".join(reasons),
+            "role": role,
             "has_profile": has_profile,
             "kind": "person" if is_person else "org",
         }
@@ -513,6 +571,9 @@ def diagnose(results: list):
     n_prof = sum(1 for r in results if r["has_profile"])
     print(f"\nTotal: {len(results)} cuentas · con perfil: {n_prof} · "
           f"keep=True: {n_keep} ({100 * n_keep / len(results):.1f}%)")
+    from collections import Counter
+    roles = Counter(r["role"] for r in results)
+    print("Roles: " + " · ".join(f"{k}={v}" for k, v in roles.most_common()))
 
     print("\n── 20 ejemplos aleatorios " + "─" * 50)
     for r in rng.sample(results, min(20, len(results))):
@@ -563,6 +624,7 @@ def write_neo4j(results: list, batch_size: int = 500):
         "username": r["username"],
         "geo": r["geography_score"], "cult": r["cultural_score"],
         "final": r["final_score"], "keep": r["keep"], "reason": r["reason"],
+        "role": r["role"],
     } for r in results]
     with driver.session() as session:
         for i in range(0, len(rows), batch_size):
@@ -573,7 +635,8 @@ def write_neo4j(results: list, batch_size: int = 500):
                     a.culturalScore    = row.cult,
                     a.classifierScore  = row.final,
                     a.classifierKeep   = row.keep,
-                    a.classifierReason = row.reason
+                    a.classifierReason = row.reason,
+                    a.classifierRole   = row.role
             """, rows=rows[i: i + batch_size])
     driver.close()
     print(f"✅ Scores escritos en Neo4j ({len(rows)} nodos :Account)")
@@ -634,7 +697,7 @@ def main(
     # CSV
     OUTPUT_CSV.parent.mkdir(exist_ok=True)
     fieldnames = ["username", "geography_score", "cultural_score",
-                  "final_score", "tier", "keep", "reason",
+                  "final_score", "tier", "keep", "reason", "role",
                   "has_profile", "kind"]
     with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
