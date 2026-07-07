@@ -164,10 +164,11 @@
 
 **Fecha:** Julio 2026
 **Decisión:** Tres tiers de cuentas basados en `businessCategoryName`:
-- **Primary:** Artist, Restaurant, Community, Local business, Podcast, Art Gallery, Journalist, Public figure, Digital creator, Entrepreneur — foco del análisis cultural.
-- **Secondary:** Language School, NGO, Education, University — contexto institucional sin foco prioritario.
+- **Primary:** Artist, Restaurant, Community, Local business, Podcast, Art Gallery, Journalist — foco del análisis cultural.
+- **Secondary:** Language School, NGO, Education, University, Digital creator, Public figure, Entrepreneur — contexto relevante pero no prioritario.
 - **Excluded:** Financial service, Politician, Real Estate, Tour Agency, Government — ruido o fuera de scope cultural.
 **Razón:** No todas las cuentas tienen el mismo valor para el objetivo del proyecto. Las instituciones financieras y políticas distorsionan los rankings culturales. Los tiers permiten análisis granular sin perder datos.
+**Actualización (Julio 2026):** Digital creator, Public figure y Entrepreneur se movieron de primary a secondary. Justificación: categorías ambiguas que no garantizan contenido cultural primario — pueden ser relevantes pero no prioritarias. Un "Digital creator" puede ser influencer de moda o de fitness sin ninguna vinculación cultural colombiana; un "Public figure" puede ser político o deportista.
 **Alternativa considerada:** Incluir todo sin filtro, excluir manualmente caso por caso.
 **Por qué se descartó:** Sin filtro: rankings dominados por cuentas con millones de seguidores sin relevancia cultural. Manual: no escalable.
 

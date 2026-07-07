@@ -13,15 +13,16 @@
     "Non-Governmental Organization (NGO)",
     "None,Non-Governmental Organization (NGO)",
     "None,Organization", "None,Government Website",
-    "Government Agencies", "None,Consulate & Embassy"
+    "Government Agencies", "None,Consulate & Embassy",
+    "Digital creator", "Public figure",
+    "Entrepreneur", "None,Entrepreneur"
   ],
   "primary": [
     "Artist", "None,Artist", "None,Musician",
-    "Digital creator", "Restaurant", "Community",
+    "Restaurant", "Community",
     "None,Community", "None,Event", "None,Art",
     "None,Art Gallery", "Journalist", "Podcast",
-    "Public figure", "Entrepreneur", "None,Local business",
-    "None,Entrepreneur"
+    "None,Local business"
   ],
   "manual_overrides": {
     "consuladocolparis": "secondary",
