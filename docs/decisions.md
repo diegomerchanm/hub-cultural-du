@@ -214,5 +214,62 @@
 
 ---
 
-*Última actualización: Julio 2026*
-*Próximas decisiones a documentar: SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos.*
+---
+
+## DD-022 (actualización) — Seeds V2: consulados + instituciones culturales
+
+**Fecha:** 2026-07-07
+
+Contexto: los consulados conocen sus comunidades — sus relatedProfiles y menciones son un mapa de la diáspora real. Se amplía el criterio de seeds a instituciones culturales francesas relacionadas con América Latina.
+
+Decisión: la clasificación de importancia/tier de cada cuenta NO se define aquí manualmente. Se determinará después mediante scraping de seguidores/relatedProfiles (`1_harvest_ig_profiles.py`) y el scoring del clasificador NLP (`1_harvest_account_classifier.py` — geography_score + cultural_score + anti-embeddings, DD-023). Este bloque solo fija el set inicial de seeds, no su tier final.
+
+### Bloque A — Consulados y embajadas latinoamericanas en Francia
+
+| País | Handle IG | Tipo | Confianza |
+|---|---|---|---|
+| Colombia | @consuladocolparis | Consulado | Alta |
+| Colombia | @embajadacolfra | Embajada | Alta |
+| Argentina | @arg_enfrancia | Embajada | Media-alta |
+| Brasil | @cg_brasil_paris | Consulado | Media (verificar vs @cgparisoficial) |
+| Brasil | @bresilenfrance | Embajada | Alta |
+| Chile | @embachilefrancia | Embajada | Media |
+| México | @embajadademexicoenfrancia | Embajada | Media-alta |
+| Perú | @consuladodelperuenparis | Consulado | Alta |
+| Venezuela | @embfrancia_ve | Embajada | Baja (verificar vs @embavefrancia) |
+| Ecuador | @eecufrancia | Embajada | Baja (verificar vs @embajadaecufrancia) |
+| Uruguay | @uruguayfrancia | Embajada | Alta |
+| Bolivia | — | No encontrado en IG | — |
+| Costa Rica | @costaricafrance | Embajada | Media-alta |
+| Guatemala | @embaguafr | Embajada | Alta |
+| República Dominicana | @rdenfrancia | Embajada | Alta |
+| República Dominicana | @rdenparis | Consulado | Alta |
+| Panamá | @embpanamafra | Embajada | Alta |
+| Cuba | @embacubafrancia | Embajada | Alta |
+| El Salvador | — | No encontrado en IG | — |
+| Honduras | @embajadadehondurasenfrancia | Embajada | Media-alta |
+| Nicaragua | — | No encontrado en IG | — |
+| Paraguay | — | No encontrado en IG | — |
+
+### Bloque B — Instituciones culturales/académicas francesas relacionadas con América Latina
+
+| Cuenta | Handle IG | Tipo |
+|---|---|---|
+| Maison de l'Amérique Latine | @maisondelameriquelatineparis | Institución cultural (1946) |
+| Instituto Cervantes París | @institutocervantesparis | Instituto cultural hispano |
+| France Diplomatie (ES) | @francediplo_es | Institucional francés (español) |
+| IHEAL & CREDA | @iheal_creda | Centro académico (Sorbonne Nouvelle) |
+| Festival CLaP | @festivalclap | Festival de cine latinoamericano de París |
+| GRULAC UNESCO | @grulacunesco | Grupo diplomático LatAm/Caribe en UNESCO |
+| El Café Latino | @elcafelatino | Medio bilingüe sobre América Latina en Europa |
+
+Excluido explícitamente: Alliances Françaises (fuera de Francia), cuentas comerciales (ej. restaurante de la Maison de l'Amérique Latine).
+
+Pendiente de verificación manual por Diego:
+- Bolivia, El Salvador, Nicaragua, Paraguay — sin handle de IG confirmado.
+- Brasil, Venezuela, Ecuador — doble candidato, elegir cuenta activa antes de correr el harvester.
+
+---
+
+*Última actualización: 2026-07-07*
+*Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos.*

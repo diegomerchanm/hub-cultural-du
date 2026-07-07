@@ -1,0 +1,30 @@
+{
+  "_comment": "Seeds V2 — consulados + instituciones culturales (DD-022). Pendiente de verificación: Bolivia, El Salvador, Nicaragua, Paraguay (sin handle IG confirmado). Brasil/Venezuela/Ecuador tienen doble candidato — elegir cuenta activa antes de correr 1_harvest_ig_profiles.py.",
+  "seeds": [
+    { "handle": "consuladocolparis",              "pais_o_institucion": "Colombia",                      "tipo": "Consulado",             "bloque": "A" },
+    { "handle": "embajadacolfra",                 "pais_o_institucion": "Colombia",                      "tipo": "Embajada",              "bloque": "A" },
+    { "handle": "arg_enfrancia",                  "pais_o_institucion": "Argentina",                     "tipo": "Embajada",              "bloque": "A" },
+    { "handle": "cg_brasil_paris",                "pais_o_institucion": "Brasil",                        "tipo": "Consulado",             "bloque": "A", "_nota": "verificar vs @cgparisoficial" },
+    { "handle": "bresilenfrance",                 "pais_o_institucion": "Brasil",                        "tipo": "Embajada",              "bloque": "A" },
+    { "handle": "embachilefrancia",               "pais_o_institucion": "Chile",                         "tipo": "Embajada",              "bloque": "A" },
+    { "handle": "embajadademexicoenfrancia",       "pais_o_institucion": "México",                        "tipo": "Embajada",              "bloque": "A" },
+    { "handle": "consuladodelperuenparis",         "pais_o_institucion": "Perú",                          "tipo": "Consulado",             "bloque": "A" },
+    { "handle": "embfrancia_ve",                  "pais_o_institucion": "Venezuela",                     "tipo": "Embajada",              "bloque": "A", "_nota": "verificar vs @embavefrancia" },
+    { "handle": "eecufrancia",                    "pais_o_institucion": "Ecuador",                       "tipo": "Embajada",              "bloque": "A", "_nota": "verificar vs @embajadaecufrancia" },
+    { "handle": "uruguayfrancia",                 "pais_o_institucion": "Uruguay",                       "tipo": "Embajada",              "bloque": "A" },
+    { "handle": "costaricafrance",                "pais_o_institucion": "Costa Rica",                    "tipo": "Embajada",              "bloque": "A" },
+    { "handle": "embaguafr",                      "pais_o_institucion": "Guatemala",                     "tipo": "Embajada",              "bloque": "A" },
+    { "handle": "rdenfrancia",                    "pais_o_institucion": "República Dominicana",          "tipo": "Embajada",              "bloque": "A" },
+    { "handle": "rdenparis",                      "pais_o_institucion": "República Dominicana",          "tipo": "Consulado",             "bloque": "A" },
+    { "handle": "embpanamafra",                   "pais_o_institucion": "Panamá",                        "tipo": "Embajada",              "bloque": "A" },
+    { "handle": "embacubafrancia",                "pais_o_institucion": "Cuba",                          "tipo": "Embajada",              "bloque": "A" },
+    { "handle": "embajadadehondurasenfrancia",     "pais_o_institucion": "Honduras",                      "tipo": "Embajada",              "bloque": "A" },
+    { "handle": "maisondelameriquelatineparis",    "pais_o_institucion": "Maison de l'Amérique Latine",   "tipo": "Institución cultural",  "bloque": "B" },
+    { "handle": "institutocervantesparis",         "pais_o_institucion": "Instituto Cervantes París",     "tipo": "Instituto cultural",    "bloque": "B" },
+    { "handle": "francediplo_es",                 "pais_o_institucion": "France Diplomatie (ES)",        "tipo": "Institucional francés", "bloque": "B" },
+    { "handle": "iheal_creda",                    "pais_o_institucion": "IHEAL & CREDA",                 "tipo": "Centro académico",      "bloque": "B" },
+    { "handle": "festivalclap",                   "pais_o_institucion": "Festival CLaP",                 "tipo": "Festival",              "bloque": "B" },
+    { "handle": "grulacunesco",                   "pais_o_institucion": "GRULAC UNESCO",                 "tipo": "Grupo diplomático",     "bloque": "B" },
+    { "handle": "elcafelatino",                   "pais_o_institucion": "El Café Latino",                "tipo": "Medio bilingüe",        "bloque": "B" }
+  ]
+}
