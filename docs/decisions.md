@@ -271,5 +271,26 @@ Pendiente de verificación manual por Diego:
 
 ---
 
-*Última actualización: 2026-07-07*
+---
+
+## DD-025 — Cuentas vacías como lista de prospección orgánica
+
+**Fecha:** Julio 2026
+**Decisión:** Tratar las ~4,467 cuentas vacías en Neo4j como lista de prospección prioritaria para V2, antes de buscar nuevas seeds externas.
+**Razón:** Estas cuentas fueron descubiertas orgánicamente porque la diáspora colombiana ya las mencionó, etiquetó, comentó o relacionó. Su origen confirma relevancia:
+- 1,530 via comentarios en posts del consulado
+- 1,001 via relatedProfiles de 36 perfiles scrapeados
+- 906 via menciones en posts
+- 740 via etiquetas en posts
+- 290 origen desconocido (múltiples fuentes)
+
+Los relatedProfiles son especialmente valiosos — 36 perfiles generan potencialmente ~1,300 cuentas únicas nuevas sin necesidad de scraping de followers. Costo estimado para scrapeear todos sus perfiles: ~$0.65 USD.
+
+**Implicación para V2:** Correr `1_harvest_ig_profiles.py` sobre las cuentas vacías filtradas por el clasificador NLP antes de buscar seeds externas — son candidatas con relevancia orgánicamente confirmada.
+**Alternativa considerada:** Buscar nuevas seeds externas (consulados latinoamericanos) como primera acción de V2.
+**Por qué complementar ambas:** Las seeds externas amplían el scope a toda América Latina; las cuentas vacías profundizan el corpus colombiano ya existente.
+
+---
+
+*Última actualización: 2026-07-08*
 *Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos.*
