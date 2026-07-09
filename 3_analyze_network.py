@@ -107,7 +107,10 @@ def export():
                    (a:Political)                    AS political,
                    (a:Public)                       AS public,
                    coalesce(a.politicalScore, 0)    AS politicalScore,
-                   a.businessCategory               AS businessCategory
+                   a.businessCategory               AS businessCategory,
+                   a.verified                       AS verified,
+                   a.private                        AS private,
+                   coalesce(a.profilePicUrl, '')    AS profilePicUrl
         """).data()
         nodes_df = pd.DataFrame(nodes)
         nodes_df["tier"] = assign_tiers(nodes_df)

@@ -266,6 +266,13 @@ def _tokens_in(text: str, tokens: list) -> list:
     return found
 
 
+def _to_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 # ── 4. Carga de datos ─────────────────────────────────────────────────────────
 def load_tiers() -> dict:
     with open(TIERS_FILE, encoding="utf-8") as f:
@@ -384,6 +391,36 @@ def geo_hard_signals(profile: dict) -> tuple:
     return signals, reasons
 
 
+# ── 5b. Completitud de datos (diagnóstico, DD-027) ────────────────────────────
+# Cuenta cuántos de 5 campos están presentes: fullName, followers, public,
+# verified, profilePicUrl. Solo diagnóstico — no modula geography/cultural/keep.
+COMPLETENESS_FIELDS = 5
+
+
+def _profile_completeness(profile: dict) -> float:
+    """Cuenta con perfil scrapeado (data_raw/profile_*.json)."""
+    present = [
+        bool((profile.get("fullName") or "").strip()),
+        _to_float(profile.get("followersCount")) > 0,
+        profile.get("private") is not None,
+        profile.get("verified") is not None,
+        bool((profile.get("profilePicUrl") or "").strip()),
+    ]
+    return round(sum(present) / COMPLETENESS_FIELDS, 2)
+
+
+def _node_completeness(row: dict) -> float:
+    """Cuenta sin perfil scrapeado — solo lo que llegó a nodes.csv."""
+    present = [
+        bool((row.get("fullName") or "").strip()),
+        _to_float(row.get("followers")) > 0,
+        (row.get("public") or "").strip() != "",
+        (row.get("verified") or "").strip() != "",
+        bool((row.get("profilePicUrl") or "").strip()),
+    ]
+    return round(sum(present) / COMPLETENESS_FIELDS, 2)
+
+
 # ── 6. Clasificador ───────────────────────────────────────────────────────────
 class AccountClassifier:
     def __init__(self, neg_weight: float = NEG_WEIGHT, max_posts: int = 10):
@@ -456,7 +493,8 @@ class AccountClassifier:
                      and not profile.get("businessCategoryName"))
         return self._finalize(username, geography, cultural, tier,
                               is_person, reasons, has_profile=True,
-                              political=username in self.political_accounts)
+                              political=username in self.political_accounts,
+                              data_completeness=_profile_completeness(profile))
 
     # ---- cuentas SOLO con username/fullName ----------------------------------
     def score_username_batch(self, rows: list) -> list:
@@ -511,12 +549,14 @@ class AccountClassifier:
             results.append(self._finalize(username, geography, cultural, tier,
                                           is_person=True, reasons=reasons,
                                           has_profile=False,
-                                          political=political))
+                                          political=political,
+                                          data_completeness=_node_completeness(r)))
         return results
 
     # ---- decisión final -------------------------------------------------------
     def _finalize(self, username, geography, cultural, tier, is_person,
-                  reasons, has_profile, political=False) -> dict:
+                  reasons, has_profile, political=False,
+                  data_completeness=0.0) -> dict:
         final = 0.5 * geography + 0.5 * cultural
         threshold = THRESHOLD_PERSON if is_person else THRESHOLD_ORG
         keep = final >= threshold
@@ -550,6 +590,7 @@ class AccountClassifier:
             "role": role,
             "has_profile": has_profile,
             "kind": "person" if is_person else "org",
+            "data_completeness": data_completeness,
         }
 
 
@@ -574,6 +615,13 @@ def diagnose(results: list):
     from collections import Counter
     roles = Counter(r["role"] for r in results)
     print("Roles: " + " · ".join(f"{k}={v}" for k, v in roles.most_common()))
+
+    avg_completeness = sum(r["data_completeness"] for r in results) / len(results)
+    band_low  = sum(1 for r in results if r["data_completeness"] <= 0.33)
+    band_mid  = sum(1 for r in results if 0.33 < r["data_completeness"] <= 0.66)
+    band_high = sum(1 for r in results if r["data_completeness"] > 0.66)
+    print(f"data_completeness (DD-027, solo diagnóstico): promedio={avg_completeness:.2f} · "
+          f"0-0.33={band_low} · 0.34-0.66={band_mid} · 0.67-1.0={band_high}")
 
     print("\n── 20 ejemplos aleatorios " + "─" * 50)
     for r in rng.sample(results, min(20, len(results))):
@@ -698,7 +746,7 @@ def main(
     OUTPUT_CSV.parent.mkdir(exist_ok=True)
     fieldnames = ["username", "geography_score", "cultural_score",
                   "final_score", "tier", "keep", "reason", "role",
-                  "has_profile", "kind"]
+                  "has_profile", "kind", "data_completeness"]
     with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()

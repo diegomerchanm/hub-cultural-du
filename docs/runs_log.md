@@ -183,5 +183,35 @@ sociológicos significativos
 
 ---
 
-*Última actualización: Julio 2026*
-*Próximo run: RUN-011 — V2 seeds consulados latinoamericanos*
+## RUN-011 — Julio 2026 — Primer scrapeo de seeds V2
+**Scripts:** 1_harvest_ig_profiles.py --seeds config/seeds_v2.json, 
+2_build_graph.py
+**Input:** 25 seeds V2 (18 bloque A consulados/embajadas + 7 bloque B 
+instituciones culturales, DD-022). 2 ya tenían perfil local 
+(consuladocolparis, embajadacolfra).
+**Output:**
+- 23 perfiles nuevos scrapeados, 0 fallos
+- 193 perfiles totales en data_raw/ (170 de V1 + 23 nuevos)
+- 5,433 nodos :Account en Neo4j (+796 vs. los 4,637 de RUN-002/010)
+- De esos +796: 23 son perfiles completos (las seeds), ~773 son nodos 
+  nuevos descubiertos vía relatedProfiles/taggedUsers/coauthorProducers/
+  mentions/comentarios de las 23 cuentas institucionales
+- Costo real: $0.06 USD (calibración previa había estimado $1.34-$3.36 
+  — sobreestimación corregida)
+- Error transitorio de conexión Neo4j durante 2_build_graph.py, resuelto 
+  automáticamente por retry — no afectó el resultado final
+**Resultado:** Expansión V2 operacional, lista para clasificador NLP
+**Lecciones:**
+- El patrón BFS de RUN-001/002 escala bien: 23 seeds institucionales 
+  generaron ~33 nodos nuevos promedio cada una (menos que los ~80 que 
+  generó @consuladocolparis sola en RUN-001 — instituciones parecen tener 
+  relatedProfiles/engagement más acotado que una cuenta comunitaria activa)
+- Hallazgo de heterogeneidad de datos: 2,665 de los nodos nuevos tienen 
+  fullName (relatedProfiles/taggedUsers), 2,575 son solo username 
+  (mentions/comentarios) — ver DD-027
+
+---
+
+*Última actualización: 2026-07-09*
+*Próximo run: RUN-012 — clasificador --diagnose sobre expansión V2 + 
+definición de umbral a ojo por Diego*

@@ -341,5 +341,39 @@ de rol (fuente vs. objetivo), no de score.
 
 ---
 
+## DD-027 — Métrica de completitud de datos como diagnóstico (no afecta scoring aún)
+
+**Fecha:** 2026-07-09
+**Contexto:** Tras el primer scrapeo de las 25 seeds V2, el grafo pasó de 
+4,637 a 5,433 nodos :Account (+796). De esos, 2,665 cuentas nuevas tienen 
+`fullName` (llegaron vía relatedProfiles/taggedUsers/coauthorProducers) y 
+2,575 no tienen ningún campo más allá del username (llegaron vía mentions 
+o comentarios). `1_harvest_account_classifier.py` no distinguía esto — 
+trataba a todas las cuentas sin perfil scrapeado con el mismo factor de 
+confianza fijo (USERNAME_CONF=0.60), sin importar cuánta evidencia real 
+había disponible. Además, el export a nodes.csv perdía las propiedades 
+`verified`, `private` y `profilePicUrl` que sí llegan a Neo4j desde 
+2_build_graph.py.
+
+**Decisión:** Agregar `data_completeness` (0-1, conteo de campos no-nulos 
+sobre 5: fullName, followers, public, verified, profilePicUrl) como columna 
+de diagnóstico en account_scores.csv y en la salida de --diagnose. Por 
+ahora NO modula el cálculo de final_score ni el umbral de keep — es 
+únicamente para que el análisis visual del umbral (a ojo, según lo acordado) 
+tenga en cuenta la calidad de la evidencia detrás de cada score, no solo 
+el score mismo.
+**Razón:** Comparar un final_score=0.45 de una cuenta con bio+posts reales 
+contra un final_score=0.45 de una cuenta solo-username no es comparar lo 
+mismo — la validez de la medición es distinta. Documentar la métrica antes 
+de decidir cómo usarla evita comprometerse prematuramente a una fórmula 
+de ponderación sin haber visto la distribución real.
+**Alternativa considerada:** Modular USERNAME_CONF automáticamente según 
+completitud desde ya.
+**Por qué se pospuso:** Diego quiere revisar la distribución real de 
+data_completeness cruzada con final_score antes de decidir si y cómo debe 
+pesar — evita ajustar una fórmula con datos que aún no se han visto.
+
+---
+
 *Última actualización: 2026-07-09*
 *Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos.*
