@@ -166,7 +166,7 @@
 **Decisión:** Tres tiers de cuentas basados en `businessCategoryName`:
 - **Primary:** Artist, Restaurant, Community, Local business, Podcast, Art Gallery, Journalist — foco del análisis cultural.
 - **Secondary:** Language School, NGO, Education, University, Digital creator, Public figure, Entrepreneur — contexto relevante pero no prioritario.
-- **Excluded:** Financial service, Politician, Real Estate, Tour Agency, Government — ruido o fuera de scope cultural.
+- **Excluded:** Financial service, Politician, Real Estate, Tour Agency, Government — ruido o fuera de scope cultural (excepción: cuentas seed del Bloque A de DD-022 se mantienen activas como ancla estructural pese a este tier — ver DD-026).
 **Razón:** No todas las cuentas tienen el mismo valor para el objetivo del proyecto. Las instituciones financieras y políticas distorsionan los rankings culturales. Los tiers permiten análisis granular sin perder datos.
 **Actualización (Julio 2026):** Digital creator, Public figure y Entrepreneur se movieron de primary a secondary. Justificación: categorías ambiguas que no garantizan contenido cultural primario — pueden ser relevantes pero no prioritarias. Un "Digital creator" puede ser influencer de moda o de fitness sin ninguna vinculación cultural colombiana; un "Public figure" puede ser político o deportista.
 **Alternativa considerada:** Incluir todo sin filtro, excluir manualmente caso por caso.
@@ -292,5 +292,54 @@ Los relatedProfiles son especialmente valiosos — 36 perfiles generan potencial
 
 ---
 
-*Última actualización: 2026-07-08*
+## DD-026 — Consulados como ancla estructural vs. objetivo cultural clasificable
+
+**Fecha:** 2026-07-09
+**Decisión:** Las cuentas del Bloque A de seeds V2 (consulados y embajadas 
+latinoamericanas en Francia, DD-022) reciben `role = "seed_source"` y 
+`keep = False` de forma incondicional en `1_harvest_account_classifier.py`, 
+independientemente de su `final_score`. Esto se implementa en la función 
+`_finalize()` (líneas ~531-540): si la cuenta es seed y pertenece al 
+Bloque A, `keep` se sobreescribe a `False` sin importar el score calculado.
+
+**Razón — la contradicción que resuelve:** DD-016 clasifica "Government 
+organization" en el tier Excluded, ya que instituciones gubernamentales 
+distorsionan los rankings de relevancia cultural. Pero DD-006 y DD-022 
+usan precisamente instituciones gubernamentales (consulados/embajadas) 
+como semilla estructural de todo el descubrimiento de red — sin ellas no 
+hay BFS, no hay `relatedProfiles`, no hay expansión. Aplicar DD-016 
+literalmente excluiría del grafo a la cuenta que hace posible el grafo.
+
+La resolución separa dos preguntas distintas que antes se resolvían con 
+un solo criterio:
+1. "¿Esta cuenta es un objetivo cultural válido para el análisis de 
+   relevancia?" → Para consulados/embajadas: NO (se comportan igual que 
+   DD-016 lo predice — son gobierno, no cultura).
+2. "¿Esta cuenta debe permanecer activa como nodo/ancla para descubrir 
+   la red?" → SÍ, siempre — su función no es ser evaluada, es generar 
+   las conexiones que sí serán evaluadas.
+
+El score alto que estas cuentas obtienen (ej. @consuladocolparis: 
+geo=1.00, cult=0.88, final=0.94) es correcto y no se descarta — 
+confirma que el modelo detecta bien geografía+cultura — pero no se 
+traduce en `keep=True` porque `keep` responde a la pregunta 1, no a la 2.
+
+**Distinción con DD-012:** DD-012 penaliza (no excluye) cuentas políticas 
+individuales para preservar aristas reales en el grafo. DD-026 es un 
+mecanismo distinto: no es una penalización de score, es una separación 
+de rol (seed_source vs. target) que aplica solo al Bloque A de seeds 
+institucionales, no a cuentas políticas descubiertas orgánicamente.
+
+**Alternativa considerada:** Aplicar DD-016 sin excepción (excluir 
+también a los consulados del grafo activo); crear un tier adicional 
+"institutional-seed" con reglas propias de scoring.
+**Por qué se descartó:** Excluir consulados del grafo activo rompe la 
+cadena de descubrimiento BFS (DD-006) — no habría forma de encontrar 
+las cuentas de la diáspora sin la cuenta que las conecta. Un tier nuevo 
+añadiría complejidad de scoring innecesaria cuando el problema real es 
+de rol (fuente vs. objetivo), no de score.
+
+---
+
+*Última actualización: 2026-07-09*
 *Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos.*
