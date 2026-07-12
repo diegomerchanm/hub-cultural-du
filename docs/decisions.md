@@ -375,5 +375,36 @@ pesar — evita ajustar una fórmula con datos que aún no se han visto.
 
 ---
 
-*Última actualización: 2026-07-09*
+## DD-028 — Posts recientes sobre densidad histórica
+
+**Fecha:** 2026-07-12
+**Decisión:** 1_harvest_ig_posts.py filtra por `onlyPostsNewerThan` 
+(default 10 días) en vez de solo un tope de cantidad (RESULTS_LIMIT=50 
+sin filtro temporal, como en V1/RUN-003). Lista de cuentas generalizada 
+desde account_scores.csv (keep=True), con exclusión manual de 
+williamsanchezinmobiliaria (falso positivo del clasificador — categoría 
+de negocio no capturada por el tier).
+**Razón:** DD-020 (V1) buscaba maximizar densidad del grafo scrapeando 
+más posts por cuenta, bajo la lógica de que más aristas sociales = 
+mejor discriminación de algoritmos de centralidad (GDS/igraph). En V2, 
+la idoneidad cultural de una cuenta ya no depende de esos algoritmos — 
+se resuelve directamente con el clasificador NLP sobre bio+posts+
+username (DD-023, DD-027). Esto libera a la fase de posts de la 
+responsabilidad de generar densidad, y permite priorizar el objetivo 
+real del pipeline de eventos (4_enrich_events_extract.py): capturar 
+anuncios de eventos vigentes, no reconstruir historial.
+**Alternativa considerada:** Mantener RESULTS_LIMIT=50 sin filtro 
+temporal (como V1).
+**Por qué se descartó:** Trae posts de hace meses/años que no aportan 
+a la detección de eventos próximos, y diluye el corpus con contenido 
+desactualizado que ya no representa la actividad cultural vigente de 
+la diáspora.
+**Riesgo aceptado:** Cuentas institucionales de baja cadencia de 
+publicación pueden quedar con 0 posts en la ventana de 10 días — se 
+diagnostica en la corrida (punto 3) y se revisa caso por caso si el 
+volumen de "vacíos" es alto.
+
+---
+
+*Última actualización: 2026-07-12*
 *Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos.*
