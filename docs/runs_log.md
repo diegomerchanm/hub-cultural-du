@@ -212,6 +212,39 @@ instituciones culturales, DD-022). 2 ya tenían perfil local
 
 ---
 
-*Última actualización: 2026-07-09*
-*Próximo run: RUN-012 — clasificador --diagnose sobre expansión V2 + 
-definición de umbral a ojo por Diego*
+## RUN-012 — Julio 2026 — Segundo scrapeo dirigido por clasificador NLP
+**Scripts:** 1_harvest_account_classifier.py --diagnose, 
+1_harvest_ig_profiles.py --from-classifier, 2_build_graph.py
+**Input:** account_scores.csv tras la expansión de RUN-011 (5,433 cuentas 
+evaluadas, umbral sin modificar: THRESHOLD_ORG=0.60, THRESHOLD_PERSON=0.75)
+**Output:**
+- keep=True: 70 cuentas (1.3%) · Roles: context=5345, target=63, seed_source=25
+- data_completeness (DD-027): promedio=0.52, bimodal — 2565 en banda 0-0.33, 
+  11 en banda 0.34-0.66, 2857 en banda 0.67-1.0
+- De las 63 target, 57 ya tenían perfil completo (V1) — el chequeo 
+  incremental las saltó automáticamente
+- 6 perfiles genuinamente nuevos scrapeados: festivaldautomne, 
+  domingo_pal_bailador_paris, parisglobefestival, ruedadecumbia.paris, 
+  cinema.lemelies.montreuil, parislete — todos descubiertos vía 
+  relatedProfiles/taggedUsers de las seeds institucionales V2 
+  (data_completeness=0.8 antes del scrapeo)
+- 199 perfiles totales en data_raw/ (136 públicos, 63 privados)
+- Costo: $0.00 USD (por debajo del redondeo mostrado por el script)
+- Ninguna de las 6 cuentas nuevas trajo latestPosts — pendiente evaluar si 
+  vale la pena 1_harvest_ig_posts.py sobre ellas
+**Resultado:** Ciclo completo de dos fases (BFS + filtro NLP + scrapeo 
+dirigido) operacional y validado de punta a punta sobre seeds V2
+**Lecciones:**
+- La estrategia de dos pasadas resultó altamente eficiente: de 796 nodos 
+  nuevos generados en RUN-011, solo 6 requirieron inversión real de scraping 
+  — el resto o ya eran conocidos (57) o no pasaron el filtro NLP (733)
+- Umbral original del clasificador (0.60/0.75) se mantuvo sin ajuste — 
+  validado como funcional por Diego tras revisar el --diagnose
+- data_completeness (DD-027) sigue siendo solo diagnóstico; su naturaleza 
+  bimodal sugiere que un tratamiento categórico (full/partial/bare) sería 
+  tan informativo como uno continuo, dada la escasez de casos intermedios
+
+---
+
+*Última actualización: 2026-07-12*
+*Próximo run: RUN-013 — 3_analyze_network.py sobre grafo V2 expandido*
