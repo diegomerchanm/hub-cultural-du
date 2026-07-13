@@ -3,14 +3,22 @@
 
 Lista de cuentas generalizada desde data_processed/account_scores.csv
 (keep=True), con exclusión manual de falsos positivos del clasificador
-(DD-028). Filtra por recencia (onlyPostsNewerThan) en vez de solo un tope
-de cantidad fijo: DD-028 documenta por qué V2 prioriza actividad cultural
-vigente sobre densidad histórica del grafo (contraste con DD-020 en V1).
+(DD-028). Filtra por recencia en vez de solo un tope de cantidad fijo:
+DD-028 documenta por qué V2 prioriza actividad cultural vigente sobre
+densidad histórica del grafo (contraste con DD-020 en V1).
+
+La ventana onlyPostsNewerThan es dinámica por cuenta, no un valor fijo
+global (DD-029): cada cuenta pide exactamente los días que le faltan
+desde su último post conocido, topados en --days. Los resultados se
+fusionan con lo ya guardado (dedupe por id) y se recortan a los 50 más
+recientes — cap deslizante, no overwrite.
 """
 
 import csv
 import json
+import math
 import os
+from datetime import datetime, timezone
 
 import typer
 from apify_client import ApifyClient
@@ -47,6 +55,62 @@ def load_target_usernames() -> list[str]:
     print(f"📋 {len(rows)} filas en '{ACCOUNT_SCORES_CSV}' — {len(usernames)} con keep=True "
           f"({excluded_present} excluidas manualmente)")
     return usernames
+
+
+# ── 2b. Ventana dinámica de re-chequeo por cuenta (DD-029) ─────────────────
+
+def _parse_timestamp(ts) -> datetime | None:
+    if not isinstance(ts, str):
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _newest_post_timestamp(posts: list) -> datetime | None:
+    timestamps = [_parse_timestamp(p.get("timestamp")) for p in posts if isinstance(p, dict)]
+    timestamps = [t for t in timestamps if t is not None]
+    return max(timestamps) if timestamps else None
+
+
+def days_to_fetch(username: str, max_days: int) -> int | None:
+    """
+    Ventana onlyPostsNewerThan específica para esta cuenta.
+
+    None → la brecha real (sin redondear) es <1 día — piso mínimo acordado
+    con Diego, no vale la pena re-chequear una diferencia insignificante.
+
+    int → días a pedirle al actor. Si no hay posts_<username>.json, o no
+    tiene posts con timestamp parseable, se trata como cuenta nueva y se
+    pide max_days completo. Si no, es la antigüedad del post más reciente
+    conocido, redondeada hacia arriba (ceil, para no perder el día
+    parcial) y topada en max_days.
+    """
+    filepath = f"data_raw/posts_{username}.json"
+    if not os.path.exists(filepath):
+        return max_days
+
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            posts = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return max_days
+
+    if not isinstance(posts, list) or not posts:
+        return max_days
+
+    newest = _newest_post_timestamp(posts)
+    if newest is None:
+        return max_days
+    if newest.tzinfo is None:
+        newest = newest.replace(tzinfo=timezone.utc)
+
+    raw_gap_days = (datetime.now(timezone.utc) - newest).total_seconds() / 86400
+    if raw_gap_days < 1:
+        return None
+
+    return min(math.ceil(raw_gap_days), max_days)
 
 
 # ── 3. FinOps — calibración de costo ───────────────────────────────────────
@@ -115,23 +179,56 @@ def diagnose_empty(username: str, days: int) -> tuple[str, str]:
                       f"(tiene {posts_count} históricos — ventana corta)")
 
 
+# ── 4b. Merge + dedupe + cap deslizante (DD-029) ───────────────────────────
+
+def _load_existing_posts(filepath: str) -> list:
+    if not os.path.exists(filepath):
+        return []
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def merge_and_cap(existing: list, new_items: list, cap: int = RESULTS_LIMIT) -> list:
+    """
+    Fusiona existentes + nuevos deduplicando por 'id' (el nuevo gana —
+    puede traer likes/comments actualizados), ordena por timestamp
+    descendente y recorta a los `cap` más recientes. Posts sin 'id'
+    (p.ej. placeholders de error tipo "no_items") se descartan.
+    """
+    by_id = {}
+    for post in [*existing, *new_items]:
+        if isinstance(post, dict) and post.get("id") is not None:
+            by_id[post["id"]] = post
+
+    def _sort_key(post):
+        return _parse_timestamp(post.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc)
+
+    merged = sorted(by_id.values(), key=_sort_key, reverse=True)
+    return merged[:cap]
+
+
 # ── 5. Scraping ─────────────────────────────────────────────────────────────
 
-def scrape_posts(usernames: list[str], days: int, client: ApifyClient) -> dict:
+def scrape_posts(targets: list[tuple[str, int]], client: ApifyClient) -> dict:
+    """targets: [(username, dias_a_pedir), ...] — ventana ya resuelta por cuenta."""
     total_cost, total_posts = 0.0, 0
     cost_log_entries = []
-    window_empty = 0   # tiene historial pero nada en la ventana de recencia
+    window_empty = 0   # tiene historial pero nada en su ventana dinámica
     no_content   = 0   # privada o sin contenido histórico
     unknown      = 0   # sin perfil local para diagnosticar la causa
 
-    for username in usernames:
+    for username, days_for_account in targets:
         filepath = f"data_raw/posts_{username}.json"
-        print(f"\n🚀 Scraping @{username}...")
+        print(f"\n🚀 Scraping @{username} (ventana: {days_for_account}d)...")
 
         run_input = {
             "username":           [username],
             "resultsLimit":       RESULTS_LIMIT,
-            "onlyPostsNewerThan": f"{days} days",
+            "onlyPostsNewerThan": f"{days_for_account} days",
             "skipPinnedPosts":    True,
         }
 
@@ -145,7 +242,7 @@ def scrape_posts(usernames: list[str], days: int, client: ApifyClient) -> dict:
             print(f"  💰 Costo: ${run_cost:.4f} USD")
 
             if not dataset_items:
-                category, reason = diagnose_empty(username, days)
+                category, reason = diagnose_empty(username, days_for_account)
                 if category == "window":
                     window_empty += 1
                 elif category == "no_content":
@@ -156,12 +253,16 @@ def scrape_posts(usernames: list[str], days: int, client: ApifyClient) -> dict:
                 cost_log_entries.append({"username": username, "posts": 0, "cost": run_cost})
                 continue
 
+            existing = _load_existing_posts(filepath)
+            merged   = merge_and_cap(existing, dataset_items, RESULTS_LIMIT)
+
             with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(dataset_items, f, ensure_ascii=False, indent=4)
+                json.dump(merged, f, ensure_ascii=False, indent=4)
 
             total_posts += len(dataset_items)
             cost_log_entries.append({"username": username, "posts": len(dataset_items), "cost": run_cost})
-            print(f"  ✅ {len(dataset_items)} posts guardados en '{filepath}'")
+            print(f"  ✅ {len(dataset_items)} posts nuevos — {len(merged)} totales guardados "
+                  f"en '{filepath}' (cap {RESULTS_LIMIT})")
 
         except Exception as e:
             print(f"  ❌ Error scrapeando @{username}: {e}")
@@ -191,18 +292,25 @@ def main(
         print("✅ No hay cuentas con keep=True para scrapear.")
         return
 
-    pending = [u for u in target_usernames
-               if not os.path.exists(f"data_raw/posts_{u}.json")]
-    skipped = len(target_usernames) - len(pending)
+    n_negligible, pending = 0, []
+    for u in target_usernames:
+        window = days_to_fetch(u, days)
+        if window is None:
+            n_negligible += 1
+        else:
+            pending.append((u, window))
 
     print(f"\n📋 {len(target_usernames)} cuentas objetivo")
-    if skipped:
-        print(f"⏭️  {skipped} ya tienen archivo local — se saltarán")
-    print(f"🎯 {len(pending)} cuentas a scrapear (últimos {days} días, "
-          f"tope de seguridad {RESULTS_LIMIT} posts/cuenta)\n")
+    print(f"⏭️  {n_negligible} cuentas con brecha <1 día — se saltan")
+    if pending:
+        windows = [w for _, w in pending]
+        print(f"🔁 {len(pending)} cuentas a re-chequear con ventana dinámica "
+              f"(rango: {min(windows)}-{max(windows)} días, tope {days})")
+    print(f"🎯 {len(pending)} cuentas a scrapear "
+          f"(tope de seguridad {RESULTS_LIMIT} posts/cuenta)\n")
 
     if not pending:
-        print("✅ Todos los posts ya están descargados.")
+        print("✅ Todos los posts ya están descargados o su brecha es insignificante.")
         return
 
     cost_per = get_calibrated_cost()
@@ -221,7 +329,7 @@ def main(
         print("❌ Operación cancelada.")
         return
 
-    result = scrape_posts(pending, days, ApifyClient(APIFY_TOKEN))
+    result = scrape_posts(pending, ApifyClient(APIFY_TOKEN))
 
     print(f"\n{'─'*50}")
     print(f"  {'Username':<35} {'Posts':>5}  {'Costo':>8}")
@@ -234,7 +342,7 @@ def main(
 
     if result["window_empty"] or result["no_content"] or result["unknown"]:
         print(f"\n🔍 Diagnóstico de cuentas sin posts:")
-        print(f"   · Sin actividad en ventana de {days} días (con historial): {result['window_empty']}")
+        print(f"   · Sin actividad en su ventana dinámica (con historial): {result['window_empty']}")
         print(f"   · Privadas o sin contenido histórico: {result['no_content']}")
         if result["unknown"]:
             print(f"   · Causa desconocida (sin perfil local): {result['unknown']}")

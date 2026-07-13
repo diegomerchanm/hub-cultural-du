@@ -406,5 +406,36 @@ volumen de "vacíos" es alto.
 
 ---
 
-*Última actualización: 2026-07-12*
+## DD-029 — Ventana de scrapeo dinámica por cuenta + cap deslizante de 50 posts
+
+**Fecha:** 2026-07-13
+**Decisión:** 1_harvest_ig_posts.py reemplaza el chequeo binario vigente/
+vencido (DD-028) por una ventana `onlyPostsNewerThan` calculada 
+dinámicamente por cuenta: min(días desde el último post conocido, 
+--days tope). Cuentas con brecha <1 día se saltan; el resto se 
+re-chequea con exactamente la ventana que necesita, no un valor fijo 
+global. Los resultados se fusionan con los posts existentes (dedupe 
+por id) y se recortan a los 50 más recientes (ventana deslizante), en 
+vez de sobreescribir el archivo completo.
+**Razón:** El chequeo binario de DD-028 tenía un punto ciego: una 
+cuenta con post de hace 2 días se marcaba "vigente" bajo cualquier 
+ventana ≥2 días y se saltaba por completo, perdiendo posts publicados 
+en el intervalo entre ese post conocido y "ahora". La ventana dinámica 
+cierra exactamente esa brecha por cuenta, sin gastar de más en cuentas 
+ya casi al día ni quedarse corto en cuentas con actividad reciente 
+justo fuera del radar del chequeo binario.
+**Alternativa considerada:** Mantener ventana fija global (DD-028 tal 
+cual) y aceptar el punto ciego.
+**Por qué se descartó:** El costo marginal de consultar con ventana 
+pequeña es casi nulo (confirmado empíricamente: $0.00-0.02 por cuenta 
+en corridas previas), así que no hay razón de peso para tolerar el 
+punto ciego solo por ahorro de llamadas.
+**Nota técnica:** El cap de 50 posts (RESULTS_LIMIT) ahora funciona 
+como ventana deslizante acumulativa, no como límite de una sola 
+corrida — el corpus por cuenta converge a "los 50 posts más recientes 
+conocidos hasta la fecha", actualizado incrementalmente en cada corrida.
+
+---
+
+*Última actualización: 2026-07-13*
 *Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos.*
