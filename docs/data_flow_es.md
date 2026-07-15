@@ -1,39 +1,39 @@
 # Data Flow — Hub Cultural DU
 
-Diagram of the complete data flow, from external sources to Neo4j.
-Each block indicates the responsible script and the nodes/relationships it creates or enriches.
+Diagrama del flujo completo de datos, desde las fuentes externas hasta Neo4j.
+Cada bloque indica el script responsable y los nodos/relaciones que crea o enriquece.
 
-> **How to update:** each phase is an independent `subgraph`. Adding a new
-> script = adding a new `subgraph` and connecting it with `-->` to the corresponding storage.
+> **Cómo actualizar:** cada fase es una `subgraph` independiente. Añadir un nuevo
+> script = añadir un nuevo `subgraph` y conectarlo con `-->` al storage correspondiente.
 
 ---
 
-## Full flow
+## Flujo completo
 
 ```mermaid
 flowchart TD
 
-    %% ─── EXTERNAL SOURCES ───────────────────────────────────────────────────
-    IG[(Instagram\nPublic API)]
+    %% ─── FUENTES EXTERNAS ───────────────────────────────────────────────────
+    IG[(Instagram\nAPI pública)]
     APIFY[Apify Cloud\napify/instagram-profile-scraper\napify/instagram-post-scraper]
     NOM[Nominatim\nOpenStreetMap]
 
     IG --> APIFY
 
-    %% ─── PHASE 1 — EXTRACTION ─────────────────────────────────────────────────
-    subgraph PHASE1["Phase 1 · Extraction  (extract_profiles.py + extract_ig_*.py)"]
+    %% ─── FASE 1 — EXTRACCIÓN ─────────────────────────────────────────────────
+    subgraph FASE1["Fase 1 · Extracción  (extract_profiles.py + extract_ig_*.py)"]
         direction TB
-        E1["① Query Neo4j\nAccounts without followersCount"]
-        E2["② Estimate cost\n(calibrated from .apify_cost_log.json)"]
-        E3["③ Harvest by username\n— profile metadata\n— latestPosts\n— latestIgtvVideos\n— relatedProfiles"]
+        E1["① Consulta Neo4j\nAccounts sin followersCount"]
+        E2["② Estima costo\n(calibrado desde .apify_cost_log.json)"]
+        E3["③ Scrape por username\n— profile metadata\n— latestPosts\n— latestIgtvVideos\n— relatedProfiles"]
         E4[/"data_raw/\nprofile_‹user›.json\nposts_‹user›.json"/]
         E1 --> E2 --> E3 --> E4
     end
 
     APIFY --> E3
 
-    %% ─── PHASE 2 — INGESTION ────────────────────────────────────────────────────
-    subgraph PHASE2["Phase 2 · Neo4j Ingestion  (2_build_graph.py)"]
+    %% ─── FASE 2 — INGESTA ────────────────────────────────────────────────────
+    subgraph FASE2["Fase 2 · Ingesta Neo4j  (2_build_graph.py)"]
         direction TB
         L1["load_profile()\nMERGE :Account\nSET :Public | :Private\nMERGE :Location  ──LOCATED_AT──▶ Account"]
         L2["load_posts()\nMERGE :Post  ──PUBLISHED──▶ Account\nMERGE :Hashtag  ──HAS_HASHTAG\nMERGE :Account  ──MENTIONS / TAGS_USER / COAUTHORED_BY\nMERGE :Location ──TAGGED_AT\nMERGE :Track    ──USES_MUSIC\nMERGE :Comment  ──WROTE / ON"]
@@ -44,8 +44,8 @@ flowchart TD
 
     E4 --> L1
 
-    %% ─── NEO4J — BASE LAYER ───────────────────────────────────────────────────
-    subgraph NEO4J["Neo4j Aura · Base nodes"]
+    %% ─── NEO4J — CAPA BASE ───────────────────────────────────────────────────
+    subgraph NEO4J["Neo4j Aura · Nodos base"]
         direction LR
         N_ACC(":Account\n:Public | :Private\n:Political")
         N_POST(":Post")
@@ -58,8 +58,8 @@ flowchart TD
 
     L4 --> NEO4J
 
-    %% ─── PHASE 3 — GDS ALGORITHMS ─────────────────────────────────────────────
-    subgraph PHASE3["Phase 3 · Graph Algorithms  (run_gds_algorithms.py)"]
+    %% ─── FASE 3 — ALGORITMOS GDS ─────────────────────────────────────────────
+    subgraph FASE3["Fase 3 · Graph Algorithms  (run_gds_algorithms.py)"]
         direction TB
         G1["mark_political_accounts()\nSET :Political, politicalWeight=0.1"]
         G2["detect_political_by_hashtags()\nSET politicalScore"]
@@ -70,10 +70,10 @@ flowchart TD
     end
 
     NEO4J --> G1
-    G5 -. "SET on :Account" .-> N_ACC
+    G5 -. "SET en :Account" .-> N_ACC
 
-    %% ─── PHASE 4-A — NLP ENRICHMENT ──────────────────────────────────────────
-    subgraph PHASE4A["Phase 4-A · NLP Enrichment  (4_enrich_nodes_nlp.py)"]
+    %% ─── FASE 4-A — ENRIQUECIMIENTO NLP ──────────────────────────────────────
+    subgraph FASE4A["Fase 4-A · NLP Enrichment  (4_enrich_nodes_nlp.py)"]
         direction TB
         A1["detect_lang()  [langdetect]\n→ bioLanguage / captionLanguage"]
         A2["extract_features()  [spaCy ES/EN/FR]\n→ bioEntities / captionEntities\n→ bioKeywords / captionKeywords"]
@@ -82,16 +82,16 @@ flowchart TD
     end
 
     NEO4J --> A1
-    A3 -. "SET on :Account\n    on :Post" .-> N_ACC
-    A3 -. "SET on :Account\n    on :Post" .-> N_POST
+    A3 -. "SET en :Account\n    en :Post" .-> N_ACC
+    A3 -. "SET en :Account\n    en :Post" .-> N_POST
 
-    %% ─── PHASE 4-B — EVENT EXTRACTION ────────────────────────────────────────
-    subgraph PHASE4B["Phase 4-B · Event Extraction  (4_enrich_events_extract.py)"]
+    %% ─── FASE 4-B — EXTRACCIÓN DE EVENTOS ────────────────────────────────────
+    subgraph FASE4B["Fase 4-B · Event Extraction  (4_enrich_events_extract.py)"]
         direction TB
-        B1["zero-shot  [cross-encoder/nli-MiniLM2-L6-H768]\n12 cultural labels → event type + confidence"]
+        B1["zero-shot  [cross-encoder/nli-MiniLM2-L6-H768]\n12 etiquetas culturales → tipo de evento + confianza"]
         B2["extract_ner()  [spaCy]\n→ DATE, LOC/GPE/FAC, ORG"]
         B3["compute_hotness()\n= 0.4·log(likes) + 0.3·log(comments) + 0.3·recency"]
-        B4["find_similar_event()  [inline resolver]\ncosine > 0.82 + location match + date ±3d\n→ ENRICH existing | CREATE new"]
+        B4["find_similar_event()  [inline resolver]\ncoseno > 0.82 + location match + fecha ±3d\n→ ENRICH existente | CREATE nuevo"]
         B5["upsert_event()\nMERGE :Event\n──MENTIONS_EVENT──▶ Post\n──ORGANIZED──▶ Account\n──PARTICIPATED_IN──▶ Account\n──SUPPORTED──▶ Account\n──LOCATED_AT──▶ Location\n──HAS_HASHTAG──▶ Hashtag"]
         B1 --> B2 --> B3 --> B4 --> B5
     end
@@ -99,29 +99,29 @@ flowchart TD
     NEO4J --> B1
     B5 --> N_EV
 
-    subgraph NEO4J_EV["Neo4j Aura · Event nodes"]
+    subgraph NEO4J_EV["Neo4j Aura · Nodos evento"]
         N_EV(":Event\ntitle, type, eventDate\nhotnessScore, confidence\nbioEmbedding")
     end
 
-    %% ─── PHASE 4-C — DEDUPLICATION ────────────────────────────────────────────
-    subgraph PHASE4C["Phase 4-C · Event Resolver  (4_enrich_events_resolve.py)"]
+    %% ─── FASE 4-C — DEDUPLICACIÓN ────────────────────────────────────────────
+    subgraph FASE4C["Fase 4-C · Event Resolver  (4_enrich_events_resolve.py)"]
         direction TB
-        C1["load_all_events()\nload :Event with embedding"]
-        C2["Group by locationName"]
-        C3["Compare pairs\ncosine > threshold\n+ date ±date_window days"]
-        C4["merge_events()\ncanonical = higher hotnessScore\nredirect relationships explicitly\nDETACH DELETE duplicate"]
+        C1["load_all_events()\ncargar :Event con embedding"]
+        C2["Agrupar por locationName"]
+        C3["Comparar pares\ncoseno > threshold\n+ fecha ±date_window días"]
+        C4["merge_events()\ncanónico = mayor hotnessScore\nredirigir relaciones explícitamente\nDETACH DELETE duplicado"]
         C1 --> C2 --> C3 --> C4
     end
 
     NEO4J_EV --> C1
-    C4 -. "removes duplicates\nenriches canonical" .-> NEO4J_EV
+    C4 -. "elimina duplicados\nenriquece canónico" .-> NEO4J_EV
 
-    %% ─── PHASE 5 — GEOCODING ────────────────────────────────────────────────
-    subgraph PHASE5["Phase 5 · Geo Enrichment  (4_enrich_locations.py)"]
+    %% ─── FASE 5 — GEOCODIFICACIÓN ────────────────────────────────────────────
+    subgraph FASE5["Fase 5 · Geo Enrichment  (4_enrich_locations.py)"]
         direction TB
-        GEO1["geocode_location()  [Nominatim 1.1s/req]\nup to 3 queries per Location\n→ lat, lon, city, country, arrondissement"]
+        GEO1["geocode_location()  [Nominatim 1.1s/req]\nhasta 3 queries por Location\n→ lat, lon, city, country, arrondissement"]
         GEO2["write_location_geo()\nSET lat/lon/city/country/quartier/arrondissement"]
-        GEO3["write_hierarchy()\nMERGE :Arrondissement (Paris 750XX)\nMERGE :City\nMERGE :Country\n──LOCATED_IN──▶ hierarchy"]
+        GEO3["write_hierarchy()\nMERGE :Arrondissement (Paris 750XX)\nMERGE :City\nMERGE :Country\n──LOCATED_IN──▶ jerarquía"]
         GEO4[/.geocoding_log.json\nFinOps log/]
         GEO1 --> GEO2 --> GEO3
         GEO3 --> GEO4
@@ -130,7 +130,7 @@ flowchart TD
     NOM --> GEO1
     N_LOC --> GEO1
 
-    subgraph NEO4J_GEO["Neo4j Aura · Geo hierarchy"]
+    subgraph NEO4J_GEO["Neo4j Aura · Jerarquía geo"]
         direction LR
         G_LOC(":Location\n+lat/lon/city/arrondissement")
         G_ARR(":Arrondissement")
@@ -143,7 +143,7 @@ flowchart TD
 
     GEO3 --> NEO4J_GEO
 
-    %% ─── STYLES ─────────────────────────────────────────────────────────────
+    %% ─── ESTILOS ─────────────────────────────────────────────────────────────
     classDef source    fill:#fde68a,stroke:#d97706,color:#000
     classDef storage   fill:#dbeafe,stroke:#3b82f6,color:#000
     classDef phase     fill:#f0fdf4,stroke:#16a34a,color:#000
@@ -157,28 +157,28 @@ flowchart TD
 
 ---
 
-## Properties written per phase
+## Propiedades escritas por fase
 
-| Phase | Node | Properties added |
-|-------|------|-----------------|
-| 2 — Ingestion | `:Account` | `id`, `fullName`, `biography`, `followersCount`, `followsCount`, `verified`, `private`, `businessCategory`, `postsCount`, `profilePicUrl` |
-| 2 — Ingestion | `:Post` | `type`, `shortCode`, `url`, `caption`, `timestamp`, `likesCount`, `commentsCount`, `videoViewCount`, `displayUrl` |
-| 2 — Ingestion | `:Location` | `name`, `latitude`, `longitude`, `streetAddress`, `zipCode` |
+| Fase | Nodo | Propiedades añadidas |
+|------|------|----------------------|
+| 2 — Ingesta | `:Account` | `id`, `fullName`, `biography`, `followersCount`, `followsCount`, `verified`, `private`, `businessCategory`, `postsCount`, `profilePicUrl` |
+| 2 — Ingesta | `:Post` | `type`, `shortCode`, `url`, `caption`, `timestamp`, `likesCount`, `commentsCount`, `videoViewCount`, `displayUrl` |
+| 2 — Ingesta | `:Location` | `name`, `latitude`, `longitude`, `streetAddress`, `zipCode` |
 | 3 — GDS | `:Account` | `degreeCentrality`, `pageRankScore`, `communityId`, `betweennessScore`, `culturalRelevanceScore`, `politicalWeight`, `politicalScore` |
 | 4-A — NLP | `:Account` | `bioLanguage`, `bioEntities`, `bioKeywords`, `bioEmbedding`\* |
 | 4-A — NLP | `:Post` | `captionLanguage`, `captionEntities`, `captionKeywords`, `captionEmbedding`\* |
-| 4-B — Events | `:Event` | `id`, `title`, `type`, `rawDate`, `eventDate`, `locationName`, `hotnessScore`, `confidence`, `postCount`, `embedding`, `createdAt` |
-| 4-B — Events | `:Post` | `eventExtracted` (idempotency sentinel) |
+| 4-B — Eventos | `:Event` | `id`, `title`, `type`, `rawDate`, `eventDate`, `locationName`, `hotnessScore`, `confidence`, `postCount`, `embedding`, `createdAt` |
+| 4-B — Eventos | `:Post` | `eventExtracted` (sentinel idempotencia) |
 | 5 — Geo | `:Location` | `lat`, `lon`, `city`, `country`, `countryCode`, `quartier`, `arrondissement`, `displayName`, `geocodedAt` |
 
-\* Only with `--embeddings`
+\* Solo con `--embeddings`
 
 ---
 
-## Relationships per phase
+## Relaciones por fase
 
-| Phase | Relationship | Source → Target |
-|-------|-------------|----------------|
+| Fase | Relación | Origen → Destino |
+|------|----------|-----------------|
 | 2 | `PUBLISHED` | `:Account` → `:Post` / `:IgtvVideo` |
 | 2 | `HAS_HASHTAG` | `:Post` / `:IgtvVideo` → `:Hashtag` |
 | 2 | `MENTIONS` | `:Post` / `:IgtvVideo` → `:Account` |

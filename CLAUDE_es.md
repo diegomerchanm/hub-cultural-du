@@ -26,8 +26,8 @@ pip install -r requirements.txt
 python extract_profiles.py                  # Phase 1: scrape pending profiles (cost-aware)
 python 2_build_graph.py                     # Phase 2: ingest data_raw/*.json into Neo4j
 python run_gds_algorithms.py                # Phase 3: graph algorithms + cultural relevance score
-python 3_analyze_network.py run-all         # Phase 3-alt: local analysis (igraph/leidenalg) — no GDS or port 7687
-python 3_analyze_network.py analyze         #   metrics only, 100% offline from data_processed/*.csv
+python 3_analyze_network.py run-all         # Phase 3-alt: análisis LOCAL (igraph/leidenalg) — sin GDS ni puerto 7687
+python 3_analyze_network.py analyze         #   solo métricas, 100% offline desde data_processed/*.csv
 python 4_enrich_nodes_nlp.py                # Phase 4-A: bio + caption → lang/NER/keywords
 python 4_enrich_events_extract.py           # Phase 4-B: detect events → :Event nodes
 python 4_enrich_events_resolve.py           # Phase 4-C: dedup existing :Event nodes
@@ -69,8 +69,8 @@ NEO4J_PASSWORD=...
 - **Incremental processing:** `extract_profiles.py` queries Neo4j for accounts not yet scraped, making re-runs idempotent.
 - **Cost control:** Apify usage is tracked in `.apify_cost_log.json` (gitignored). Always check estimated cost before running large extractions.
 - **Political filtering:** 13 political accounts are hardcoded in `run_gds_algorithms.py` and down-weighted in the Cultural Relevance Score. Changes to this list require deliberate review.
-- **Cultural Relevance Score formula:** components normalized by **percentile rank** (0–1] before weighting: 43.75% PageRank + 31.25% Degree + 25% Betweenness (original proportions 35:25:20), × political penalty. `log(followers)` was **excluded from the score** and is reported as a separate dimension (`popularityScore`); `pageRankPct`/`degreePct`/`betweennessPct` are also persisted.
-- **Local analysis (3_analyze_network.py):** offline alternative to GDS (port 7687 is often blocked and standard AuraDB does not include GDS). Exports to `data_processed/*.csv`, runs igraph/leidenalg (exact PageRank and betweenness, Leiden γ=0.5/1.0/1.5 with seed=42, WCC, k-core, participation coefficient, E-I index by actor type) and writes back with `UNWIND` in batches. **Multiplex** network: social layer (MENTIONS/TAGS_USER/COAUTHORED_BY projected author→post→target, since in the raw graph they originate from the Post) separate from the algorithmic layer (RELATED_TO, `Algo` suffix). Actor typology can be curated in `data_processed/actor_types.csv`.
+- **Cultural Relevance Score formula:** componentes normalizados por **percentile rank** (0-1] antes de ponderar: 43.75% PageRank + 31.25% Degree + 25% Betweenness (proporciones 35:25:20 originales), × political penalty. `log(followers)` fue **excluido del score** y se reporta como dimensión separada (`popularityScore`); también se persisten `pageRankPct`/`degreePct`/`betweennessPct`.
+- **Análisis local (3_analyze_network.py):** alternativa a GDS que corre offline (el puerto 7687 suele estar bloqueado y AuraDB estándar no trae GDS). Exporta a `data_processed/*.csv`, corre igraph/leidenalg (PageRank y betweenness EXACTOS, Leiden γ=0.5/1.0/1.5 con seed=42, WCC, k-core, participation coefficient, E-I index por tipo de actor) y escribe de vuelta con `UNWIND` en lotes. Red **multiplex**: capa social (MENTIONS/TAGS_USER/COAUTHORED_BY proyectadas autor→post→target, pues en el grafo crudo salen del Post) separada de la algorítmica (RELATED_TO, sufijo `Algo`). Tipología de actores curable en `data_processed/actor_types.csv`.
 - **GDS graph projection:** Named `"red-cultural"` — must be dropped before re-projecting (`gds.graph.drop("red-cultural")`).
 - **raw data:** `data_raw/` is gitignored; JSON files are named `profile_<username>.json`.
 - **NLP scripts are all idempotent:** each checks for a `NULL` sentinel property before processing (`bioLanguage`, `captionLanguage`, `eventExtracted`, `lat`).

@@ -1,298 +1,296 @@
-# Hub Cultural — Log de Ejecuciones
+# Hub Cultural — Execution Log
 
-> Registro cronológico de cada ejecución significativa del pipeline.
-> Complementa docs/decisions.md (el por qué) con el qué pasó y qué resultados obtuvimos.
-> Base para el capítulo de resultados del mémoire.
+> Chronological record of each significant pipeline run.
+> Complements docs/decisions.md (the why) with what happened and what results were obtained.
+> Foundation for the results chapter of the mémoire.
 
 ---
 
-## RUN-001 — Junio 2026 — Seed inicial
+## RUN-001 — June 2026 — Initial seed
 **Scripts:** 1_harvest_ig_profiles.py, 2_build_graph.py
-**Input:** @consuladocolparis (único seed)
+**Input:** @consuladocolparis (single seed)
 **Output:**
-- 1 perfil scrapeado con datos completos
-- ~80 nodos Account vacíos creados via relatedProfiles y menciones
-- Costo: ~$0.0005 USD
-**Resultado:** Grafo inicial con seed único operacional
-**Lecciones:** El seed genera automáticamente nodos vacíos
-de cuentas relacionadas sin costo adicional de scraping
+- 1 profile harvested with complete data
+- ~80 empty Account nodes created via relatedProfiles and mentions
+- Cost: ~$0.0005 USD
+**Result:** Initial graph with single seed operational
+**Lessons:** The seed automatically generates empty nodes
+for related accounts at no additional harvesting cost
 
 ---
 
-## RUN-002 — Junio 2026 — Expansión BFS capa 1
+## RUN-002 — June 2026 — BFS expansion layer 1
 **Scripts:** 1_harvest_ig_profiles.py, 2_build_graph.py
-**Input:** ~80 cuentas vacías detectadas automáticamente por Neo4j
+**Input:** ~80 empty accounts automatically detected by Neo4j
 **Output:**
-- 169 perfiles adicionales scrapeados
-- 170 perfiles totales en data_raw/
-- 4,637 nodos Account en Neo4j
-- 107 cuentas :Public, 63 cuentas :Private
-- Costo: $0.0026 USD total acumulado
-**Resultado:** Corpus inicial de 170 perfiles operacional
-**Lecciones:**
-- Costo extremadamente bajo ($0.0005/perfil)
-- Las 4,467 cuentas vacías restantes son lista de prospección orgánica
-- Origen de cuentas: 1,530 comentarios, 1,001 relatedProfiles,
-  906 menciones, 740 etiquetas, 290 desconocido
+- 169 additional profiles harvested
+- 170 total profiles in data_raw/
+- 4,637 Account nodes in Neo4j
+- 107 :Public accounts, 63 :Private accounts
+- Cost: $0.0026 USD cumulative total
+**Result:** Initial corpus of 170 profiles operational
+**Lessons:**
+- Extremely low cost ($0.0005/profile)
+- The remaining 4,467 empty accounts are an organic prospect list
+- Account origins: 1,530 comments, 1,001 relatedProfiles,
+  906 mentions, 740 tags, 290 unknown
 
 ---
 
-## RUN-003 — Julio 2026 — Posts culturales priorizados
+## RUN-003 — July 2026 — Prioritized cultural posts
 **Scripts:** 1_harvest_ig_posts.py, 2_build_graph.py
-**Input:** 7 cuentas culturales seleccionadas manualmente:
+**Input:** 7 manually selected cultural accounts:
   dichaparis, el_man_de_los_chorizos, elcafetal.paris,
   ivan_argote, calisabor_salsa_calena,
   alianzafrancesademedellin, educulturaco
 **Output:**
-- 333 posts scrapeados (50 por cuenta, 33 calisabor)
-- 1,190 posts totales en Neo4j
-- Costo: $0.82 USD
-**Resultado:** Posts profundos disponibles para pipeline NLP
-**Lecciones:** El costo de posts (~$0.12/cuenta) es 240x
-mayor que perfiles (~$0.0005) — necesita filtro NLP previo
+- 333 posts harvested (50 per account, 33 for calisabor)
+- 1,190 total posts in Neo4j
+- Cost: $0.82 USD
+**Result:** Deep posts available for NLP pipeline
+**Lessons:** Post harvesting cost (~$0.12/account) is 240x
+higher than profiles (~$0.0005) — requires prior NLP filter
 
 ---
 
-## RUN-004 — Julio 2026 — NLP enriquecimiento de nodos
+## RUN-004 — July 2026 — NLP node enrichment
 **Scripts:** 4_enrich_nodes_nlp.py
-**Input:** 123 bios de Account + 1,317 captions de Post
+**Input:** 123 Account bios + 1,317 Post captions
 **Output:**
-- 123 bios enriquecidas con idioma, entidades NER, keywords
-- 1,317 captions enriquecidos
-- Distribución idiomas bios: es=82, unknown=18, en=14, fr=9
-**Resultado:** Nodos enriquecidos con semántica NLP
-**Lecciones:**
-- spaCy no extrae DATE en bios (esperado — bios son estáticas)
-- Filtros post-NER necesarios: URLs, saltos de línea, >60 chars
-- MISC de spaCy muy ruidoso en textos de Instagram — eliminado
+- 123 bios enriched with language, NER entities, keywords
+- 1,317 captions enriched
+- Bio language distribution: es=82, unknown=18, en=14, fr=9
+**Result:** Nodes enriched with NLP semantics
+**Lessons:**
+- spaCy does not extract DATE from bios (expected — bios are static)
+- Post-NER filters needed: URLs, line breaks, >60 chars
+- spaCy MISC very noisy in Instagram text — removed
 
 ---
 
-## RUN-005 — Julio 2026 — Detección de eventos v1 (fallida)
-**Scripts:** 4_enrich_events_extract.py (versión original)
+## RUN-005 — July 2026 — Event detection v1 (failed)
+**Scripts:** 4_enrich_events_extract.py (original version)
 **Input:** 1,085 posts
 **Output:**
-- Tasa de detección: ~0.7% (7 eventos de 1,085 posts)
-- Tiempo: ~5 horas en CPU i5
-**Resultado:** FALLIDO — pipeline inutilizable
-**Lecciones:**
-- Bug crítico 1: modelo NLI monolingüe inglés
-  (cross-encoder/nli-MiniLM2-L6-H768) sobre textos ES/FR
-- Bug crítico 2: spaCy ES/FR no tiene label DATE
-- Bug crítico 3: make_event_id() con fecha no normalizada
-- Todos identificados por revisión Fable
+- Detection rate: ~0.7% (7 events from 1,085 posts)
+- Time: ~5 hours on i5 CPU
+**Result:** FAILED — pipeline unusable
+**Lessons:**
+- Critical bug 1: monolingual English NLI model
+  (cross-encoder/nli-MiniLM2-L6-H768) on ES/FR texts
+- Critical bug 2: spaCy ES/FR has no DATE label
+- Critical bug 3: make_event_id() with non-normalized date
+- All identified by Fable review
 
 ---
 
-## RUN-006 — Julio 2026 — Detección de eventos v2 (corregida)
-**Scripts:** 4_enrich_events_extract.py (post-fixes Fable)
-**Input:** 1,289 posts (después de reset de sentinel)
+## RUN-006 — July 2026 — Event detection v2 (corrected)
+**Scripts:** 4_enrich_events_extract.py (post-Fable fixes)
+**Input:** 1,289 posts (after sentinel reset)
 **Output:**
-- Tasa de detección: 74% (756 eventos de 1,289 posts)
-- Tiempo: 18 minutos (vs 5 horas anterior)
-- 494 eventos creados, 262 enriquecidos
-- Distribución: 447 gastronómico, 108 institucional,
-  57 visual, 41 formación, 32 comunitario, 24 festival,
-  22 musical, 3 escénico, 3 audiovisual, 1 político
-**Resultado:** Pipeline NLP operacional
-**Lecciones:**
+- Detection rate: 74% (756 events from 1,289 posts)
+- Time: 18 minutes (vs. 5 hours before)
+- 494 events created, 262 enriched
+- Distribution: 447 gastronomic, 108 institutional,
+  57 visual, 41 training, 32 community, 24 festival,
+  22 musical, 3 performing arts, 3 audiovisual, 1 political
+**Result:** NLP pipeline operational
+**Lessons:**
 - Fix 1: mDeBERTa-v3-base-xnli-multilingual-nli-2mil7
-- Fix 2: dateparser para extracción de fechas
-- Fix 3: máximo de similitud vs promedio en Capa 1
-- Fix 4: modelo ligero MiniLMv2 como default en Capa 2b
-- Speedup 10x via batch inference
-- 259 gastronómicos sospechosos → revisión manual →
-  muchos son posts de menú, no eventos reales
+- Fix 2: dateparser for date extraction
+- Fix 3: maximum similarity vs. average in Layer 1
+- Fix 4: lightweight MiniLMv2 as default in Layer 2b
+- 10x speedup via batch inference
+- 259 suspicious gastronomic → manual review →
+  many are menu posts, not real events
 
 ---
 
-## RUN-007 — Julio 2026 — Resolución de duplicados
+## RUN-007 — July 2026 — Duplicate resolution
 **Scripts:** 4_enrich_events_resolve.py
-**Input:** 504 eventos (después de limpieza manual)
+**Input:** 504 events (after manual cleanup)
 **Output:**
-- 14 pares duplicados fusionados
-- 220 relaciones redirigidas
-- 490 eventos finales
-- Hotness promedio: 2.900
+- 14 duplicate pairs merged
+- 220 relationships redirected
+- 490 final events
+- Average hotness: 2.900
 - Max postCount: 11
-**Resultado:** Eventos deduplicados en Neo4j
-**Lecciones:**
-- Normalización de location crítica: París/Paris/paris
-  deben ser el mismo grupo (fix con unidecode)
-- Threshold 0.75 correcto para similitud semántica
-- Triple criterio necesario: location + fecha ±3d + similitud
+**Result:** Deduplicated events in Neo4j
+**Lessons:**
+- Location normalization critical: París/Paris/paris
+  must be the same group (fix with unidecode)
+- Threshold 0.75 correct for semantic similarity
+- Triple criterion necessary: location + date ±3d + similarity
 
 ---
 
-## RUN-008 — Julio 2026 — Geocodificación de locations
+## RUN-008 — July 2026 — Location geocoding
 **Scripts:** 4_enrich_locations.py
-**Input:** 550 nodos Location en Neo4j
+**Input:** 550 Location nodes in Neo4j
 **Output:**
-- 550/550 locations geocodificadas (100%)
-- Distribución geográfica:
-  Francia: 245, Colombia: 93, España: 44,
-  Brasil: 19, otros: 149
-- Rate limit Nominatim: 1 req/s → ~10 minutos total
-**Resultado:** Red transnacional en 8+ países confirmada
-**Lecciones:**
-- La red no es solo París — es transnacional
-- Consistente con teoría de simultaneidad transnacional
+- 550/550 locations geocoded (100%)
+- Geographic distribution:
+  France: 245, Colombia: 93, Spain: 44,
+  Brazil: 19, other: 149
+- Nominatim rate limit: 1 req/s → ~10 minutes total
+**Result:** Transnational network across 8+ countries confirmed
+**Lessons:**
+- The network is not only Paris — it is transnational
+- Consistent with transnational simultaneity theory
   (Vertovec, 2009)
-- Algunos falsos positivos: "Festival De" → Alemania,
-  "Este Domingo" → República Dominicana
+- Some false positives: "Festival De" → Germany,
+  "Este Domingo" → Dominican Republic
 
 ---
 
-## RUN-009 — Julio 2026 — Análisis de red v1
+## RUN-009 — July 2026 — Network analysis v1
 **Scripts:** 3_analyze_network.py export/analyze/writeback
-**Input:** 4,637 nodos, 2,939 aristas sociales,
-          1,300 aristas algorítmicas
+**Input:** 4,637 nodes, 2,939 social edges,
+          1,300 algorithmic edges
 **Output:**
-- 61 comunidades Leiden (modularidad 0.88)
-- E-I Index social global: -0.2149
-  · individual: -0.2020 (localista)
-  · institucional_cultural: +0.8027 (puente)
-  · comercial: +0.9059 (puente fuerte)
-  · medio: +1.0000 (conector puro)
+- 61 Leiden communities (modularity 0.88)
+- Global social E-I Index: -0.2149
+  · individual: -0.2020 (localist)
+  · institucional_cultural: +0.8027 (bridge)
+  · comercial: +0.9059 (strong bridge)
+  · medio: +1.0000 (pure connector)
 - Betweenness @consuladocolparis: 13,108
-- Densidad del grafo: 2,047 nodos / 2,300 aristas (ratio 1.1)
-**Resultado:** Análisis de red v1 completo con hallazgos
-sociológicos significativos
-**Lecciones:**
-- Densidad demasiado baja para rankings discriminativos
-- Bug identificado: proyección GDS anterior solo veía
-  RELATED_TO, no MENTIONS/TAGS_USER — corregido por Fable
-- Los negocios latinos son los puentes reales de la diáspora
-  (E-I comercial = +0.9059) — hallazgo citable
+- Graph density: 2,047 nodes / 2,300 edges (ratio 1.1)
+**Result:** Complete v1 network analysis with significant
+sociological findings
+**Lessons:**
+- Density too low for discriminative rankings
+- Bug identified: previous GDS projection only saw
+  RELATED_TO, not MENTIONS/TAGS_USER — corrected by Fable
+- Latin businesses are the real bridges of the diaspora
+  (commercial E-I = +0.9059) — citable finding
 
 ---
 
-## RUN-010 — Julio 2026 — Análisis de red con tiers
+## RUN-010 — July 2026 — Network analysis with tiers
 **Scripts:** 3_analyze_network.py export/analyze/writeback
-**Input:** 4,637 nodos con tier asignado
+**Input:** 4,637 nodes with assigned tier
   (27 primary, 9 secondary, 17 excluded, 4,584 unknown)
 **Output:**
-- Mismos algoritmos sobre grafo completo
-- Filtro tier solo en reporte final
-- Top primary por PageRank disponible para semillas V2
-**Resultado:** Rankings limpios sin ruido político/comercial
-**Lecciones:**
-- 99% del grafo es unknown — baja densidad confirmada
-- Necesita más ciclos BFS para ser discriminativo
-- Sistema de tiers correcto pero corpus insuficiente
+- Same algorithms on full graph
+- Tier filter only in final report
+- Top primary by PageRank available for V2 seeds
+**Result:** Clean rankings without political/commercial noise
+**Lessons:**
+- 99% of the graph is unknown — low density confirmed
+- Needs more BFS cycles to be discriminative
+- Tier system correct but insufficient corpus
 
 ---
 
-## RUN-011 — Julio 2026 — Primer scrapeo de seeds V2
-**Scripts:** 1_harvest_ig_profiles.py --seeds config/seeds_v2.json, 
+## RUN-011 — July 2026 — First V2 seed harvest
+**Scripts:** 1_harvest_ig_profiles.py --seeds config/seeds_v2.json,
 2_build_graph.py
-**Input:** 25 seeds V2 (18 bloque A consulados/embajadas + 7 bloque B 
-instituciones culturales, DD-022). 2 ya tenían perfil local 
+**Input:** 25 V2 seeds (18 Bloc A consulates/embassies + 7 Bloc B
+cultural institutions, DD-022). 2 already had a local profile
 (consuladocolparis, embajadacolfra).
 **Output:**
-- 23 perfiles nuevos scrapeados, 0 fallos
-- 193 perfiles totales en data_raw/ (170 de V1 + 23 nuevos)
-- 5,433 nodos :Account en Neo4j (+796 vs. los 4,637 de RUN-002/010)
-- De esos +796: 23 son perfiles completos (las seeds), ~773 son nodos 
-  nuevos descubiertos vía relatedProfiles/taggedUsers/coauthorProducers/
-  mentions/comentarios de las 23 cuentas institucionales
-- Costo real: $0.06 USD (calibración previa había estimado $1.34-$3.36 
-  — sobreestimación corregida)
-- Error transitorio de conexión Neo4j durante 2_build_graph.py, resuelto 
-  automáticamente por retry — no afectó el resultado final
-**Resultado:** Expansión V2 operacional, lista para clasificador NLP
-**Lecciones:**
-- El patrón BFS de RUN-001/002 escala bien: 23 seeds institucionales 
-  generaron ~33 nodos nuevos promedio cada una (menos que los ~80 que 
-  generó @consuladocolparis sola en RUN-001 — instituciones parecen tener 
-  relatedProfiles/engagement más acotado que una cuenta comunitaria activa)
-- Hallazgo de heterogeneidad de datos: 2,665 de los nodos nuevos tienen 
-  fullName (relatedProfiles/taggedUsers), 2,575 son solo username 
-  (mentions/comentarios) — ver DD-027
+- 23 new profiles harvested, 0 failures
+- 193 total profiles in data_raw/ (170 from V1 + 23 new)
+- 5,433 :Account nodes in Neo4j (+796 vs. 4,637 from RUN-002/010)
+- Of those +796: 23 are complete profiles (the seeds), ~773 are
+  new nodes discovered via relatedProfiles/taggedUsers/coauthorProducers/
+  mentions/comments from the 23 institutional accounts
+- Actual cost: $0.06 USD (prior calibration had estimated $1.34–$3.36
+  — corrected overestimate)
+- Transient Neo4j connection error during 2_build_graph.py, automatically
+  resolved by retry — did not affect the final result
+**Result:** V2 expansion operational, ready for NLP classifier
+**Lessons:**
+- The BFS pattern from RUN-001/002 scales well: 23 institutional seeds
+  generated ~33 new nodes each on average (fewer than the ~80 generated
+  by @consuladocolparis alone in RUN-001 — institutions appear to have
+  more limited relatedProfiles/engagement than an active community account)
+- Data heterogeneity finding: 2,665 of the new nodes have fullName
+  (relatedProfiles/taggedUsers), 2,575 are username-only
+  (mentions/comments) — see DD-027
 
 ---
 
-## RUN-012 — Julio 2026 — Segundo scrapeo dirigido por clasificador NLP
-**Scripts:** 1_harvest_account_classifier.py --diagnose, 
+## RUN-012 — July 2026 — Second harvest directed by NLP classifier
+**Scripts:** 1_harvest_account_classifier.py --diagnose,
 1_harvest_ig_profiles.py --from-classifier, 2_build_graph.py
-**Input:** account_scores.csv tras la expansión de RUN-011 (5,433 cuentas 
-evaluadas, umbral sin modificar: THRESHOLD_ORG=0.60, THRESHOLD_PERSON=0.75)
+**Input:** account_scores.csv after RUN-011 expansion (5,433 accounts
+evaluated, threshold unchanged: THRESHOLD_ORG=0.60, THRESHOLD_PERSON=0.75)
 **Output:**
-- keep=True: 70 cuentas (1.3%) · Roles: context=5345, target=63, seed_source=25
-- data_completeness (DD-027): promedio=0.52, bimodal — 2565 en banda 0-0.33, 
-  11 en banda 0.34-0.66, 2857 en banda 0.67-1.0
-- De las 63 target, 57 ya tenían perfil completo (V1) — el chequeo 
-  incremental las saltó automáticamente
-- 6 perfiles genuinamente nuevos scrapeados: festivaldautomne, 
-  domingo_pal_bailador_paris, parisglobefestival, ruedadecumbia.paris, 
-  cinema.lemelies.montreuil, parislete — todos descubiertos vía 
-  relatedProfiles/taggedUsers de las seeds institucionales V2 
-  (data_completeness=0.8 antes del scrapeo)
-- 199 perfiles totales en data_raw/ (136 públicos, 63 privados)
-- Costo: $0.00 USD (por debajo del redondeo mostrado por el script)
-- Ninguna de las 6 cuentas nuevas trajo latestPosts — pendiente evaluar si 
-  vale la pena 1_harvest_ig_posts.py sobre ellas
-**Resultado:** Ciclo completo de dos fases (BFS + filtro NLP + scrapeo 
-dirigido) operacional y validado de punta a punta sobre seeds V2
-**Lecciones:**
-- La estrategia de dos pasadas resultó altamente eficiente: de 796 nodos 
-  nuevos generados en RUN-011, solo 6 requirieron inversión real de scraping 
-  — el resto o ya eran conocidos (57) o no pasaron el filtro NLP (733)
-- Umbral original del clasificador (0.60/0.75) se mantuvo sin ajuste — 
-  validado como funcional por Diego tras revisar el --diagnose
-- data_completeness (DD-027) sigue siendo solo diagnóstico; su naturaleza 
-  bimodal sugiere que un tratamiento categórico (full/partial/bare) sería 
-  tan informativo como uno continuo, dada la escasez de casos intermedios
+- keep=True: 70 accounts (1.3%) · Roles: context=5345, target=63, seed_source=25
+- data_completeness (DD-027): average=0.52, bimodal — 2565 in band 0–0.33,
+  11 in band 0.34–0.66, 2857 in band 0.67–1.0
+- Of the 63 target, 57 already had a complete profile (V1) — the incremental
+  check skipped them automatically
+- 6 genuinely new profiles harvested: festivaldautomne,
+  domingo_pal_bailador_paris, parisglobefestival, ruedadecumbia.paris,
+  cinema.lemelies.montreuil, parislete — all discovered via
+  relatedProfiles/taggedUsers of V2 institutional seeds
+  (data_completeness=0.8 before harvesting)
+- 199 total profiles in data_raw/ (136 public, 63 private)
+- Cost: $0.00 USD (below the rounding shown by the script)
+- None of the 6 new accounts brought latestPosts — pending evaluation of
+  whether 1_harvest_ig_posts.py is worthwhile for them
+**Result:** Complete two-phase cycle (BFS + NLP filter + directed harvest)
+operational and validated end-to-end on V2 seeds
+**Lessons:**
+- The two-pass strategy proved highly efficient: of 796 new nodes generated
+  in RUN-011, only 6 required real harvesting investment — the rest were
+  either already known (57) or did not pass the NLP filter (733)
+- Original classifier threshold (0.60/0.75) maintained without adjustment —
+  validated as functional by Diego after reviewing --diagnose
+- data_completeness (DD-027) remains diagnostic only; its bimodal nature
+  suggests a categorical treatment (full/partial/bare) would be as informative
+  as a continuous one, given the scarcity of intermediate cases
 
 ---
 
-## RUN-013 — Julio 2026 — Pérdida de datos por versión de código desactualizada (incidente)
+## RUN-013 — July 2026 — Data loss due to stale code version (incident)
 **Scripts:** 1_harvest_ig_posts.py
-**Input:** 4 cuentas con historial de RUN-003 (dichaparis, elcafetal.paris,
-educulturaco, ivan_argote) — ejecutadas a las 09:16-09:25 UTC del
-2026-07-13, 14-23 minutos ANTES de que el commit e2ae5fc (DD-029, merge
-+ ventana dinámica) se aplicara.
+**Input:** 4 accounts with RUN-003 history (dichaparis, elcafetal.paris,
+educulturaco, ivan_argote) — executed at 09:16–09:25 UTC on
+2026-07-13, 14–23 minutes BEFORE commit e2ae5fc (DD-029, merge
++ dynamic window) was applied.
 **Output:**
-- El código que corrió era el de 8f58d50 (DD-028) — overwrite directo,
-  sin merge_and_cap.
-- dichaparis: overwrite total, quedaron solo 2 posts nuevos (perdió ~48
-  históricos de RUN-003).
-- elcafetal.paris, educulturaco, ivan_argote: overwrite con el
-  placeholder de error "no_items" de Apify (bug adicional — el chequeo
-  "if not dataset_items" no detectaba ese caso, ver DD-030), perdiendo
-  el 100% de su historial de RUN-003.
-- Estado corrupto ingestado a Neo4j vía 2_build_graph.py antes de
-  detectarse.
-- Recuperación intentada vía API de Apify: imposible — los datasets de
-  RUN-003 (2026-07-01) ya expiraron. La API solo retiene las últimas ~83
-  corridas (rango disponible: 2026-07-12 a 2026-07-13). Pérdida
-  permanente confirmada.
-**Resultado:** INCIDENTE — pérdida de datos parcial, causa raíz
-identificada y corregida.
-**Lecciones:**
-- Causa raíz real: desfase temporal entre la ejecución del script y el
-  commit del fix que se creía ya aplicado — no un bug en merge_and_cap
-  ni en days_to_fetch (ambos funcionan correctamente, confirmado vía
-  API de Apify comparando timestamps de commit vs. timestamps de runs).
-- Bug secundario real y confirmado: el placeholder de error
-  "{'error': 'no_items', ...}" de apify/instagram-post-scraper es una
-  lista de 1 elemento — truthy en Python — así que "if not dataset_items"
-  nunca lo detectaba, en ninguna versión del script hasta este fix (DD-030).
-- data_raw/ está gitignored — no hay respaldo automático de datos
-  crudos. Perder un archivo local es perder el dato, salvo que Apify
-  todavía retenga el dataset original (verificado: no en este caso).
-- Protocolo a futuro: confirmar que un commit de fix está aplicado
-  ANTES de correr el script que depende de él, no asumir que "ya está
-  comiteado" sin verificar con git status/git log.
+- The code that ran was from 8f58d50 (DD-028) — direct overwrite,
+  without merge_and_cap.
+- dichaparis: full overwrite, only 2 new posts remained (lost ~48
+  historical ones from RUN-003).
+- elcafetal.paris, educulturaco, ivan_argote: overwritten with the
+  Apify "no_items" error placeholder (additional bug — the check
+  "if not dataset_items" did not detect that case, see DD-030), losing
+  100% of their RUN-003 history.
+- Corrupted state ingested into Neo4j via 2_build_graph.py before
+  detection.
+- Recovery attempted via Apify API: impossible — RUN-003 datasets
+  (2026-07-01) had already expired. The API only retains the last ~83
+  runs (available range: 2026-07-12 to 2026-07-13). Permanent loss confirmed.
+**Result:** INCIDENT — partial data loss, root cause identified and corrected.
+**Lessons:**
+- Actual root cause: timing gap between script execution and the fix commit
+  that was believed already applied — not a bug in merge_and_cap or
+  days_to_fetch (both work correctly, confirmed via Apify API comparing
+  commit timestamps vs. run timestamps).
+- Real and confirmed secondary bug: the error placeholder
+  "{'error': 'no_items', ...}" from apify/instagram-post-scraper is a
+  1-element list — truthy in Python — so "if not dataset_items" never
+  detected it, in any version of the script until this fix (DD-030).
+- data_raw/ is gitignored — no automatic backup of raw data. Losing a
+  local file means losing the data, unless Apify still retains the original
+  dataset (verified: not in this case).
+- Future protocol: confirm a fix commit is applied BEFORE running the script
+  that depends on it — do not assume "it's already committed" without
+  verifying with git status/git log.
 
 ---
 
-## RUN-014 — Julio 2026 — Validación del fix geo_hard_signals (DD-031/DD-032)
+## RUN-014 — July 2026 — Validation of geo_hard_signals fix (DD-031/DD-032)
 **Scripts:** 1_harvest_account_classifier.py --diagnose
-**Input:** data_processed/account_scores.csv (5,433 cuentas) tras los
-commits 9180ad4 (bbox lat/lon, DD-031) y fe65863 (AF_SATELLITE, DD-032)
+**Input:** data_processed/account_scores.csv (5,433 accounts) after
+commits 9180ad4 (lat/lon bbox, DD-031) and fe65863 (AF_SATELLITE, DD-032)
 **Output:**
-- 7/7 cuentas objetivo pasaron a keep=False:
+- 7/7 target accounts moved to keep=False:
   alianzafrancesademedellin (username:AF_satellite:medellin),
   alianzafrancesacali (addr:OUTSIDE_FR:3.44,-76.52 + AF_satellite:cali),
   alianza_francesa_de_pereira (addr:OUTSIDE_FR:4.81,-75.70 + AF_satellite:pereira),
@@ -300,23 +298,23 @@ commits 9180ad4 (bbox lat/lon, DD-031) y fe65863 (AF_SATELLITE, DD-032)
   williamsanchezinmobiliaria (addr:OUTSIDE_FR:39.99,-0.05),
   embcolghana (addr:OUTSIDE_FR:5.61,-0.18),
   remaxmariavillasmil02 (addr:OUTSIDE_FR:7.77,-72.21)
-- keep=True: 62 → 61 (exactamente la cuenta esperada, sin más)
-- Sin daño colateral: calisabor_salsa_calena y francy_barahona_calisabor
-  (ambas con "cali" en el username, ambas radicadas en París) verificadas
-  intactas en keep=True con geo≥0.99
-- Sin red ni Neo4j necesarios — validación completa offline sobre CSV
-**Resultado:** Fix validado end-to-end
-**Lecciones:**
-- businessAddress con lat/lon es la señal geográfica más robusta
-  disponible; generaliza a cualquier país sin mantenimiento de listas
-- El residual post-bbox (alianzafrancesademedellin, sin lat/lon, bio
-  sobre "Francia" como tema) requirió una regla acotada al patrón de
-  nombre (AF_SATELLITE), no una regla general de username con ciudad LatAm
-- _tokens_in() usa word boundary — no funciona para tokens embebidos en
-  usernames sin separadores; usar substring (_norm(tok) in _norm(username))
-  en contextos donde ya hay gating por otro patrón fuerte
+- keep=True: 62 → 61 (exactly the expected account, no more)
+- No collateral damage: calisabor_salsa_calena and francy_barahona_calisabor
+  (both with "cali" in the username, both based in Paris) verified
+  intact at keep=True with geo≥0.99
+- No network or Neo4j needed — complete offline validation on CSV
+**Result:** Fix validated end-to-end
+**Lessons:**
+- businessAddress with lat/lon is the most robust geographic signal
+  available; generalizes to any country without list maintenance
+- The post-bbox residual (alianzafrancesademedellin, no lat/lon, bio
+  about "Francia" as a topic) required a rule scoped to the name pattern
+  (AF_SATELLITE), not a general LatAm-city username rule
+- _tokens_in() uses word boundary — does not work for tokens embedded in
+  usernames without separators; use substring (_norm(tok) in _norm(username))
+  in contexts already gated by another strong pattern
 
 ---
 
-*Última actualización: 2026-07-15*
-*Próximo run: RUN-015 — 3_analyze_network.py sobre grafo V2 expandido (bloqueado por conectividad)*
+*Last updated: 2026-07-15*
+*Next run: RUN-015 — 3_analyze_network.py on expanded V2 graph (blocked by connectivity)*

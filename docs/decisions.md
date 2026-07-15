@@ -1,546 +1,392 @@
-# Hub Cultural — Registro de Decisiones de Arquitectura
+# Hub Cultural — Architecture Decision Records
 
-> Documento vivo que registra las decisiones técnicas y metodológicas
-> del proyecto, sus razones y las alternativas consideradas.
-> Base para la redacción del capítulo metodológico del mémoire.
-
----
-
-## DD-001 — Neo4j como base de datos principal
-
-**Fecha:** Junio 2026
-**Decisión:** Usar Neo4j AuraDB (cloud) como almacenamiento principal del proyecto.
-**Razón:** Los datos de Instagram son naturalmente relacionales — cuentas que mencionan cuentas, posts que etiquetan usuarios, hashtags compartidos entre publicaciones. Un grafo captura esta estructura de forma nativa. Las consultas de red (caminos más cortos, vecindades, centralidad) son 10-100x más eficientes en Cypher que en SQL.
-**Alternativa considerada:** PostgreSQL con tablas de relaciones o MongoDB documental.
-**Por qué se descartó:** Las consultas de análisis de red son complejas y lentas en SQL. MongoDB no tiene soporte nativo para algoritmos de grafos.
+> Living document recording the technical and methodological decisions
+> of the project, their rationale, and the alternatives considered.
+> Foundation for the methodology chapter of the mémoire.
 
 ---
 
-## DD-002 — Apify como plataforma de scraping
+## DD-001 — Neo4j as primary database
 
-**Fecha:** Junio 2026
-**Decisión:** Usar Apify Cloud con actores `instagram-profile-scraper` e `instagram-post-scraper`.
-**Razón:** Instagram bloquea activamente el scraping directo. Apify mantiene actores especializados que sortean estas protecciones, con infraestructura cloud que evita bloqueos por IP. El modelo de pago por uso (FinOps) permite controlar costos por query.
-**Alternativa considerada:** Selenium/Playwright propio, Instaloader.
-**Por qué se descartó:** Alto mantenimiento ante cambios de Instagram, riesgo de bloqueo de IP, sin infraestructura cloud.
-
----
-
-## DD-003 — Separación de scripts por responsabilidad
-
-**Fecha:** Junio 2026
-**Decisión:** Scripts separados para perfiles (`1_harvest_ig_profiles.py`) y posts (`1_harvest_ig_posts.py`) en vez de un scraper único.
-**Razón:** Perfiles y posts tienen estructuras JSON completamente diferentes, actores de Apify distintos, y frecuencias de actualización diferentes. Separarlos permite ejecutarlos independientemente y controlar costos granularmente.
-**Alternativa considerada:** Un solo script que extrae todo.
-**Por qué se descartó:** Acoplamiento excesivo, difícil de mantener y de controlar costos.
+**Date:** June 2026
+**Decision:** Use Neo4j AuraDB (cloud) as the project's primary storage.
+**Rationale:** Instagram data is naturally relational — accounts that mention accounts, posts that tag users, hashtags shared across publications. A graph captures this structure natively. Network queries (shortest paths, neighborhoods, centrality) are 10–100x more efficient in Cypher than in SQL.
+**Alternative considered:** PostgreSQL with relationship tables or document-oriented MongoDB.
+**Why rejected:** Network analysis queries are complex and slow in SQL. MongoDB has no native support for graph algorithms.
 
 ---
 
-## DD-004 — Modelo de grafo: nodos y relaciones
+## DD-002 — Apify as harvesting platform
 
-**Fecha:** Junio 2026
-**Decisión:** Modelo con 7 tipos de nodos (Account, Post, IgtvVideo, Hashtag, Location, Track, Comment) y 10 tipos de relaciones (PUBLISHED, HAS_HASHTAG, MENTIONS, TAGS_USER, COAUTHORED_BY, TAGGED_AT, USES_MUSIC, WROTE, ON, RELATED_TO).
-**Razón:** Captura tanto el contenido (posts, hashtags) como las relaciones sociales (menciones, etiquetas) y el contexto cultural (música, ubicación). Permite análisis multidimensional de la red.
-**Alternativa considerada:** Modelo simplificado solo con Account y Post.
-**Por qué se descartó:** Perdería información valiosa sobre eventos (Location), tendencias culturales (Hashtag, Track) y colaboraciones (COAUTHORED_BY).
-
----
-
-## DD-005 — Labels :Public/:Private en nodos Account
-
-**Fecha:** Junio 2026
-**Decisión:** Usar labels adicionales de Neo4j (`:Public`, `:Private`) en vez de solo una propiedad booleana.
-**Razón:** Las labels en Neo4j permiten filtrar en Cypher de forma más eficiente (`MATCH (a:Account:Public)`) y son visualmente distinguibles en Neo4j Browser con colores diferentes.
-**Alternativa considerada:** Propiedad `a.isPrivate = true/false`.
-**Por qué se descartó:** Las propiedades booleanas no permiten filtrado indexado tan eficiente como las labels en Neo4j.
+**Date:** June 2026
+**Decision:** Use Apify Cloud with `instagram-profile-scraper` and `instagram-post-scraper` actors.
+**Rationale:** Instagram actively blocks direct scraping. Apify maintains specialized actors that bypass these protections, with cloud infrastructure that avoids IP blocks. The pay-per-use model (FinOps) allows cost control per query.
+**Alternative considered:** Custom Selenium/Playwright, Instaloader.
+**Why rejected:** High maintenance burden given Instagram changes, IP block risk, no cloud infrastructure.
 
 ---
 
-## DD-006 — Estrategia de expansión de red: BFS desde seed
+## DD-003 — Separate scripts by responsibility
 
-**Fecha:** Junio 2026
-**Decisión:** Usar `@consuladocolparis` como cuenta semilla y expandir la red via menciones, etiquetas y relatedProfiles en vez de scraping aleatorio.
-**Razón:** El consulado es el nodo institucional más central de la diáspora colombiana en París — todas las cuentas relevantes están a 1-3 grados de distancia. La expansión BFS garantiza que cada nueva cuenta descubierta tiene conexión real con la comunidad.
-**Alternativa considerada:** Lista curada manualmente de cuentas colombianas en París.
-**Por qué se descartó:** Sesgo del investigador, no escalable, pierde conexiones inesperadas.
-
----
-
-## DD-007 — Embeddings semánticos sobre keywords para detección de eventos
-
-**Fecha:** Julio 2026
-**Decisión:** Usar `paraphrase-multilingual-MiniLM-L12-v2` como Capa 1 de detección de eventos en vez de keywords hardcodeadas.
-**Razón:** Los posts de Instagram mezclan español, francés e inglés con emojis y jerga. Las keywords fallan ante variaciones ortográficas, multilingüismo y formas indirectas de anunciar eventos. Los embeddings capturan el concepto de "evento futuro en lugar físico" independientemente del idioma o las palabras exactas. Como se concluyó durante el desarrollo: "clasificar por palabras en la era de la IA no tiene sentido."
-**Alternativa considerada:** Regex + keywords hardcodeadas, EntityRuler de spaCy.
-**Por qué se descartó:** Frágil ante variaciones, requiere mantenimiento constante, no multilingüe por diseño.
+**Date:** June 2026
+**Decision:** Separate scripts for profiles (`1_harvest_ig_profiles.py`) and posts (`1_harvest_ig_posts.py`) instead of a single harvester.
+**Rationale:** Profiles and posts have completely different JSON structures, different Apify actors, and different update frequencies. Keeping them separate allows independent execution and granular cost control.
+**Alternative considered:** A single script that extracts everything.
+**Why rejected:** Excessive coupling, hard to maintain and to control costs.
 
 ---
 
-## DD-008 — Modelo multilingüe mDeBERTa sobre NLI monolingüe
+## DD-004 — Graph model: nodes and relationships
 
-**Fecha:** Julio 2026
-**Decisión:** Usar `MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7` para clasificación zero-shot de tipo de evento.
-**Razón:** El modelo anterior (`cross-encoder/nli-MiniLM2-L6-H768`) fue entrenado en MNLI en inglés — al pasarle captions en español y francés el resultado era cercano al azar. El mDeBERTa multilingüe fue entrenado en XNLI con 15 idiomas incluyendo español y francés.
-**Alternativa considerada:** `cross-encoder/nli-MiniLM2-L6-H768` (monolingüe inglés).
-**Por qué se descartó:** Tasa de detección de 0.7% — inaceptable. Bug identificado por revisión externa (Fable).
-
----
-
-## DD-009 — Arquitectura de 2 capas para detección de eventos
-
-**Fecha:** Julio 2026
-**Decisión:** Pipeline de 2 capas: Capa 1 (similitud semántica con embeddings) filtra candidatos, Capa 2 (zero-shot NLI) clasifica el tipo de evento solo sobre candidatos.
-**Razón:** Correr el modelo NLI sobre todos los posts es 5-7 horas en CPU i5. Usar embeddings como pre-filtro reduce los candidatos al ~40% del corpus, bajando el tiempo total a ~18 minutos. La Capa 1 es 100x más rápida y suficientemente precisa para el filtrado inicial.
-**Alternativa considerada:** Solo zero-shot sobre todos los posts, SetFit fine-tuned.
-**Por qué se descartó:** Zero-shot solo: demasiado lento. SetFit: requiere ~200 ejemplos etiquetados manualmente y GPU — fuera de scope para v1.
+**Date:** June 2026
+**Decision:** Model with 7 node types (Account, Post, IgtvVideo, Hashtag, Location, Track, Comment) and 10 relationship types (PUBLISHED, HAS_HASHTAG, MENTIONS, TAGS_USER, COAUTHORED_BY, TAGGED_AT, USES_MUSIC, WROTE, ON, RELATED_TO).
+**Rationale:** Captures both content (posts, hashtags) and social relationships (mentions, tags) and cultural context (music, location). Enables multidimensional network analysis.
+**Alternative considered:** Simplified model with only Account and Post.
+**Why rejected:** Would lose valuable information about events (Location), cultural trends (Hashtag, Track), and collaborations (COAUTHORED_BY).
 
 ---
 
-## DD-010 — 100 frases de referencia para Capa 1
+## DD-005 — :Public/:Private labels on Account nodes
 
-**Fecha:** Julio 2026
-**Decisión:** Usar 100 frases de referencia que cubren 8 tipos de evento en 3 idiomas y 6 formas de anuncio (convocatoria, apertura, agenda, fecha+lugar, inscripción, recordatorio).
-**Razón:** Con pocas referencias (<15), el espacio semántico de comparación es demasiado estrecho — posts con formas indirectas de anuncio no son detectados. 100 frases cubren suficientemente el espacio semántico sin ser redundantes.
-**Alternativa considerada:** 15 frases genéricas.
-**Por qué se descartó:** Tasa de detección insuficiente — los posts más interesantes (eventos pequeños comunitarios) usan formas de anuncio no cubiertas por pocas referencias.
-
----
-
-## DD-011 — nlp_event_resolver para deduplicación semántica
-
-**Fecha:** Julio 2026
-**Decisión:** Script separado que fusiona eventos duplicados usando triple criterio: misma Location normalizada + fecha ±3 días + similitud coseno > 0.75.
-**Razón:** Múltiples cuentas publican sobre el mismo evento (DichaFest aparecía en 6-7 posts de diferentes cuentas). Sin deduplicación, el mismo evento se crea múltiples veces con datos fragmentados. La triple señal evita fusiones incorrectas entre eventos distintos que comparten solo un criterio.
-**Alternativa considerada:** Solo similitud semántica, clustering DBSCAN.
-**Por qué se descartó:** Solo similitud: fusiona eventos distintos en el mismo venue. DBSCAN: requiere definir epsilon sin datos de calibración.
+**Date:** June 2026
+**Decision:** Use additional Neo4j labels (`:Public`, `:Private`) instead of just a boolean property.
+**Rationale:** Labels in Neo4j allow more efficient filtering in Cypher (`MATCH (a:Account:Public)`) and are visually distinguishable in Neo4j Browser with different colors.
+**Alternative considered:** Property `a.isPrivate = true/false`.
+**Why rejected:** Boolean properties do not allow indexed filtering as efficiently as labels in Neo4j.
 
 ---
 
-## DD-012 — Filtro político: penalización vs exclusión total
+## DD-006 — Network expansion strategy: BFS from seed
 
-**Fecha:** Julio 2026
-**Decisión:** Las cuentas políticas (`@gustavopetrourrego`, `@registraduria`, etc.) reciben una penalización en el `culturalRelevanceScore` (weight = 0.1) en vez de ser excluidas del grafo.
-**Razón:** Excluirlas eliminaría conexiones reales — el consulado interactúa con estas cuentas y esa interacción es datos válidos. La penalización las mantiene en el grafo para análisis de red pero las hace irrelevantes para las recomendaciones de semillas y el dashboard cultural.
-**Alternativa considerada:** Exclusión total del grafo, exclusión solo del dashboard.
-**Por qué se descartó:** Exclusión total distorsiona los algoritmos de centralidad al eliminar nodos con muchas conexiones reales.
-
----
-
-## DD-013 — NetworkX/igraph local sobre Neo4j GDS
-
-**Fecha:** Julio 2026
-**Decisión:** Correr los algoritmos de análisis de red (PageRank, Betweenness, Leiden) localmente con igraph (C) en vez de usar Neo4j Graph Data Science.
-**Razones:**
-1. El puerto 7687 de Neo4j Aura está bloqueado en la red corporativa — GDS requiere conexión persistente.
-2. igraph en C es más rápido que GDS para grafos de este tamaño (~7,000 nodos).
-3. Los resultados en CSV son versionables en git y reproducibles sin conexión.
-4. GDS en Aura Free tiene limitaciones de memoria no documentadas.
-**Alternativa considerada:** Neo4j GDS via Bolt, Google Colab con GDS.
-**Por qué se descartó:** Dependencia de red y de credenciales cloud para cada ejecución.
+**Date:** June 2026
+**Decision:** Use `@consuladocolparis` as the seed account and expand the network via mentions, tags, and relatedProfiles instead of random harvesting.
+**Rationale:** The consulate is the most central institutional node of the Colombian diaspora in Paris — all relevant accounts are 1–3 degrees away. BFS expansion guarantees that every newly discovered account has a real connection to the community.
+**Alternative considered:** Manually curated list of Colombian accounts in Paris.
+**Why rejected:** Researcher bias, not scalable, misses unexpected connections.
 
 ---
 
-## DD-014 — Grafo completo para algoritmos, tier solo en reporte
+## DD-007 — Semantic embeddings over keywords for event detection
 
-**Fecha:** Julio 2026
-**Decisión:** Los algoritmos de centralidad (PageRank, Betweenness, Leiden) corren sobre el grafo completo (4,637 nodos). El filtro por tier (primary/secondary/excluded) solo se aplica al reporte final y a la selección de semillas.
-**Razón:** El PageRank de `@dichaparis` depende de quién la menciona — incluyendo cuentas `unknown`. Si se filtra el grafo antes de correr los algoritmos, se pierde ese contexto y los rankings son menos representativos de la importancia real de cada cuenta en la red.
-**Alternativa considerada:** Filtrar nodos y aristas antes de construir el grafo igraph.
-**Por qué se descartó:** Con ~36 nodos clasificados en 4,637 totales, el grafo filtrado es demasiado pequeño para que los algoritmos sean estadísticamente significativos.
-
----
-
-## DD-015 — businessCategoryName de Instagram como fuente de actorType
-
-**Fecha:** Julio 2026
-**Decisión:** Usar el campo `businessCategoryName` de la API de Instagram (vía Apify) como clasificador primario del tipo de cuenta, complementado con `manual_overrides` en `config/account_tiers.json`.
-**Razón:** Instagram ya clasifica sus cuentas de negocio con categorías precisas (Artist, Restaurant, NGO, Politician, etc.). Es más confiable que heurísticas de keywords sobre el username o la bio. Los `manual_overrides` permiten corregir clasificaciones incorrectas sin tocar el código.
-**Alternativa considerada:** Zero-shot classification sobre la bio, heurísticas de keywords en username.
-**Por qué se descartó:** Keywords: frágil y requiere mantenimiento. Zero-shot: añade latencia y costo computacional innecesario cuando Instagram ya tiene la clasificación.
+**Date:** July 2026
+**Decision:** Use `paraphrase-multilingual-MiniLM-L12-v2` as Layer 1 for event detection instead of hardcoded keywords.
+**Rationale:** Instagram posts mix Spanish, French, and English with emojis and slang. Keywords fail with spelling variations, multilingualism, and indirect forms of announcing events. Embeddings capture the concept of "future event at a physical place" regardless of language or exact wording. As concluded during development: "classifying by keywords in the AI era makes no sense."
+**Alternative considered:** Regex + hardcoded keywords, spaCy EntityRuler.
+**Why rejected:** Fragile against variations, requires constant maintenance, not multilingual by design.
 
 ---
 
-## DD-016 — Sistema de tiers para priorización de cuentas
+## DD-008 — Multilingual mDeBERTa over monolingual NLI
 
-**Fecha:** Julio 2026
-**Decisión:** Tres tiers de cuentas basados en `businessCategoryName`:
-- **Primary:** Artist, Restaurant, Community, Local business, Podcast, Art Gallery, Journalist — foco del análisis cultural.
-- **Secondary:** Language School, NGO, Education, University, Digital creator, Public figure, Entrepreneur — contexto relevante pero no prioritario.
-- **Excluded:** Financial service, Politician, Real Estate, Tour Agency, Government — ruido o fuera de scope cultural (excepción: cuentas seed del Bloque A de DD-022 se mantienen activas como ancla estructural pese a este tier — ver DD-026).
-**Razón:** No todas las cuentas tienen el mismo valor para el objetivo del proyecto. Las instituciones financieras y políticas distorsionan los rankings culturales. Los tiers permiten análisis granular sin perder datos.
-**Actualización (Julio 2026):** Digital creator, Public figure y Entrepreneur se movieron de primary a secondary. Justificación: categorías ambiguas que no garantizan contenido cultural primario — pueden ser relevantes pero no prioritarias. Un "Digital creator" puede ser influencer de moda o de fitness sin ninguna vinculación cultural colombiana; un "Public figure" puede ser político o deportista.
-**Alternativa considerada:** Incluir todo sin filtro, excluir manualmente caso por caso.
-**Por qué se descartó:** Sin filtro: rankings dominados por cuentas con millones de seguidores sin relevancia cultural. Manual: no escalable.
+**Date:** July 2026
+**Decision:** Use `MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7` for zero-shot event type classification.
+**Rationale:** The previous model (`cross-encoder/nli-MiniLM2-L6-H768`) was trained on MNLI in English — when fed Spanish and French captions the result was near chance. The multilingual mDeBERTa was trained on XNLI across 15 languages including Spanish and French.
+**Alternative considered:** `cross-encoder/nli-MiniLM2-L6-H768` (English monolingual).
+**Why rejected:** Detection rate of 0.7% — unacceptable. Bug identified by external review (Fable).
 
 ---
 
-## DD-017 — Almacenamiento histórico de runs de análisis
+## DD-009 — 2-layer architecture for event detection
 
-**Fecha:** Julio 2026
-**Decisión:** Cada ejecución de `3_analyze_network.py analyze` guarda sus resultados en `data_processed/runs/YYYYMMDD_HHMMSS_{label}/` además de actualizar los archivos raíz.
-**Razón:** El análisis de red se recalcula cada vez que se añaden datos al grafo. Guardar runs históricos permite comparar cómo evolucionan los rankings a medida que el corpus crece — evidencia del proceso iterativo para el mémoire.
-**Alternativa considerada:** Sobrescribir siempre los mismos archivos.
-**Por qué se descartó:** Pierde la trazabilidad de la evolución del análisis — imposible comparar V1 con V2.
-
----
-
-## DD-018 — Nominatim (OpenStreetMap) para geocodificación
-
-**Fecha:** Julio 2026
-**Decisión:** Usar Nominatim (API gratuita de OpenStreetMap) para geocodificar los nodos Location extraídos por NER.
-**Razón:** Gratuito, sin API key, cubre París y Colombia con buena precisión. El rate limit de 1 req/s es manejable para el volumen del proyecto (~215 locations).
-**Alternativa considerada:** Google Maps Geocoding API, HERE Maps.
-**Por qué se descartó:** Google Maps: de pago con límite de requests gratuitos insuficiente. HERE: requiere registro y API key.
+**Date:** July 2026
+**Decision:** Two-layer pipeline: Layer 1 (semantic similarity with embeddings) filters candidates, Layer 2 (zero-shot NLI) classifies the event type only on candidates.
+**Rationale:** Running the NLI model on all posts takes 5–7 hours on an i5 CPU. Using embeddings as a pre-filter reduces candidates to ~40% of the corpus, bringing total time down to ~18 minutes. Layer 1 is 100x faster and precise enough for initial filtering.
+**Alternative considered:** Zero-shot only over all posts, fine-tuned SetFit.
+**Why rejected:** Zero-shot alone: too slow. SetFit: requires ~200 manually labeled examples and a GPU — out of scope for v1.
 
 ---
 
-## DD-019 — Nomenclatura harvest/build/analyze/enrich/visualize
+## DD-010 — 100 reference phrases for Layer 1
 
-**Fecha:** Julio 2026
-**Decisión:** Renombrar todos los scripts con prefijo descriptivo + número de etapa (`1_harvest_`, `2_build_`, `3_analyze_`, `4_enrich_`, `5_visualize_`).
-**Razón:** La nomenclatura original (`extract_profiles.py`, `nlp_extract_events.py`) no comunicaba el orden de ejecución ni el rol de cada script. El nuevo esquema es autodescriptivo — cualquier colaborador entiende el pipeline sin leer documentación.
-**Alternativa considerada:** Mantener nombres originales, usar solo números.
-**Por qué se descartó:** Solo números: no descriptivos. Nombres originales: no comunican orden ni responsabilidad.
-
----
-
-## DD-020 — Baja densidad del grafo como limitación metodológica
-
-**Fecha:** Julio 2026
-**Decisión:** Documentar explícitamente la baja densidad del grafo (2,047 nodos / 2,300 aristas, ratio ~1.1 aristas/nodo) como limitación metodológica de v1 en vez de intentar ocultarla.
-**Razón:** La limitación es real y afecta el poder discriminativo de los algoritmos de centralidad. Documentarla con honestidad y proponer el BFS de V2 como solución es más riguroso académicamente que presentar resultados sin contexto.
-**Implicación para V2:** Scrapeando 50 posts para cada una de las 170 cuentas actuales (en vez de 12) se triplicaría la densidad del grafo sin necesidad de expandir el número de cuentas.
-**Referencia:** La baja densidad puede interpretarse también como hallazgo sociológico — una red muy dispersa puede indicar fragmentación de la diáspora colombiana en Francia, consistente con literatura sobre diásporas en países de acogida con alta individualización (Vertovec, 2009).
+**Date:** July 2026
+**Decision:** Use 100 reference phrases covering 8 event types in 3 languages and 6 announcement forms (call for entries, opening, agenda, date+location, registration, reminder).
+**Rationale:** With few references (<15), the semantic comparison space is too narrow — posts with indirect announcement forms are not detected. 100 phrases sufficiently cover the semantic space without being redundant.
+**Alternative considered:** 15 generic phrases.
+**Why rejected:** Insufficient detection rate — the most interesting posts (small community events) use announcement forms not covered by few references.
 
 ---
 
+## DD-011 — nlp_event_resolver for semantic deduplication
+
+**Date:** July 2026
+**Decision:** Separate script that merges duplicate events using a triple criterion: same normalized Location + date ±3 days + cosine similarity > 0.75.
+**Rationale:** Multiple accounts post about the same event (DichaFest appeared in 6–7 posts from different accounts). Without deduplication, the same event is created multiple times with fragmented data. The triple signal prevents incorrect merges between distinct events that share only one criterion.
+**Alternative considered:** Semantic similarity alone, DBSCAN clustering.
+**Why rejected:** Similarity only: merges distinct events at the same venue. DBSCAN: requires defining epsilon without calibration data.
+
 ---
 
-## DD-022 (actualización) — Seeds V2: consulados + instituciones culturales
+## DD-012 — Political filter: penalty vs. total exclusion
 
-**Fecha:** 2026-07-07
+**Date:** July 2026
+**Decision:** Political accounts (`@gustavopetrourrego`, `@registraduria`, etc.) receive a penalty in the `culturalRelevanceScore` (weight = 0.1) rather than being excluded from the graph.
+**Rationale:** Excluding them would remove real connections — the consulate interacts with these accounts and that interaction is valid data. The penalty keeps them in the graph for network analysis but makes them irrelevant for seed recommendations and the cultural dashboard.
+**Alternative considered:** Total exclusion from the graph, exclusion only from the dashboard.
+**Why rejected:** Total exclusion distorts centrality algorithms by removing nodes with many real connections.
 
-Contexto: los consulados conocen sus comunidades — sus relatedProfiles y menciones son un mapa de la diáspora real. Se amplía el criterio de seeds a instituciones culturales francesas relacionadas con América Latina.
+---
 
-Decisión: la clasificación de importancia/tier de cada cuenta NO se define aquí manualmente. Se determinará después mediante scraping de seguidores/relatedProfiles (`1_harvest_ig_profiles.py`) y el scoring del clasificador NLP (`1_harvest_account_classifier.py` — geography_score + cultural_score + anti-embeddings, DD-023). Este bloque solo fija el set inicial de seeds, no su tier final.
+## DD-013 — Local NetworkX/igraph over Neo4j GDS
 
-### Bloque A — Consulados y embajadas latinoamericanas en Francia
+**Date:** July 2026
+**Decision:** Run network analysis algorithms (PageRank, Betweenness, Leiden) locally with igraph (C) instead of using Neo4j Graph Data Science.
+**Rationale:**
+1. Neo4j Aura port 7687 is blocked on the corporate network — GDS requires a persistent connection.
+2. igraph in C is faster than GDS for graphs of this size (~7,000 nodes).
+3. CSV results are git-versionable and reproducible without a connection.
+4. GDS on Aura Free has undocumented memory limits.
+**Alternative considered:** Neo4j GDS via Bolt, Google Colab with GDS.
+**Why rejected:** Dependency on network and cloud credentials for every execution.
 
-| País | Handle IG | Tipo | Confianza |
+---
+
+## DD-014 — Full graph for algorithms, tier filter only in reporting
+
+**Date:** July 2026
+**Decision:** Centrality algorithms (PageRank, Betweenness, Leiden) run on the full graph (4,637 nodes). The tier filter (primary/secondary/excluded) is applied only to the final report and seed selection.
+**Rationale:** `@dichaparis`'s PageRank depends on who mentions it — including `unknown` accounts. If the graph is filtered before running algorithms, that context is lost and rankings are less representative of each account's real importance in the network.
+**Alternative considered:** Filter nodes and edges before building the igraph graph.
+**Why rejected:** With ~36 classified nodes out of 4,637 total, the filtered graph is too small for algorithms to be statistically meaningful.
+
+---
+
+## DD-015 — Instagram businessCategoryName as actorType source
+
+**Date:** July 2026
+**Decision:** Use the `businessCategoryName` field from the Instagram API (via Apify) as the primary account type classifier, complemented by `manual_overrides` in `config/account_tiers.json`.
+**Rationale:** Instagram already classifies its business accounts with precise categories (Artist, Restaurant, NGO, Politician, etc.). This is more reliable than keyword heuristics on the username or bio. `manual_overrides` allow correcting incorrect classifications without touching code.
+**Alternative considered:** Zero-shot classification on the bio, keyword heuristics on username.
+**Why rejected:** Keywords: fragile and requires maintenance. Zero-shot: adds latency and unnecessary computational cost when Instagram already has the classification.
+
+---
+
+## DD-016 — Tier system for account prioritization
+
+**Date:** July 2026
+**Decision:** Three account tiers based on `businessCategoryName`:
+- **Primary:** Artist, Restaurant, Community, Local business, Podcast, Art Gallery, Journalist — core of cultural analysis.
+- **Secondary:** Language School, NGO, Education, University, Digital creator, Public figure, Entrepreneur — relevant context but not priority.
+- **Excluded:** Financial service, Politician, Real Estate, Tour Agency, Government — noise or out of cultural scope (exception: Bloc A seed accounts from DD-022 remain active as structural anchors despite this tier — see DD-026).
+**Rationale:** Not all accounts have the same value for the project's objective. Financial and political institutions distort cultural rankings. Tiers enable granular analysis without losing data.
+**Update (July 2026):** Digital creator, Public figure, and Entrepreneur moved from primary to secondary. Justification: ambiguous categories that do not guarantee primary cultural content — they may be relevant but not priority. A "Digital creator" can be a fashion or fitness influencer with no Colombian cultural connection; a "Public figure" can be a politician or athlete.
+**Alternative considered:** Include everything without a filter, manually exclude case by case.
+**Why rejected:** No filter: rankings dominated by accounts with millions of followers and no cultural relevance. Manual: not scalable.
+
+---
+
+## DD-017 — Historical storage of analysis runs
+
+**Date:** July 2026
+**Decision:** Each execution of `3_analyze_network.py analyze` saves results in `data_processed/runs/YYYYMMDD_HHMMSS_{label}/` in addition to updating the root files.
+**Rationale:** Network analysis is recalculated every time data is added to the graph. Saving historical runs allows comparing how rankings evolve as the corpus grows — evidence of the iterative process for the mémoire.
+**Alternative considered:** Always overwrite the same files.
+**Why rejected:** Loses traceability of analysis evolution — impossible to compare V1 with V2.
+
+---
+
+## DD-018 — Nominatim (OpenStreetMap) for geocoding
+
+**Date:** July 2026
+**Decision:** Use Nominatim (OpenStreetMap free API) to geocode Location nodes extracted by NER.
+**Rationale:** Free, no API key required, covers Paris and Colombia with good accuracy. The 1 req/s rate limit is manageable for the project volume (~215 locations).
+**Alternative considered:** Google Maps Geocoding API, HERE Maps.
+**Why rejected:** Google Maps: paid with insufficient free request limit. HERE: requires registration and API key.
+
+---
+
+## DD-019 — harvest/build/analyze/enrich/visualize naming convention
+
+**Date:** July 2026
+**Decision:** Rename all scripts with a descriptive prefix + stage number (`1_harvest_`, `2_build_`, `3_analyze_`, `4_enrich_`, `5_visualize_`).
+**Rationale:** The original naming (`extract_profiles.py`, `nlp_extract_events.py`) did not communicate execution order or each script's role. The new scheme is self-descriptive — any collaborator understands the pipeline without reading documentation.
+**Alternative considered:** Keep original names, use numbers only.
+**Why rejected:** Numbers only: not descriptive. Original names: do not communicate order or responsibility.
+
+---
+
+## DD-020 — Low graph density as methodological limitation
+
+**Date:** July 2026
+**Decision:** Explicitly document the low graph density (2,047 nodes / 2,300 edges, ratio ~1.1 edges/node) as a v1 methodological limitation rather than trying to hide it.
+**Rationale:** The limitation is real and affects the discriminative power of centrality algorithms. Documenting it honestly and proposing V2 BFS as the solution is more academically rigorous than presenting results without context.
+**Implication for V2:** Harvesting 50 posts for each of the 170 current accounts (instead of 12) would triple graph density without needing to expand the number of accounts.
+**Reference:** Low density can also be interpreted as a sociological finding — a very sparse network may indicate fragmentation of the Colombian diaspora in France, consistent with literature on diasporas in host countries with high individualization (Vertovec, 2009).
+
+---
+
+---
+
+## DD-022 (update) — V2 seeds: consulates + cultural institutions
+
+**Date:** 2026-07-07
+
+Context: consulates know their communities — their relatedProfiles and mentions are a map of the real diaspora. The seed criterion is expanded to include French cultural institutions related to Latin America.
+
+Decision: the importance/tier classification of each account is NOT defined manually here. It will be determined afterward through follower/relatedProfile harvesting (`1_harvest_ig_profiles.py`) and NLP classifier scoring (`1_harvest_account_classifier.py` — geography_score + cultural_score + anti-embeddings, DD-023). This block only fixes the initial seed set, not each account's final tier.
+
+### Bloc A — Latin American consulates and embassies in France
+
+| Country | IG Handle | Type | Confidence |
 |---|---|---|---|
-| Colombia | @consuladocolparis | Consulado | Alta |
-| Colombia | @embajadacolfra | Embajada | Alta |
-| Argentina | @arg_enfrancia | Embajada | Media-alta |
-| Brasil | @cg_brasil_paris | Consulado | Media (verificar vs @cgparisoficial) |
-| Brasil | @bresilenfrance | Embajada | Alta |
-| Chile | @embachilefrancia | Embajada | Media |
-| México | @embajadademexicoenfrancia | Embajada | Media-alta |
-| Perú | @consuladodelperuenparis | Consulado | Alta |
-| Venezuela | @embfrancia_ve | Embajada | Baja (verificar vs @embavefrancia) |
-| Ecuador | @eecufrancia | Embajada | Baja (verificar vs @embajadaecufrancia) |
-| Uruguay | @uruguayfrancia | Embajada | Alta |
-| Bolivia | — | No encontrado en IG | — |
-| Costa Rica | @costaricafrance | Embajada | Media-alta |
-| Guatemala | @embaguafr | Embajada | Alta |
-| República Dominicana | @rdenfrancia | Embajada | Alta |
-| República Dominicana | @rdenparis | Consulado | Alta |
-| Panamá | @embpanamafra | Embajada | Alta |
-| Cuba | @embacubafrancia | Embajada | Alta |
-| El Salvador | — | No encontrado en IG | — |
-| Honduras | @embajadadehondurasenfrancia | Embajada | Media-alta |
-| Nicaragua | — | No encontrado en IG | — |
-| Paraguay | — | No encontrado en IG | — |
+| Colombia | @consuladocolparis | Consulate | High |
+| Colombia | @embajadacolfra | Embassy | High |
+| Argentina | @arg_enfrancia | Embassy | Medium-high |
+| Brazil | @cg_brasil_paris | Consulate | Medium (verify vs @cgparisoficial) |
+| Brazil | @bresilenfrance | Embassy | High |
+| Chile | @embachilefrancia | Embassy | Medium |
+| Mexico | @embajadademexicoenfrancia | Embassy | Medium-high |
+| Peru | @consuladodelperuenparis | Consulate | High |
+| Venezuela | @embfrancia_ve | Embassy | Low (verify vs @embavefrancia) |
+| Ecuador | @eecufrancia | Embassy | Low (verify vs @embajadaecufrancia) |
+| Uruguay | @uruguayfrancia | Embassy | High |
+| Bolivia | — | Not found on IG | — |
+| Costa Rica | @costaricafrance | Embassy | Medium-high |
+| Guatemala | @embaguafr | Embassy | High |
+| Dominican Republic | @rdenfrancia | Embassy | High |
+| Dominican Republic | @rdenparis | Consulate | High |
+| Panama | @embpanamafra | Embassy | High |
+| Cuba | @embacubafrancia | Embassy | High |
+| El Salvador | — | Not found on IG | — |
+| Honduras | @embajadadehondurasenfrancia | Embassy | Medium-high |
+| Nicaragua | — | Not found on IG | — |
+| Paraguay | — | Not found on IG | — |
 
-### Bloque B — Instituciones culturales/académicas francesas relacionadas con América Latina
+### Bloc B — French cultural/academic institutions related to Latin America
 
-| Cuenta | Handle IG | Tipo |
+| Account | IG Handle | Type |
 |---|---|---|
-| Maison de l'Amérique Latine | @maisondelameriquelatineparis | Institución cultural (1946) |
-| Instituto Cervantes París | @institutocervantesparis | Instituto cultural hispano |
-| France Diplomatie (ES) | @francediplo_es | Institucional francés (español) |
-| IHEAL & CREDA | @iheal_creda | Centro académico (Sorbonne Nouvelle) |
-| Festival CLaP | @festivalclap | Festival de cine latinoamericano de París |
-| GRULAC UNESCO | @grulacunesco | Grupo diplomático LatAm/Caribe en UNESCO |
-| El Café Latino | @elcafelatino | Medio bilingüe sobre América Latina en Europa |
+| Maison de l'Amérique Latine | @maisondelameriquelatineparis | Cultural institution (1946) |
+| Instituto Cervantes París | @institutocervantesparis | Spanish cultural institute |
+| France Diplomatie (ES) | @francediplo_es | French institutional (Spanish) |
+| IHEAL & CREDA | @iheal_creda | Academic center (Sorbonne Nouvelle) |
+| Festival CLaP | @festivalclap | Latin American film festival in Paris |
+| GRULAC UNESCO | @grulacunesco | LatAm/Caribbean diplomatic group at UNESCO |
+| El Café Latino | @elcafelatino | Bilingual media outlet on Latin America in Europe |
 
-Excluido explícitamente: Alliances Françaises (fuera de Francia), cuentas comerciales (ej. restaurante de la Maison de l'Amérique Latine).
+Explicitly excluded: Alliances Françaises outside France, commercial accounts (e.g. Maison de l'Amérique Latine restaurant).
 
-Pendiente de verificación manual por Diego:
-- Bolivia, El Salvador, Nicaragua, Paraguay — sin handle de IG confirmado.
-- Brasil, Venezuela, Ecuador — doble candidato, elegir cuenta activa antes de correr el harvester.
-
----
+Pending manual verification by Diego:
+- Bolivia, El Salvador, Nicaragua, Paraguay — no confirmed IG handle.
+- Brazil, Venezuela, Ecuador — two candidates, choose the active account before running the harvester.
 
 ---
 
-## DD-025 — Cuentas vacías como lista de prospección orgánica
+---
 
-**Fecha:** Julio 2026
-**Decisión:** Tratar las ~4,467 cuentas vacías en Neo4j como lista de prospección prioritaria para V2, antes de buscar nuevas seeds externas.
-**Razón:** Estas cuentas fueron descubiertas orgánicamente porque la diáspora colombiana ya las mencionó, etiquetó, comentó o relacionó. Su origen confirma relevancia:
-- 1,530 via comentarios en posts del consulado
-- 1,001 via relatedProfiles de 36 perfiles scrapeados
-- 906 via menciones en posts
-- 740 via etiquetas en posts
-- 290 origen desconocido (múltiples fuentes)
+## DD-025 — Empty accounts as organic prospect list
 
-Los relatedProfiles son especialmente valiosos — 36 perfiles generan potencialmente ~1,300 cuentas únicas nuevas sin necesidad de scraping de followers. Costo estimado para scrapeear todos sus perfiles: ~$0.65 USD.
+**Date:** July 2026
+**Decision:** Treat the ~4,467 empty accounts in Neo4j as a priority prospect list for V2, before looking for external new seeds.
+**Rationale:** These accounts were discovered organically because the Colombian diaspora already mentioned, tagged, commented on, or related to them. Their origin confirms relevance:
+- 1,530 via comments on consulate posts
+- 1,001 via relatedProfiles of 36 harvested profiles
+- 906 via mentions in posts
+- 740 via tags in posts
+- 290 unknown origin (multiple sources)
 
-**Implicación para V2:** Correr `1_harvest_ig_profiles.py` sobre las cuentas vacías filtradas por el clasificador NLP antes de buscar seeds externas — son candidatas con relevancia orgánicamente confirmada.
-**Alternativa considerada:** Buscar nuevas seeds externas (consulados latinoamericanos) como primera acción de V2.
-**Por qué complementar ambas:** Las seeds externas amplían el scope a toda América Latina; las cuentas vacías profundizan el corpus colombiano ya existente.
+relatedProfiles are especially valuable — 36 profiles potentially generate ~1,300 unique new accounts without needing to harvest followers. Estimated cost to harvest all their profiles: ~$0.65 USD.
+
+**Implication for V2:** Run `1_harvest_ig_profiles.py` on empty accounts filtered by the NLP classifier before looking for external seeds — they are candidates with organically confirmed relevance.
+**Alternative considered:** Look for new external seeds (Latin American consulates) as the first V2 action.
+**Why both complement each other:** External seeds expand scope to all of Latin America; empty accounts deepen the existing Colombian corpus.
 
 ---
 
-## DD-026 — Consulados como ancla estructural vs. objetivo cultural clasificable
+## DD-026 — Consulates as structural anchors vs. classifiable cultural targets
 
-**Fecha:** 2026-07-09
-**Decisión:** Las cuentas del Bloque A de seeds V2 (consulados y embajadas 
-latinoamericanas en Francia, DD-022) reciben `role = "seed_source"` y 
-`keep = False` de forma incondicional en `1_harvest_account_classifier.py`, 
-independientemente de su `final_score`. Esto se implementa en la función 
-`_finalize()` (líneas ~531-540): si la cuenta es seed y pertenece al 
-Bloque A, `keep` se sobreescribe a `False` sin importar el score calculado.
+**Date:** 2026-07-09
+**Decision:** Bloc A V2 seed accounts (Latin American consulates and embassies in France, DD-022) receive `role = "seed_source"` and `keep = False` unconditionally in `1_harvest_account_classifier.py`, regardless of their `final_score`. This is implemented in the `_finalize()` function (lines ~531–540): if the account is a seed and belongs to Bloc A, `keep` is overwritten to `False` regardless of the calculated score.
 
-**Razón — la contradicción que resuelve:** DD-016 clasifica "Government 
-organization" en el tier Excluded, ya que instituciones gubernamentales 
-distorsionan los rankings de relevancia cultural. Pero DD-006 y DD-022 
-usan precisamente instituciones gubernamentales (consulados/embajadas) 
-como semilla estructural de todo el descubrimiento de red — sin ellas no 
-hay BFS, no hay `relatedProfiles`, no hay expansión. Aplicar DD-016 
-literalmente excluiría del grafo a la cuenta que hace posible el grafo.
+**Rationale — the contradiction it resolves:** DD-016 classifies "Government organization" in the Excluded tier, since government institutions distort cultural relevance rankings. But DD-006 and DD-022 use precisely government institutions (consulates/embassies) as the structural seed of all network discovery — without them there is no BFS, no `relatedProfiles`, no expansion. Applying DD-016 literally would exclude from the graph the very account that makes the graph possible.
 
-La resolución separa dos preguntas distintas que antes se resolvían con 
-un solo criterio:
-1. "¿Esta cuenta es un objetivo cultural válido para el análisis de 
-   relevancia?" → Para consulados/embajadas: NO (se comportan igual que 
-   DD-016 lo predice — son gobierno, no cultura).
-2. "¿Esta cuenta debe permanecer activa como nodo/ancla para descubrir 
-   la red?" → SÍ, siempre — su función no es ser evaluada, es generar 
-   las conexiones que sí serán evaluadas.
+The resolution separates two distinct questions that were previously resolved with a single criterion:
+1. "Is this account a valid cultural target for relevance analysis?" → For consulates/embassies: NO (they behave exactly as DD-016 predicts — they are government, not culture).
+2. "Should this account remain active as a node/anchor to discover the network?" → YES, always — its function is not to be evaluated, but to generate the connections that will be evaluated.
 
-El score alto que estas cuentas obtienen (ej. @consuladocolparis: 
-geo=1.00, cult=0.88, final=0.94) es correcto y no se descarta — 
-confirma que el modelo detecta bien geografía+cultura — pero no se 
-traduce en `keep=True` porque `keep` responde a la pregunta 1, no a la 2.
+The high score these accounts obtain (e.g. @consuladocolparis: geo=1.00, cult=0.88, final=0.94) is correct and is not discarded — it confirms the model detects geography+culture well — but it does not translate into `keep=True` because `keep` answers question 1, not question 2.
 
-**Distinción con DD-012:** DD-012 penaliza (no excluye) cuentas políticas 
-individuales para preservar aristas reales en el grafo. DD-026 es un 
-mecanismo distinto: no es una penalización de score, es una separación 
-de rol (seed_source vs. target) que aplica solo al Bloque A de seeds 
-institucionales, no a cuentas políticas descubiertas orgánicamente.
+**Distinction from DD-012:** DD-012 penalizes (does not exclude) individual political accounts to preserve real edges in the graph. DD-026 is a different mechanism: not a score penalty, but a role separation (seed_source vs. target) that applies only to Bloc A institutional seeds, not to political accounts discovered organically.
 
-**Alternativa considerada:** Aplicar DD-016 sin excepción (excluir 
-también a los consulados del grafo activo); crear un tier adicional 
-"institutional-seed" con reglas propias de scoring.
-**Por qué se descartó:** Excluir consulados del grafo activo rompe la 
-cadena de descubrimiento BFS (DD-006) — no habría forma de encontrar 
-las cuentas de la diáspora sin la cuenta que las conecta. Un tier nuevo 
-añadiría complejidad de scoring innecesaria cuando el problema real es 
-de rol (fuente vs. objetivo), no de score.
+**Alternative considered:** Apply DD-016 without exception (also exclude consulates from the active graph); create an additional "institutional-seed" tier with its own scoring rules.
+**Why rejected:** Excluding consulates from the active graph breaks the BFS discovery chain (DD-006) — there would be no way to find diaspora accounts without the account that connects them. A new tier would add unnecessary scoring complexity when the real problem is about role (source vs. target), not score.
 
 ---
 
-## DD-027 — Métrica de completitud de datos como diagnóstico (no afecta scoring aún)
+## DD-027 — Data completeness metric as diagnostic (does not affect scoring yet)
 
-**Fecha:** 2026-07-09
-**Contexto:** Tras el primer scrapeo de las 25 seeds V2, el grafo pasó de 
-4,637 a 5,433 nodos :Account (+796). De esos, 2,665 cuentas nuevas tienen 
-`fullName` (llegaron vía relatedProfiles/taggedUsers/coauthorProducers) y 
-2,575 no tienen ningún campo más allá del username (llegaron vía mentions 
-o comentarios). `1_harvest_account_classifier.py` no distinguía esto — 
-trataba a todas las cuentas sin perfil scrapeado con el mismo factor de 
-confianza fijo (USERNAME_CONF=0.60), sin importar cuánta evidencia real 
-había disponible. Además, el export a nodes.csv perdía las propiedades 
-`verified`, `private` y `profilePicUrl` que sí llegan a Neo4j desde 
-2_build_graph.py.
+**Date:** 2026-07-09
+**Context:** After the first harvest of 25 V2 seeds, the graph grew from 4,637 to 5,433 :Account nodes (+796). Of those, 2,665 new accounts have `fullName` (arrived via relatedProfiles/taggedUsers/coauthorProducers) and 2,575 have no fields beyond the username (arrived via mentions or comments). `1_harvest_account_classifier.py` did not distinguish this — it treated all accounts without a harvested profile with the same fixed confidence factor (USERNAME_CONF=0.60), regardless of how much real evidence was available. Additionally, the export to nodes.csv was losing the `verified`, `private`, and `profilePicUrl` properties that do arrive in Neo4j from 2_build_graph.py.
 
-**Decisión:** Agregar `data_completeness` (0-1, conteo de campos no-nulos 
-sobre 5: fullName, followers, public, verified, profilePicUrl) como columna 
-de diagnóstico en account_scores.csv y en la salida de --diagnose. Por 
-ahora NO modula el cálculo de final_score ni el umbral de keep — es 
-únicamente para que el análisis visual del umbral (a ojo, según lo acordado) 
-tenga en cuenta la calidad de la evidencia detrás de cada score, no solo 
-el score mismo.
-**Razón:** Comparar un final_score=0.45 de una cuenta con bio+posts reales 
-contra un final_score=0.45 de una cuenta solo-username no es comparar lo 
-mismo — la validez de la medición es distinta. Documentar la métrica antes 
-de decidir cómo usarla evita comprometerse prematuramente a una fórmula 
-de ponderación sin haber visto la distribución real.
-**Alternativa considerada:** Modular USERNAME_CONF automáticamente según 
-completitud desde ya.
-**Por qué se pospuso:** Diego quiere revisar la distribución real de 
-data_completeness cruzada con final_score antes de decidir si y cómo debe 
-pesar — evita ajustar una fórmula con datos que aún no se han visto.
+**Decision:** Add `data_completeness` (0–1, count of non-null fields out of 5: fullName, followers, public, verified, profilePicUrl) as a diagnostic column in account_scores.csv and in the `--diagnose` output. For now it does NOT modulate the `final_score` calculation or the keep threshold — it is purely diagnostic so that visual threshold analysis (by eye, as agreed) takes into account the quality of evidence behind each score, not just the score itself.
+**Rationale:** Comparing a final_score=0.45 from an account with a real bio+posts against a final_score=0.45 from a username-only account is not comparing the same thing — the validity of the measurement differs. Documenting the metric before deciding how to use it avoids prematurely committing to a weighting formula without having seen the real distribution.
+**Alternative considered:** Automatically modulate USERNAME_CONF by completeness from the start.
+**Why deferred:** Diego wants to review the real distribution of data_completeness crossed with final_score before deciding if and how it should weigh — avoids tuning a formula with data not yet seen.
 
 ---
 
-## DD-028 — Posts recientes sobre densidad histórica
+## DD-028 — Recent posts over historical density
 
-**Fecha:** 2026-07-12
-**Decisión:** 1_harvest_ig_posts.py filtra por `onlyPostsNewerThan` 
-(default 10 días) en vez de solo un tope de cantidad (RESULTS_LIMIT=50 
-sin filtro temporal, como en V1/RUN-003). Lista de cuentas generalizada 
-desde account_scores.csv (keep=True), con exclusión manual de 
-williamsanchezinmobiliaria (falso positivo del clasificador — categoría 
-de negocio no capturada por el tier).
-**Razón:** DD-020 (V1) buscaba maximizar densidad del grafo scrapeando 
-más posts por cuenta, bajo la lógica de que más aristas sociales = 
-mejor discriminación de algoritmos de centralidad (GDS/igraph). En V2, 
-la idoneidad cultural de una cuenta ya no depende de esos algoritmos — 
-se resuelve directamente con el clasificador NLP sobre bio+posts+
-username (DD-023, DD-027). Esto libera a la fase de posts de la 
-responsabilidad de generar densidad, y permite priorizar el objetivo 
-real del pipeline de eventos (4_enrich_events_extract.py): capturar 
-anuncios de eventos vigentes, no reconstruir historial.
-**Alternativa considerada:** Mantener RESULTS_LIMIT=50 sin filtro 
-temporal (como V1).
-**Por qué se descartó:** Trae posts de hace meses/años que no aportan 
-a la detección de eventos próximos, y diluye el corpus con contenido 
-desactualizado que ya no representa la actividad cultural vigente de 
-la diáspora.
-**Riesgo aceptado:** Cuentas institucionales de baja cadencia de 
-publicación pueden quedar con 0 posts en la ventana de 10 días — se 
-diagnostica en la corrida (punto 3) y se revisa caso por caso si el 
-volumen de "vacíos" es alto.
+**Date:** 2026-07-12
+**Decision:** `1_harvest_ig_posts.py` filters by `onlyPostsNewerThan` (default 10 days) instead of just a quantity cap (RESULTS_LIMIT=50 without temporal filter, as in V1/RUN-003). Account list generalized from account_scores.csv (keep=True), with manual exclusion of `williamsanchezinmobiliaria` (classifier false positive — business category not captured by the tier).
+**Rationale:** DD-020 (V1) sought to maximize graph density by harvesting more posts per account, under the logic that more social edges = better discrimination of centrality algorithms (GDS/igraph). In V2, the cultural suitability of an account no longer depends on those algorithms — it is resolved directly by the NLP classifier on bio+posts+username (DD-023, DD-027). This frees the posts phase from the responsibility of generating density, and allows prioritizing the real objective of the event pipeline (4_enrich_events_extract.py): capturing current event announcements, not reconstructing history.
+**Alternative considered:** Keep RESULTS_LIMIT=50 without temporal filter (as V1).
+**Why rejected:** Brings posts from months/years ago that do not contribute to detecting upcoming events, and dilutes the corpus with outdated content that no longer represents the current cultural activity of the diaspora.
+**Accepted risk:** Institutional accounts with low publication frequency may end up with 0 posts in the 10-day window — diagnosed in the run (point 3) and reviewed case by case if the volume of "empties" is high.
 
 ---
 
-## DD-029 — Ventana de scrapeo dinámica por cuenta + cap deslizante de 50 posts
+## DD-029 — Dynamic harvest window per account + sliding cap of 50 posts
 
-**Fecha:** 2026-07-13
-**Decisión:** 1_harvest_ig_posts.py reemplaza el chequeo binario vigente/
-vencido (DD-028) por una ventana `onlyPostsNewerThan` calculada 
-dinámicamente por cuenta: min(días desde el último post conocido, 
---days tope). Cuentas con brecha <1 día se saltan; el resto se 
-re-chequea con exactamente la ventana que necesita, no un valor fijo 
-global. Los resultados se fusionan con los posts existentes (dedupe 
-por id) y se recortan a los 50 más recientes (ventana deslizante), en 
-vez de sobreescribir el archivo completo.
-**Razón:** El chequeo binario de DD-028 tenía un punto ciego: una 
-cuenta con post de hace 2 días se marcaba "vigente" bajo cualquier 
-ventana ≥2 días y se saltaba por completo, perdiendo posts publicados 
-en el intervalo entre ese post conocido y "ahora". La ventana dinámica 
-cierra exactamente esa brecha por cuenta, sin gastar de más en cuentas 
-ya casi al día ni quedarse corto en cuentas con actividad reciente 
-justo fuera del radar del chequeo binario.
-**Alternativa considerada:** Mantener ventana fija global (DD-028 tal 
-cual) y aceptar el punto ciego.
-**Por qué se descartó:** El costo marginal de consultar con ventana 
-pequeña es casi nulo (confirmado empíricamente: $0.00-0.02 por cuenta 
-en corridas previas), así que no hay razón de peso para tolerar el 
-punto ciego solo por ahorro de llamadas.
-**Nota técnica:** El cap de 50 posts (RESULTS_LIMIT) ahora funciona 
-como ventana deslizante acumulativa, no como límite de una sola 
-corrida — el corpus por cuenta converge a "los 50 posts más recientes 
-conocidos hasta la fecha", actualizado incrementalmente en cada corrida.
+**Date:** 2026-07-13
+**Decision:** `1_harvest_ig_posts.py` replaces the current binary active/expired check (DD-028) with an `onlyPostsNewerThan` window calculated dynamically per account: min(days since last known post, --days cap). Accounts with gap <1 day are skipped; the rest are re-checked with exactly the window they need, not a fixed global value. Results are merged with existing posts (dedupe by id) and trimmed to the 50 most recent (sliding window), instead of overwriting the full file.
+**Rationale:** The binary check of DD-028 had a blind spot: an account with a post from 2 days ago would be marked "active" under any window ≥2 days and skipped entirely, missing posts published in the interval between that known post and "now." The dynamic window closes exactly that gap per account, without over-spending on accounts already nearly up to date or falling short on accounts with recent activity just outside the binary check's radar.
+**Alternative considered:** Keep fixed global window (DD-028 as-is) and accept the blind spot.
+**Why rejected:** The marginal cost of querying with a small window is nearly zero (empirically confirmed: $0.00–0.02 per account in previous runs), so there is no strong reason to tolerate the blind spot just for call savings.
+**Technical note:** The 50-post cap (RESULTS_LIMIT) now functions as a cumulative sliding window, not a single-run limit — the corpus per account converges to "the 50 most recent known posts to date," updated incrementally on each run.
 
 ---
 
-## DD-030 — Detección explícita del placeholder de error "no_items" de Apify
+## DD-030 — Explicit detection of Apify "no_items" error placeholder
 
-**Fecha:** 2026-07-15
-**Decisión:** Agregar `_is_error_placeholder(items)` en 1_harvest_ig_posts.py
-para detectar el caso en que `apify/instagram-post-scraper` devuelve una lista
-de 1 elemento con clave `"error"` y sin `"id"`, antes de pasar al branch de
-merge. El chequeo en `scrape_posts()` pasa de `if not dataset_items` a
-`if not dataset_items or _is_error_placeholder(dataset_items)`.
-**Razón:** Cuando el actor no encuentra contenido (cuenta privada, sin posts
-en la ventana, o perfil restringido), devuelve:
-`[{"url": ..., "inputUrl": ..., "requestErrorMessages": [], "error": "no_items",
-"errorDescription": "Empty or private data for provided input"}]`.
-Esta lista de 1 elemento es **truthy** en Python — `if not dataset_items`
-nunca entraba al branch de diagnóstico. El resultado era: (a) los contadores
-`window_empty`/`no_content`/`unknown` no se incrementaban, (b) el log
-registraba 1 "post" falso, y (c) en versiones anteriores a DD-029 (sin
-merge_and_cap), el archivo existente se sobreescribía con datos vacíos o con
-el placeholder mismo. Confirmado como causa de pérdida de datos en RUN-013
-para elcafetal.paris, educulturaco e ivan_argote.
-**Criterio de detección:** `len(items) == 1 and "error" in items[0] and "id"
-not in items[0]` — conservador: no filtra posts reales con un solo ítem, ya
-que los posts reales siempre tienen `"id"`.
-**Alternativa considerada:** Chequear solo `items[0].get("error") ==
-"no_items"` (string hardcodeado).
-**Por qué se descartó:** La condición compuesta (len==1 + "error" en item +
-no "id") es más robusta ante cambios en el string exacto del campo error, y
-más difícil de disparar accidentalmente contra un post real.
+**Date:** 2026-07-15
+**Decision:** Add `_is_error_placeholder(items)` in `1_harvest_ig_posts.py` to detect the case where `apify/instagram-post-scraper` returns a 1-element list with key `"error"` and no `"id"`, before passing to the merge branch. The check in `scrape_posts()` changes from `if not dataset_items` to `if not dataset_items or _is_error_placeholder(dataset_items)`.
+**Rationale:** When the actor finds no content (private account, no posts in the window, or restricted profile), it returns:
+`[{"url": ..., "inputUrl": ..., "requestErrorMessages": [], "error": "no_items", "errorDescription": "Empty or private data for provided input"}]`.
+This 1-element list is **truthy** in Python — `if not dataset_items` never entered the diagnostic branch. The result was: (a) `window_empty`/`no_content`/`unknown` counters were not incremented, (b) the log recorded 1 false "post," and (c) in versions prior to DD-029 (without merge_and_cap), the existing file was overwritten with empty data or the placeholder itself. Confirmed as the cause of data loss in RUN-013 for elcafetal.paris, educulturaco, and ivan_argote.
+**Detection criterion:** `len(items) == 1 and "error" in items[0] and "id" not in items[0]` — conservative: does not filter real posts with a single item, since real posts always have `"id"`.
+**Alternative considered:** Check only `items[0].get("error") == "no_items"` (hardcoded string).
+**Why rejected:** The composite condition (len==1 + "error" in item + no "id") is more robust to changes in the exact error field string, and harder to accidentally trigger against a real post.
 
 ---
 
-## DD-031 — Bounding box geográfico para penalizar cuentas fuera de Francia
+## DD-031 — Geographic bounding box to penalize accounts outside France
 
-**Fecha:** 2026-07-15
-**Decisión:** En `geo_hard_signals()`, antes de aplanar `businessAddress` a
-string, conservar el dict original para leer `latitude`/`longitude`. Si las
-coordenadas caen fuera del bbox de Francia metropolitana
-(`lat: 41.0–51.5, lon: -5.5–9.7`), aplicar `penalty = 0.90` al
-`geography_score` (`geography = max(0.0, geography - 0.90)`). El fallback
-anterior (buscar ciudades LatAm en bio) se reduce a `penalty = 0.35` y solo
-se activa cuando no hay lat/lon en businessAddress Y no hay ninguna señal
-positiva de Francia (signals list vacía) — para no penalizar patrones
-legítimos de la diáspora como "de Bogotá a París".
-**Hallazgo que motivó el cambio:** La verificación manual de JSONs crudos
-confirmó que `businessAddress` tiene `latitude`/`longitude` reales en casi
-todos los casos poblados, pero NO tiene `countryCode`. El bug original (DD-030
-predecessor) se pensó que afectaba solo a las Alianzas Francesas colombianas,
-pero al verificar `businessAddress` en perfiles reales se encontraron cuatro
-cuentas adicionales afectadas: `williamsanchezinmobiliaria` (España),
-`unadunioneuropea` (Madrid), `embcolghana` (Ghana), `remaxmariavillasmil02`
-(Venezuela) — todas con lat/lon claramente fuera de Francia pero sin texto de
-ciudades LatAm en su bio, lo que hacía invisible el bug para el fallback
-anterior.
-**Por qué bbox en lugar de lista de ciudades:**
-- Generaliza a cualquier país sin mantenimiento de listas.
-- Detecta coordenadas de Madrid, Accra, Caracas, Bogotá, etc. con la misma
-  regla, sin necesidad de añadir cada caso nuevo.
-- Las listas de ciudades tienen falsos positivos ("Cartagena" en España,
-  "Valencia" en Venezuela), el bbox no.
-**Limitación aceptada:** El bbox excluye los DOM-TOM franceses (Guadalupe,
-Martinica, Reunión, etc., lat < 41.0 o lon fuera del rango). Decisión
-deliberada: el proyecto se enfoca en la diáspora latinoamericana en Francia
-metropolitana/Île-de-France. Si en el futuro se quiere cubrir DOM-TOM,
-revisar `FRANCE_BBOX` o añadir sub-bboxes por región.
-**Alternativa considerada:** Lista de `countryCode` válidos para Francia.
-**Por qué se descartó:** `businessAddress` de la API de Instagram no incluye
-`countryCode` — campo ausente en los datos reales verificados.
+**Date:** 2026-07-15
+**Decision:** In `geo_hard_signals()`, before flattening `businessAddress` to a string, preserve the original dict to read `latitude`/`longitude`. If the coordinates fall outside the metropolitan France bounding box (`lat: 41.0–51.5, lon: -5.5–9.7`), apply `penalty = 0.90` to the `geography_score` (`geography = max(0.0, geography - 0.90)`). The previous fallback (searching for LatAm cities in bio) is reduced to `penalty = 0.35` and only activates when there is no lat/lon in businessAddress AND no positive France signals (empty signals list) — to avoid penalizing legitimate diaspora patterns like "from Bogotá to Paris."
+**Finding that motivated the change:** Manual verification of raw JSONs confirmed that `businessAddress` has real `latitude`/`longitude` in almost all populated cases, but does NOT have `countryCode`. The original bug (DD-030 predecessor) was thought to affect only Colombian Alianzas Françaises, but verifying `businessAddress` in real profiles revealed four additional affected accounts: `williamsanchezinmobiliaria` (Spain), `unadunioneuropea` (Madrid), `embcolghana` (Ghana), `remaxmariavillasmil02` (Venezuela) — all with lat/lon clearly outside France but without LatAm city text in their bio, which made the bug invisible to the previous fallback.
+**Why bbox instead of city list:**
+- Generalizes to any country without list maintenance.
+- Detects coordinates from Madrid, Accra, Caracas, Bogotá, etc. with the same rule, without needing to add each new case.
+- City lists have false positives ("Cartagena" in Spain, "Valencia" in Venezuela), the bbox does not.
+**Accepted limitation:** The bbox excludes French DOM-TOMs (Guadeloupe, Martinique, Réunion, etc., lat < 41.0 or lon outside the range). Deliberate decision: the project focuses on the Latin American diaspora in metropolitan France/Île-de-France. If DOM-TOMs are to be covered in the future, revise `FRANCE_BBOX` or add sub-bboxes by region.
+**Alternative considered:** List of valid `countryCode` values for France.
+**Why rejected:** `businessAddress` from the Instagram API does not include `countryCode` — field absent in verified real data.
 
 ---
 
-## DD-032 — Regla acotada para sedes de Alianza Francesa fuera de Francia
+## DD-032 — Scoped rule for Alliance Française branches outside France
 
-**Fecha:** 2026-07-15
-**Decisión:** Añadir en `geo_hard_signals()` un chequeo independiente del
-fallback de bio-city (DD-031): si el username del perfil coincide con
-`AF_SATELLITE_PATTERN` (`alian[cz]a.{0,4}frances|alliance.{0,4}fran[cç]aise`)
-Y contiene un token de `NON_FRANCE_CITY_MARKERS`, aplicar `penalty = max(penalty, 0.90)`.
-Este chequeo no está gateado por "sin señales positivas de Francia" — a
-diferencia del fallback de bio — porque el patrón username+ciudad LatAm es
-estructuralmente inequívoco: una sede de Alianza Francesa con nombre de ciudad
-LatAm en el handle es por definición una sede fuera de Francia.
-**Residual que motivó el cambio:** `alianzafrancesademedellin` (Medellín,
-Colombia) pasó el fix de bbox (DD-031) porque su `businessAddress` no tiene
-`latitude`/`longitude`. Su bio menciona "Francia" como tema ("¡Aprende
-francés! ..."), no como ubicación → dispara `sem_geo:1.00` y `bio:FR`, lo que
-bloquea el fallback de bio-city por diseño. Era el único `keep=True` incorrecto
-tras DD-031.
-**Por qué regla acotada al patrón AF, no regla general de username:**
-Una regla general "username con ciudad LatAm → penalizar" rompería cuentas de
-diáspora legítimas que usan su ciudad de origen en el handle pero sí residen en
-Francia: `medellin_en_paris`, `paisas_en_paris`, `bogotanos_en_paris`, etc. El
-patrón AF es semánticamente distinto: "alianza francesa" + ciudad colombiana
-identifica inequívocamente una institución radicada en esa ciudad colombiana, no
-en Francia.
-**Alternativa considerada 1:** Regla general de username con cualquier ciudad
-LatAm en `NON_FRANCE_CITY_MARKERS`.
-**Por qué se descartó:** Alto riesgo de falsos positivos en cuentas de diáspora
-con ciudad de origen en el username.
-**Alternativa considerada 2:** Override manual en `config/account_tiers.json`
-(`"alianzafrancesademedellin": "excluded"`).
-**Por qué se descartó:** No generaliza a futuras sedes de Alianza Francesa que
-se descubran después (el BFS puede encontrar más); menos defendible como
-metodología sistemática en el mémoire que una regla declarativa.
+**Date:** 2026-07-15
+**Decision:** Add to `geo_hard_signals()` a check independent of the bio-city fallback (DD-031): if the profile username matches `AF_SATELLITE_PATTERN` (`alian[cz]a.{0,4}frances|alliance.{0,4}fran[cç]aise`) AND contains a token from `NON_FRANCE_CITY_MARKERS`, apply `penalty = max(penalty, 0.90)`. This check is not gated by "no positive France signals" — unlike the bio fallback — because the username+LatAm city pattern is structurally unambiguous: an Alliance Française branch with a LatAm city name in the handle is by definition a branch outside France.
+**Residual that motivated the change:** `alianzafrancesademedellin` (Medellín, Colombia) passed the bbox fix (DD-031) because its `businessAddress` has no `latitude`/`longitude`. Its bio mentions "Francia" as a topic ("¡Aprende francés! ..."), not as a location → triggers `sem_geo:1.00` and `bio:FR`, which blocks the bio-city fallback by design. It was the only incorrect `keep=True` after DD-031.
+**Why scoped rule to the AF pattern, not a general username rule:**
+A general rule "username with LatAm city → penalize" would break legitimate diaspora accounts that use their city of origin in the handle but do reside in France: `medellin_en_paris`, `paisas_en_paris`, `bogotanos_en_paris`, etc. The AF pattern is semantically distinct: "alianza francesa" + Colombian city unambiguously identifies an institution based in that Colombian city, not in France.
+**Alternative considered 1:** General rule for username with any LatAm city in `NON_FRANCE_CITY_MARKERS`.
+**Why rejected:** High risk of false positives in diaspora accounts with city of origin in the username.
+**Alternative considered 2:** Manual override in `config/account_tiers.json` (`"alianzafrancesademedellin": "excluded"`).
+**Why rejected:** Does not generalize to future Alliance Française branches discovered later (BFS may find more); less defensible as systematic methodology in the mémoire than a declarative rule.
 
 ---
 
-*Última actualización: 2026-07-15*
-*Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos.*
+*Last updated: 2026-07-15*
+*Next decisions to document: DD-023 (NLP account classifier), SetFit for v2, TikTok integration, human-in-the-loop for event review.*
