@@ -73,6 +73,32 @@ FRANCE_MARKERS = FRENCH_CITIES + [
     "france", "francia", "ile-de-france", "île-de-france",
     "hexagone", "hexagono", "hexágono",
 ]
+
+# Bounding box aproximado de Francia metropolitana (excluye DOM-TOM
+# deliberadamente — el proyecto se enfoca en la diáspora en territorio
+# europeo/Île-de-France; revisar si algún día se necesita cubrir
+# Guadalupe/Martinica/Reunión etc.)
+FRANCE_BBOX = {"lat_min": 41.0, "lat_max": 51.5, "lon_min": -5.5, "lon_max": 9.7}
+
+
+def _addr_outside_france(addr: dict) -> bool:
+    """True si lat/lon del businessAddress caen claramente fuera de Francia."""
+    try:
+        lat, lon = float(addr.get("latitude")), float(addr.get("longitude"))
+    except (TypeError, ValueError):
+        return False
+    return not (FRANCE_BBOX["lat_min"] <= lat <= FRANCE_BBOX["lat_max"]
+                and FRANCE_BBOX["lon_min"] <= lon <= FRANCE_BBOX["lon_max"])
+
+
+# Solo para el fallback bio-penalty — lista reducida de capitales/ciudades
+# LatAm que no son Francia (DD-031); no incluir "paris" ni variantes France
+# porque aparecen legítimamente en bios de la diáspora ("de Bogotá a París").
+NON_FRANCE_CITY_MARKERS = [
+    "bogota", "bogotá", "medellin", "medellín", "cali", "barranquilla",
+    "cartagena", "pereira", "manizales", "bucaramanga",
+]
+
 GEO_HASHTAGS = {
     "paris", "parigi", "france", "francia", "parisfrance",
     "parislatino", "latinosenparis", "latinosenfrancia",
@@ -346,19 +372,35 @@ def load_nodes() -> list:
 
 # ── 5. Señales geográficas deterministas ──────────────────────────────────────
 def geo_hard_signals(profile: dict) -> tuple:
-    """→ (lista de señales [0,1], lista de razones)."""
+    """→ (signals, reasons, penalty). penalty>0 si la cuenta está claramente
+    fuera de Francia (bbox lat/lon de businessAddress, o ciudad LatAm en bio
+    sin ninguna señal francesa positiva — DD-031)."""
     signals, reasons = [], []
+    penalty = 0.0
 
-    # businessAddress
-    addr = profile.get("businessAddress") or ""
-    if isinstance(addr, str) and addr.startswith("{"):
+    # businessAddress — conservar dict original para leer lat/lon (DD-031)
+    addr_raw = profile.get("businessAddress") or ""
+    if isinstance(addr_raw, str) and addr_raw.startswith("{"):
         try:
-            addr = json.loads(addr)
+            addr_raw = json.loads(addr_raw)
         except json.JSONDecodeError:
-            addr = {"raw": addr}
-    if isinstance(addr, dict):
-        addr = " ".join(str(v) for v in addr.values() if v)
-    if addr and _tokens_in(str(addr), FRANCE_MARKERS):
+            addr_raw = {"raw": addr_raw}
+    addr_dict = addr_raw if isinstance(addr_raw, dict) else None
+
+    # Penalty primaria: bbox geográfico sobre lat/lon (generaliza a cualquier país)
+    if addr_dict is not None and _addr_outside_france(addr_dict):
+        try:
+            lat = float(addr_dict.get("latitude"))
+            lon = float(addr_dict.get("longitude"))
+            penalty = 0.90
+            reasons.append(f"addr:OUTSIDE_FR:{lat:.2f},{lon:.2f}")
+        except (TypeError, ValueError):
+            pass
+
+    # Señal de Francia desde texto de businessAddress
+    addr_str = (" ".join(str(v) for v in addr_dict.values() if v)
+                if addr_dict else str(addr_raw))
+    if addr_str and _tokens_in(addr_str, FRANCE_MARKERS):
         signals.append(0.95)
         reasons.append("addr:FR")
 
@@ -388,7 +430,15 @@ def geo_hard_signals(profile: dict) -> tuple:
         signals.append(0.50)
         reasons.append(f"tags:{','.join(sorted(geo_tags)[:3])}")
 
-    return signals, reasons
+    # Fallback bio-city penalty: solo si sin penalización lat/lon y sin señales
+    # positivas de Francia — evita dispararse con "de Bogotá a París" (DD-031)
+    if penalty == 0.0 and not signals:
+        latam_hits = _tokens_in(profile.get("biography") or "", NON_FRANCE_CITY_MARKERS)
+        if latam_hits:
+            penalty = 0.35
+            reasons.append(f"bio:LATAM_CITY:{','.join(latam_hits[:2])}")
+
+    return signals, reasons, penalty
 
 
 # ── 5b. Completitud de datos (diagnóstico, DD-027) ────────────────────────────
@@ -467,12 +517,14 @@ class AccountClassifier:
         reasons = []
 
         # — geography_score: reglas duras + capa semántica (noisy-OR)
-        hard, hard_reasons = geo_hard_signals(profile)
+        hard, hard_reasons, geo_penalty = geo_hard_signals(profile)
         reasons += hard_reasons
         sem_geo = _rescale(self._sims(texts, self.geo_refs))
         if sem_geo > 0.15:
             reasons.append(f"sem_geo:{sem_geo:.2f}")
         geography = _noisy_or(hard + [sem_geo * 0.75])
+        if geo_penalty > 0.0:
+            geography = max(0.0, geography - geo_penalty)
 
         # — cultural_score: sim_positiva - sim_negativa*0.3 + señal de tier
         sim_pos = _rescale(self._sims(texts, self.pos_refs))

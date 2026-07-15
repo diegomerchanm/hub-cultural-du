@@ -467,5 +467,44 @@ más difícil de disparar accidentalmente contra un post real.
 
 ---
 
+## DD-031 — Bounding box geográfico para penalizar cuentas fuera de Francia
+
+**Fecha:** 2026-07-15
+**Decisión:** En `geo_hard_signals()`, antes de aplanar `businessAddress` a
+string, conservar el dict original para leer `latitude`/`longitude`. Si las
+coordenadas caen fuera del bbox de Francia metropolitana
+(`lat: 41.0–51.5, lon: -5.5–9.7`), aplicar `penalty = 0.90` al
+`geography_score` (`geography = max(0.0, geography - 0.90)`). El fallback
+anterior (buscar ciudades LatAm en bio) se reduce a `penalty = 0.35` y solo
+se activa cuando no hay lat/lon en businessAddress Y no hay ninguna señal
+positiva de Francia (signals list vacía) — para no penalizar patrones
+legítimos de la diáspora como "de Bogotá a París".
+**Hallazgo que motivó el cambio:** La verificación manual de JSONs crudos
+confirmó que `businessAddress` tiene `latitude`/`longitude` reales en casi
+todos los casos poblados, pero NO tiene `countryCode`. El bug original (DD-030
+predecessor) se pensó que afectaba solo a las Alianzas Francesas colombianas,
+pero al verificar `businessAddress` en perfiles reales se encontraron cuatro
+cuentas adicionales afectadas: `williamsanchezinmobiliaria` (España),
+`unadunioneuropea` (Madrid), `embcolghana` (Ghana), `remaxmariavillasmil02`
+(Venezuela) — todas con lat/lon claramente fuera de Francia pero sin texto de
+ciudades LatAm en su bio, lo que hacía invisible el bug para el fallback
+anterior.
+**Por qué bbox en lugar de lista de ciudades:**
+- Generaliza a cualquier país sin mantenimiento de listas.
+- Detecta coordenadas de Madrid, Accra, Caracas, Bogotá, etc. con la misma
+  regla, sin necesidad de añadir cada caso nuevo.
+- Las listas de ciudades tienen falsos positivos ("Cartagena" en España,
+  "Valencia" en Venezuela), el bbox no.
+**Limitación aceptada:** El bbox excluye los DOM-TOM franceses (Guadalupe,
+Martinica, Reunión, etc., lat < 41.0 o lon fuera del rango). Decisión
+deliberada: el proyecto se enfoca en la diáspora latinoamericana en Francia
+metropolitana/Île-de-France. Si en el futuro se quiere cubrir DOM-TOM,
+revisar `FRANCE_BBOX` o añadir sub-bboxes por región.
+**Alternativa considerada:** Lista de `countryCode` válidos para Francia.
+**Por qué se descartó:** `businessAddress` de la API de Instagram no incluye
+`countryCode` — campo ausente en los datos reales verificados.
+
+---
+
 *Última actualización: 2026-07-15*
 *Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos.*
