@@ -287,5 +287,36 @@ identificada y corregida.
 
 ---
 
+## RUN-014 — Julio 2026 — Validación del fix geo_hard_signals (DD-031/DD-032)
+**Scripts:** 1_harvest_account_classifier.py --diagnose
+**Input:** data_processed/account_scores.csv (5,433 cuentas) tras los
+commits 9180ad4 (bbox lat/lon, DD-031) y fe65863 (AF_SATELLITE, DD-032)
+**Output:**
+- 7/7 cuentas objetivo pasaron a keep=False:
+  alianzafrancesademedellin (username:AF_satellite:medellin),
+  alianzafrancesacali (addr:OUTSIDE_FR:3.44,-76.52 + AF_satellite:cali),
+  alianza_francesa_de_pereira (addr:OUTSIDE_FR:4.81,-75.70 + AF_satellite:pereira),
+  unadunioneuropea (addr:OUTSIDE_FR:40.43,-3.67),
+  williamsanchezinmobiliaria (addr:OUTSIDE_FR:39.99,-0.05),
+  embcolghana (addr:OUTSIDE_FR:5.61,-0.18),
+  remaxmariavillasmil02 (addr:OUTSIDE_FR:7.77,-72.21)
+- keep=True: 62 → 61 (exactamente la cuenta esperada, sin más)
+- Sin daño colateral: calisabor_salsa_calena y francy_barahona_calisabor
+  (ambas con "cali" en el username, ambas radicadas en París) verificadas
+  intactas en keep=True con geo≥0.99
+- Sin red ni Neo4j necesarios — validación completa offline sobre CSV
+**Resultado:** Fix validado end-to-end
+**Lecciones:**
+- businessAddress con lat/lon es la señal geográfica más robusta
+  disponible; generaliza a cualquier país sin mantenimiento de listas
+- El residual post-bbox (alianzafrancesademedellin, sin lat/lon, bio
+  sobre "Francia" como tema) requirió una regla acotada al patrón de
+  nombre (AF_SATELLITE), no una regla general de username con ciudad LatAm
+- _tokens_in() usa word boundary — no funciona para tokens embebidos en
+  usernames sin separadores; usar substring (_norm(tok) in _norm(username))
+  en contextos donde ya hay gating por otro patrón fuerte
+
+---
+
 *Última actualización: 2026-07-15*
-*Próximo run: RUN-014 — 3_analyze_network.py sobre grafo V2 expandido*
+*Próximo run: RUN-015 — 3_analyze_network.py sobre grafo V2 expandido (bloqueado por conectividad)*
