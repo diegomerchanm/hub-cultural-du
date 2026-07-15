@@ -506,5 +506,41 @@ revisar `FRANCE_BBOX` o añadir sub-bboxes por región.
 
 ---
 
+## DD-032 — Regla acotada para sedes de Alianza Francesa fuera de Francia
+
+**Fecha:** 2026-07-15
+**Decisión:** Añadir en `geo_hard_signals()` un chequeo independiente del
+fallback de bio-city (DD-031): si el username del perfil coincide con
+`AF_SATELLITE_PATTERN` (`alian[cz]a.{0,4}frances|alliance.{0,4}fran[cç]aise`)
+Y contiene un token de `NON_FRANCE_CITY_MARKERS`, aplicar `penalty = max(penalty, 0.90)`.
+Este chequeo no está gateado por "sin señales positivas de Francia" — a
+diferencia del fallback de bio — porque el patrón username+ciudad LatAm es
+estructuralmente inequívoco: una sede de Alianza Francesa con nombre de ciudad
+LatAm en el handle es por definición una sede fuera de Francia.
+**Residual que motivó el cambio:** `alianzafrancesademedellin` (Medellín,
+Colombia) pasó el fix de bbox (DD-031) porque su `businessAddress` no tiene
+`latitude`/`longitude`. Su bio menciona "Francia" como tema ("¡Aprende
+francés! ..."), no como ubicación → dispara `sem_geo:1.00` y `bio:FR`, lo que
+bloquea el fallback de bio-city por diseño. Era el único `keep=True` incorrecto
+tras DD-031.
+**Por qué regla acotada al patrón AF, no regla general de username:**
+Una regla general "username con ciudad LatAm → penalizar" rompería cuentas de
+diáspora legítimas que usan su ciudad de origen en el handle pero sí residen en
+Francia: `medellin_en_paris`, `paisas_en_paris`, `bogotanos_en_paris`, etc. El
+patrón AF es semánticamente distinto: "alianza francesa" + ciudad colombiana
+identifica inequívocamente una institución radicada en esa ciudad colombiana, no
+en Francia.
+**Alternativa considerada 1:** Regla general de username con cualquier ciudad
+LatAm en `NON_FRANCE_CITY_MARKERS`.
+**Por qué se descartó:** Alto riesgo de falsos positivos en cuentas de diáspora
+con ciudad de origen en el username.
+**Alternativa considerada 2:** Override manual en `config/account_tiers.json`
+(`"alianzafrancesademedellin": "excluded"`).
+**Por qué se descartó:** No generaliza a futuras sedes de Alianza Francesa que
+se descubran después (el BFS puede encontrar más); menos defendible como
+metodología sistemática en el mémoire que una regla declarativa.
+
+---
+
 *Última actualización: 2026-07-15*
 *Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos.*

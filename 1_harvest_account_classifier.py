@@ -99,6 +99,13 @@ NON_FRANCE_CITY_MARKERS = [
     "cartagena", "pereira", "manizales", "bucaramanga",
 ]
 
+# Sedes de Alianza Francesa fuera de Francia: el patrón username+ciudad LatAm
+# es estructuralmente inequívoco (DD-032). No usar regla general de username
+# para evitar excluir cuentas de diáspora legítimas (p.ej. "medellin_en_paris").
+AF_SATELLITE_PATTERN = re.compile(
+    r"alian[cz]a.{0,4}frances|alliance.{0,4}fran[cç]aise", re.IGNORECASE
+)
+
 GEO_HASHTAGS = {
     "paris", "parigi", "france", "francia", "parisfrance",
     "parislatino", "latinosenparis", "latinosenfrancia",
@@ -437,6 +444,20 @@ def geo_hard_signals(profile: dict) -> tuple:
         if latam_hits:
             penalty = 0.35
             reasons.append(f"bio:LATAM_CITY:{','.join(latam_hits[:2])}")
+
+    # Sede de Alianza Francesa con ciudad LatAm en el username (DD-032).
+    # No gateado por ausencia de marcadores de Francia: el patrón AF+ciudad
+    # es estructuralmente inequívoco independientemente de lo que diga la bio.
+    # Usa substring en vez de _tokens_in (que exige word boundary) porque los
+    # usernames de Instagram no tienen separadores — "alianzafrancesademedellin"
+    # embebe "medellin" sin espacio previo, lo que rompería el boundary check.
+    username = profile.get("username", "")
+    if AF_SATELLITE_PATTERN.search(username):
+        u_norm = _norm(username)
+        city_hits = [tok for tok in NON_FRANCE_CITY_MARKERS if _norm(tok) in u_norm]
+        if city_hits:
+            penalty = max(penalty, 0.90)
+            reasons.append(f"username:AF_satellite:{','.join(city_hits[:2])}")
 
     return signals, reasons, penalty
 
