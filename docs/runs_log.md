@@ -246,5 +246,46 @@ dirigido) operacional y validado de punta a punta sobre seeds V2
 
 ---
 
-*Última actualización: 2026-07-12*
-*Próximo run: RUN-013 — 3_analyze_network.py sobre grafo V2 expandido*
+## RUN-013 — Julio 2026 — Pérdida de datos por versión de código desactualizada (incidente)
+**Scripts:** 1_harvest_ig_posts.py
+**Input:** 4 cuentas con historial de RUN-003 (dichaparis, elcafetal.paris,
+educulturaco, ivan_argote) — ejecutadas a las 09:16-09:25 UTC del
+2026-07-13, 14-23 minutos ANTES de que el commit e2ae5fc (DD-029, merge
++ ventana dinámica) se aplicara.
+**Output:**
+- El código que corrió era el de 8f58d50 (DD-028) — overwrite directo,
+  sin merge_and_cap.
+- dichaparis: overwrite total, quedaron solo 2 posts nuevos (perdió ~48
+  históricos de RUN-003).
+- elcafetal.paris, educulturaco, ivan_argote: overwrite con el
+  placeholder de error "no_items" de Apify (bug adicional — el chequeo
+  "if not dataset_items" no detectaba ese caso, ver DD-030), perdiendo
+  el 100% de su historial de RUN-003.
+- Estado corrupto ingestado a Neo4j vía 2_build_graph.py antes de
+  detectarse.
+- Recuperación intentada vía API de Apify: imposible — los datasets de
+  RUN-003 (2026-07-01) ya expiraron. La API solo retiene las últimas ~83
+  corridas (rango disponible: 2026-07-12 a 2026-07-13). Pérdida
+  permanente confirmada.
+**Resultado:** INCIDENTE — pérdida de datos parcial, causa raíz
+identificada y corregida.
+**Lecciones:**
+- Causa raíz real: desfase temporal entre la ejecución del script y el
+  commit del fix que se creía ya aplicado — no un bug en merge_and_cap
+  ni en days_to_fetch (ambos funcionan correctamente, confirmado vía
+  API de Apify comparando timestamps de commit vs. timestamps de runs).
+- Bug secundario real y confirmado: el placeholder de error
+  "{'error': 'no_items', ...}" de apify/instagram-post-scraper es una
+  lista de 1 elemento — truthy en Python — así que "if not dataset_items"
+  nunca lo detectaba, en ninguna versión del script hasta este fix (DD-030).
+- data_raw/ está gitignored — no hay respaldo automático de datos
+  crudos. Perder un archivo local es perder el dato, salvo que Apify
+  todavía retenga el dataset original (verificado: no en este caso).
+- Protocolo a futuro: confirmar que un commit de fix está aplicado
+  ANTES de correr el script que depende de él, no asumir que "ya está
+  comiteado" sin verificar con git status/git log.
+
+---
+
+*Última actualización: 2026-07-15*
+*Próximo run: RUN-014 — 3_analyze_network.py sobre grafo V2 expandido*

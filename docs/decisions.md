@@ -437,5 +437,35 @@ conocidos hasta la fecha", actualizado incrementalmente en cada corrida.
 
 ---
 
-*Última actualización: 2026-07-13*
+## DD-030 — Detección explícita del placeholder de error "no_items" de Apify
+
+**Fecha:** 2026-07-15
+**Decisión:** Agregar `_is_error_placeholder(items)` en 1_harvest_ig_posts.py
+para detectar el caso en que `apify/instagram-post-scraper` devuelve una lista
+de 1 elemento con clave `"error"` y sin `"id"`, antes de pasar al branch de
+merge. El chequeo en `scrape_posts()` pasa de `if not dataset_items` a
+`if not dataset_items or _is_error_placeholder(dataset_items)`.
+**Razón:** Cuando el actor no encuentra contenido (cuenta privada, sin posts
+en la ventana, o perfil restringido), devuelve:
+`[{"url": ..., "inputUrl": ..., "requestErrorMessages": [], "error": "no_items",
+"errorDescription": "Empty or private data for provided input"}]`.
+Esta lista de 1 elemento es **truthy** en Python — `if not dataset_items`
+nunca entraba al branch de diagnóstico. El resultado era: (a) los contadores
+`window_empty`/`no_content`/`unknown` no se incrementaban, (b) el log
+registraba 1 "post" falso, y (c) en versiones anteriores a DD-029 (sin
+merge_and_cap), el archivo existente se sobreescribía con datos vacíos o con
+el placeholder mismo. Confirmado como causa de pérdida de datos en RUN-013
+para elcafetal.paris, educulturaco e ivan_argote.
+**Criterio de detección:** `len(items) == 1 and "error" in items[0] and "id"
+not in items[0]` — conservador: no filtra posts reales con un solo ítem, ya
+que los posts reales siempre tienen `"id"`.
+**Alternativa considerada:** Chequear solo `items[0].get("error") ==
+"no_items"` (string hardcodeado).
+**Por qué se descartó:** La condición compuesta (len==1 + "error" en item +
+no "id") es más robusta ante cambios en el string exacto del campo error, y
+más difícil de disparar accidentalmente contra un post real.
+
+---
+
+*Última actualización: 2026-07-15*
 *Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos.*
