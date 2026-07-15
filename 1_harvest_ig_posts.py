@@ -213,6 +213,17 @@ def merge_and_cap(existing: list, new_items: list, cap: int = RESULTS_LIMIT) -> 
 
 # ── 5. Scraping ─────────────────────────────────────────────────────────────
 
+def _is_error_placeholder(items: list) -> bool:
+    """True si el 'dataset' es el placeholder de error de Apify (lista de 1
+    elemento con clave 'error', sin ningún post real con 'id')."""
+    return (
+        len(items) == 1
+        and isinstance(items[0], dict)
+        and "error" in items[0]
+        and "id" not in items[0]
+    )
+
+
 def scrape_posts(targets: list[tuple[str, int]], client: ApifyClient) -> dict:
     """targets: [(username, dias_a_pedir), ...] — ventana ya resuelta por cuenta."""
     total_cost, total_posts = 0.0, 0
@@ -241,7 +252,7 @@ def scrape_posts(targets: list[tuple[str, int]], client: ApifyClient) -> dict:
 
             print(f"  💰 Costo: ${run_cost:.4f} USD")
 
-            if not dataset_items:
+            if not dataset_items or _is_error_placeholder(dataset_items):
                 category, reason = diagnose_empty(username, days_for_account)
                 if category == "window":
                     window_empty += 1
