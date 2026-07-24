@@ -497,8 +497,8 @@ def writeback(batch: int = typer.Option(500, help="Filas por lote UNWIND.")):
 def run_all():
     """export → analyze → writeback."""
     export()
-    analyze()
-    writeback()
+    analyze(run_label="")
+    writeback(batch=500)
 
 
 if __name__ == "__main__":
