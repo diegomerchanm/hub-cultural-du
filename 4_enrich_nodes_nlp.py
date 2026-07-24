@@ -82,12 +82,11 @@ _EMOJI_RE  = __import__("re").compile(
 )
 
 
-def _is_noise_keyword(text: str) -> bool:
-    """True si el chunk es solo emojis, puntuación o una URL."""
-    clean = _URL_RE.sub("", text).strip()
-    clean = _EMOJI_RE.sub("", clean).strip()
-    # Queda vacío o es solo puntuación/espacios
-    return not clean or all(not c.isalnum() for c in clean)
+def _clean_text(text: str) -> str:
+    """Quita URLs y emojis, colapsa espacios. Limpia el texto guardado, no solo decide inclusión."""
+    clean = _URL_RE.sub("", text)
+    clean = _EMOJI_RE.sub("", clean)
+    return " ".join(clean.split()).strip()
 
 
 def extract_features(text: str, lang: str) -> dict:
@@ -100,36 +99,48 @@ def extract_features(text: str, lang: str) -> dict:
 
     ALLOWED_ENT_TYPES = {"PER", "LOC", "GPE", "ORG", "DATE", "FAC"}
 
-    entities = list({
-        f"{ent.label_}:{ent.text.strip()}"
-        for ent in doc.ents
-        if (
-            ent.label_ in ALLOWED_ENT_TYPES                # whitelist de tipos
-            and len(ent.text.strip()) > 1
-            and len(ent.text.strip().split()) <= 6         # máx 6 palabras
-            and len(ent.text.strip()) <= 60                # máx 60 caracteres
-            and "http" not in ent.text                     # sin URLs
-            and "/" not in ent.text                        # sin paths/URLs
-            and "\n" not in ent.text                       # sin saltos de línea
-            and (                                          # DATE parseable
-                ent.label_ != "DATE"
-                or _is_valid_date_entity(ent.text.strip())
-            )
-        )
-    })
-    keywords = list({
-        chunk.text.lower().strip()
-        for chunk in doc.noun_chunks
-        if (
-            len(chunk.text.strip()) > 2
-            and not chunk.text.startswith("#")
-            and not _is_noise_keyword(chunk.text)         # 2. sin emojis/URLs/puntuación
-        )
-    })
-    return {"entities": entities, "keywords": keywords}
+    entities = set()
+    for ent in doc.ents:
+        if ent.label_ not in ALLOWED_ENT_TYPES:              # whitelist de tipos
+            continue
+        cleaned = _clean_text(ent.text)
+        if not any(c.isalnum() for c in cleaned):            # nada útil tras limpiar
+            continue
+        if not (1 < len(cleaned) <= 60):                     # longitud tras limpiar
+            continue
+        if len(cleaned.split()) > 6:                         # máx 6 palabras
+            continue
+        if "http" in cleaned or "/" in cleaned or "\n" in cleaned:
+            continue
+        if ent.label_ == "DATE" and not _is_valid_date_entity(cleaned):
+            continue
+        entities.add(f"{ent.label_}:{cleaned}")
+
+    keywords = set()
+    for chunk in doc.noun_chunks:
+        if chunk.text.strip().startswith("#"):
+            continue
+        cleaned = _clean_text(chunk.text).lower()
+        if len(cleaned) <= 2:
+            continue
+        if not any(c.isalnum() for c in cleaned):            # solo emojis/puntuación
+            continue
+        keywords.add(cleaned)
+
+    return {"entities": list(entities), "keywords": list(keywords)}
 
 
 # ── 4. Account.biography ──────────────────────────────────────────────────────
+def reset_bio_features() -> None:
+    """Limpia bioEntities/bioKeywords (conserva bioLanguage) para forzar su recálculo."""
+    with driver.session() as session:
+        session.run("""
+            MATCH (a:Account) WHERE a.bioEntities IS NOT NULL OR a.bioKeywords IS NOT NULL
+            SET a.bioEntities = NULL, a.bioKeywords = NULL
+        """)
+    print("  ♻️  bioEntities/bioKeywords reseteados (bioLanguage conservado)")
+
+
 def process_biographies(batch_size: int = 50) -> int:
     print("\n📖 Enriqueciendo Account.biography")
     print("=" * 55)
@@ -138,8 +149,8 @@ def process_biographies(batch_size: int = 50) -> int:
         records = session.run("""
             MATCH (a:Account)
             WHERE a.biography IS NOT NULL AND a.biography <> ''
-              AND a.bioLanguage IS NULL
-            RETURN a.username AS username, a.biography AS bio
+              AND (a.bioLanguage IS NULL OR a.bioEntities IS NULL)
+            RETURN a.username AS username, a.biography AS bio, a.bioLanguage AS lang
         """).data()
 
     if not records:
@@ -152,7 +163,7 @@ def process_biographies(batch_size: int = 50) -> int:
         batch = records[i: i + batch_size]
         writes = []
         for r in batch:
-            lang  = detect_lang(r["bio"])
+            lang  = r["lang"] or detect_lang(r["bio"])
             feats = extract_features(r["bio"], lang) if lang != "unknown" else {"entities": [], "keywords": []}
             writes.append({
                 "username": r["username"],
@@ -174,6 +185,16 @@ def process_biographies(batch_size: int = 50) -> int:
 
 
 # ── 5. Post.caption ───────────────────────────────────────────────────────────
+def reset_caption_features() -> None:
+    """Limpia captionEntities/captionKeywords (conserva captionLanguage) para forzar su recálculo."""
+    with driver.session() as session:
+        session.run("""
+            MATCH (p:Post) WHERE p.captionEntities IS NOT NULL OR p.captionKeywords IS NOT NULL
+            SET p.captionEntities = NULL, p.captionKeywords = NULL
+        """)
+    print("  ♻️  captionEntities/captionKeywords reseteados (captionLanguage conservado)")
+
+
 def process_captions(batch_size: int = 100) -> int:
     print("\n📸 Enriqueciendo Post.caption")
     print("=" * 55)
@@ -182,8 +203,8 @@ def process_captions(batch_size: int = 100) -> int:
         records = session.run("""
             MATCH (p:Post)
             WHERE p.caption IS NOT NULL AND p.caption <> ''
-              AND p.captionLanguage IS NULL
-            RETURN p.id AS id, p.caption AS caption
+              AND (p.captionLanguage IS NULL OR p.captionEntities IS NULL)
+            RETURN p.id AS id, p.caption AS caption, p.captionLanguage AS lang
         """).data()
 
     if not records:
@@ -196,7 +217,7 @@ def process_captions(batch_size: int = 100) -> int:
         batch = records[i: i + batch_size]
         writes = []
         for r in batch:
-            lang  = detect_lang(r["caption"])
+            lang  = r["lang"] or detect_lang(r["caption"])
             feats = extract_features(r["caption"], lang) if lang != "unknown" else {"entities": [], "keywords": []}
             writes.append({
                 "id":       r["id"],
@@ -330,6 +351,11 @@ def main(
         "paraphrase-multilingual-MiniLM-L12-v2", "--embedding-model"
     ),
     batch_size: int = typer.Option(50, "--batch-size"),
+    reset_features: bool = typer.Option(
+        False, "--reset-features",
+        help="Resetea bioEntities/bioKeywords y captionEntities/captionKeywords "
+             "(conserva bioLanguage/captionLanguage) para forzar su recálculo, p.ej. tras un fix de limpieza NER.",
+    ),
 ):
     """
     Fase 4-A: idioma + NER + keywords (+ embeddings opcionales).
@@ -338,6 +364,12 @@ def main(
     """
     driver.verify_connectivity()
     print("✅ Conexión Neo4j OK\n")
+
+    if reset_features:
+        if only in (None, "bio"):
+            reset_bio_features()
+        if only in (None, "posts"):
+            reset_caption_features()
 
     if only in (None, "bio"):
         process_biographies(batch_size=batch_size)
