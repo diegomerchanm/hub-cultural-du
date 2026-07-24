@@ -316,5 +316,22 @@ commits 9180ad4 (lat/lon bbox, DD-031) and fe65863 (AF_SATELLITE, DD-032)
 
 ---
 
-*Last updated: 2026-07-15*
-*Next run: RUN-015 — 3_analyze_network.py on expanded V2 graph (blocked by connectivity)*
+## RUN-015 — July 2026 — First network analysis on expanded V2 graph
+**Scripts:** 3_analyze_network.py run-all
+**Input:** Neo4j V2 graph post-ingestion (7,269 Account nodes, previous
+RUN-014)
+**Output:**
+- Social layer (2,973 nodes, 3,348 edges, giant=85.7%, modularity
+  0.90-0.91) and algorithmic layer (1,706 nodes, 1,956 edges, giant=90.1%,
+  modularity 0.86-0.87). Metrics → data_processed/metrics_social.csv and
+  metrics_algorithmic.csv. Writeback to Neo4j completed.
+**Result:** First complete network analysis on the expanded V2 graph.
+**Lessons:**
+- elcafetal.paris/educulturaco are top connectors despite 0-1 posts of
+  their own — validates DD-028 (cultural relevance via NLP, not
+  post/GDS density)
+
+---
+
+*Last updated: 2026-07-24*
+*Next run: RUN-016 — TBD*
