@@ -1,7 +1,7 @@
 """
 Fase 4-B — Extracción de eventos culturales desde Post.caption.
 
-Arquitectura de 3 capas:
+Arquitectura de 4 capas:
   Capa 1 — sentence-transformers (paraphrase-multilingual-MiniLM-L12-v2)
             Similitud coseno MÁXIMA contra 100 frases de referencia (no promedio).
             Filtra candidatos por max_sim >= layer1_threshold.
@@ -18,15 +18,30 @@ Arquitectura de 3 capas:
              Asigna tipo de evento con 12 labels culturales.
              --high-quality activa mDeBERTa-v3 (más lento, mejor precisión).
 
+  Capa 3 — LLM: Ollama local (modelo configurable vía OLLAMA_MODEL, default
+            qwen2.5:7b) por defecto, Groq disponible vía
+            LLM_PROVIDER=groq — ver DD-033 y DD-033 (update 3). Solo corre
+            sobre los que pasaron 2a (~30-50/corrida en pruebas, corpus
+            completo en corridas reales — Ollama no tiene tope diario de
+            tokens como el free tier de Groq). Limpia fecha/ubicación
+            (spaCy/dateparser tienen bugs confirmados), redacta
+            clean_description, y detecta noticias institucionales sin
+            invitación real al público mediante is_public_invitation/is_upcoming.
+
 Optimizaciones CPU: batch inference en 2a/2b, truncado a 256 tokens,
 torch multi-thread, cache de embeddings de referencia en ref_embeddings.npz.
 
-Score final = (layer2_score × 0.6 + hotness_norm × 0.4) × political_penalty
+Score final = (layer2_score × 0.6 + hotness_norm × 0.4) × political_penalty × llm_penalty
+  llm_penalty = 1.0 si is_public_invitation AND is_upcoming
+              = 0.15 (LLM_REJECT_PENALTY)  si el LLM responde y NO es invitación futura
+              = 0.5  (LLM_UNKNOWN_PENALTY) si el LLM falla (Ollama no disponible,
+                o Groq tras agotar reintentos) — verdicto "incierto", ver DD-033-update.
 
 Idempotente: marca cada post procesado con eventExtracted=true.
 """
 
 import hashlib
+import json
 import math
 import os
 import random
@@ -37,6 +52,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
+import requests
 
 import typer
 from dotenv import load_dotenv
@@ -50,9 +66,19 @@ load_dotenv()
 NEO4J_URI      = os.getenv("NEO4J_URI")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+GROQ_API_KEY   = os.getenv("GROQ_API_KEY")
 
 if not all([NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD]):
     raise ValueError("Error: credenciales Neo4j ausentes en .env")
+
+if not GROQ_API_KEY:
+    print("  ⚠️  GROQ_API_KEY ausente en .env — Capa 3 (LLM) se omitirá (valores null, sin penalización)")
+
+# Endpoint OpenAI-compatible de Groq. Confirmado en console.groq.com/docs/models
+# (2026-07-24): llama-3.3-70b-versatile es el modelo de texto grande vigente con
+# mejor soporte multilingüe entre los disponibles en producción.
+GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL    = "llama-3.3-70b-versatile"
 
 driver = GraphDatabase.driver(
     NEO4J_URI,
@@ -223,6 +249,12 @@ NULL_CATS    = {"nulo"}
 
 HOTNESS_MAX     = 6.0
 MIN_CAPTION_LEN = 40
+# Capa 3 (Groq) — penalización cuando el veredicto NO es invitación pública
+# futura (o cuando Groq falla tras agotar reintentos: verdicto "incierto",
+# ver DD-033-update). No es 1.0 (confianza ciega) ni 0.15 (igual a rechazo
+# confirmado) — demora acotada en ambas direcciones.
+LLM_REJECT_PENALTY  = 0.15
+LLM_UNKNOWN_PENALTY = 0.5
 # Capa 2a — detección binaria: modelo NLI multilingüe LIGERO (6 capas).
 # ⚠️ No sustituir por cross-encoder/nli-deberta-v3-small: es inglés-only.
 DET_MODEL       = "MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli"
@@ -403,6 +435,240 @@ def extract_ner(text: str, lang: str) -> dict:
     return result
 
 
+# ── 6b. Capa 3 — enriquecimiento LLM (Groq por defecto, Ollama como fallback) ──
+# LLM_PROVIDER selecciona el transporte; el prompt/esquema es EL MISMO para
+# ambos (ver _build_llm_prompt) — solo cambia a quién se le manda. Ver DD-033
+# (update 4): Ollama local descartado por límite de RAM de la máquina
+# (crashea/HTTP 500 junto al resto de modelos del pipeline, 36s+/llamada
+# incluso aislado). Groq free tier tiene tope de 100k tokens/día
+# (~148 llamadas/día, ver update 3) — se acepta como restricción operativa.
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").strip().lower()
+
+OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
+OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "qwen2.5:7b").strip()
+
+_LLM_SCHEMA_HINT = """Responde ÚNICAMENTE con un objeto JSON (sin texto adicional) con estas claves exactas:
+{
+  "is_public_invitation": bool,   // invita al público/diáspora a asistir; no es noticia, comunicado, recap o aviso administrativo
+  "is_upcoming": bool,            // describe algo futuro respecto a la fecha de publicación, no algo que ya ocurrió
+  "clean_location": string o null,   // ubicación real del evento
+  "clean_date": string "YYYY-MM-DD" o null,  // fecha real del evento, razonada por contexto
+  "clean_description": string,   // 1-2 oraciones sin emojis/hashtags/menciones, para dashboard
+  "reasoning": string             // breve justificación
+}"""
+
+LLM_CAPTION_CHARS = 900   # suficiente para juzgar is_public_invitation/is_upcoming/
+                           # clean_location sin el texto completo
+
+
+def _build_llm_prompt(caption: str, anchor_date: str) -> str:
+    """Prompt/esquema compartido entre Groq y Ollama — el transporte cambia, esto no."""
+    return (
+        f"Esta publicación de Instagram fue hecha el {anchor_date or 'fecha desconocida'}.\n"
+        f"Caption:\n\"\"\"\n{caption[:LLM_CAPTION_CHARS]}\n\"\"\"\n\n"
+        "Analiza si esta publicación es una invitación real y abierta a un evento cultural, "
+        "o si en realidad es una noticia institucional, un comunicado, la visita de una "
+        "personalidad, un aviso administrativo o el recap de algo que ya pasó.\n"
+        "Para clean_date razona explícitamente si la fecha mencionada es pasada o futura "
+        "según el contexto y la fecha de publicación — no asumas futuro por defecto.\n\n"
+        f"{_LLM_SCHEMA_HINT}"
+    )
+
+
+# ── 6b-i. Transporte Ollama (local, activo por defecto) ──────────────────────
+def _ollama_request(caption: str, anchor_date: str, label: str = "") -> Optional[dict]:
+    """Una llamada secuencial a Ollama local. Sin cuota que pacear — a diferencia
+    de Groq, no hay throttling/backoff aquí, solo el tiempo de cómputo de la
+    máquina. None si Ollama no está disponible o la respuesta falla/no parsea.
+    """
+    prompt = _build_llm_prompt(caption, anchor_date)
+    try:
+        resp = requests.post(
+            OLLAMA_ENDPOINT,
+            json={
+                "model":    OLLAMA_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "format":   "json",
+                "stream":   False,
+                "options":  {"temperature": 0.0},
+            },
+            timeout=120,
+        )
+        if resp.status_code == 404 and "not found" in resp.text.lower():
+            print(f"  ⚠️  Ollama: modelo {OLLAMA_MODEL} no está descargado [{label}] — "
+                  f"correr `ollama pull {OLLAMA_MODEL}`", flush=True)
+            return None
+        resp.raise_for_status()
+        content = resp.json()["message"]["content"]
+        return json.loads(content)
+    except requests.exceptions.ConnectionError:
+        print(f"  ⚠️  Ollama no disponible en localhost:11434 [{label}] — "
+              f"¿está corriendo `ollama serve` y el modelo {OLLAMA_MODEL} descargado?", flush=True)
+        return None
+    except Exception as e:
+        print(f"  ⚠️  Ollama falló [{label}]: {type(e).__name__}: {e}", flush=True)
+        return None
+
+
+# ── 6b-ii. Transporte Groq (disponible vía LLM_PROVIDER=groq) ────────────────
+# Free tier de Groq: 30 req/min Y 12,000 tokens/min (TPM), además de un tope
+# de 100,000 tokens/día que no se ve en los headers por-minuto — ver DD-033
+# (update 2 y 3). Se deja el throttling implementado como referencia/fallback,
+# pero Ollama es la ruta activa por defecto para volumen alto.
+GROQ_MAX_RPM             = 25
+GROQ_MAX_TPM             = 12000
+GROQ_TPM_SAFETY_MARGIN   = 11000  # margen bajo el límite real de 12000
+GROQ_MAX_ATTEMPTS        = 3
+GROQ_RESPONSE_TOKENS_EST = 150    # el JSON de salida es corto y de forma fija
+_last_groq_call_ts       = 0.0
+_groq_token_window: list = []     # [(timestamp, tokens_estimados), ...] últimos 60s
+
+
+def _groq_rate_limit_wait() -> None:
+    """Espacia llamadas para no superar GROQ_MAX_RPM, antes de cada intento."""
+    global _last_groq_call_ts
+    min_interval = 60.0 / GROQ_MAX_RPM
+    elapsed = time.time() - _last_groq_call_ts
+    if elapsed < min_interval:
+        time.sleep(min_interval - elapsed)
+    _last_groq_call_ts = time.time()
+
+
+def _estimate_tokens(text: str) -> int:
+    """Heurística simple: ~4 caracteres por token."""
+    return max(1, len(text) // 4)
+
+
+def _groq_tokens_used_last_60s() -> int:
+    global _groq_token_window
+    cutoff = time.time() - 60
+    _groq_token_window = [(ts, tok) for ts, tok in _groq_token_window if ts >= cutoff]
+    return sum(tok for _, tok in _groq_token_window)
+
+
+def _groq_tpm_wait(estimated_tokens: int) -> int:
+    """Bloquea hasta que quepan estimated_tokens en la ventana de 60s bajo
+    GROQ_TPM_SAFETY_MARGIN, en vez de disparar la llamada y esperar el 429.
+    Devuelve los tokens ya usados en la ventana (para logging)."""
+    while True:
+        used = _groq_tokens_used_last_60s()
+        if used + estimated_tokens <= GROQ_TPM_SAFETY_MARGIN or not _groq_token_window:
+            return used
+        oldest_ts = _groq_token_window[0][0]
+        wait = max(0.5, 60 - (time.time() - oldest_ts) + 0.1)
+        print(f"  ⏳ Groq TPM: {used}+{estimated_tokens} tok > {GROQ_TPM_SAFETY_MARGIN} margen"
+              f" — esperando {wait:.1f}s", flush=True)
+        time.sleep(wait)
+
+
+def _groq_request(caption: str, anchor_date: str, label: str = "") -> Optional[dict]:
+    """Llama a Groq con reintentos. None si falla tras agotar GROQ_MAX_ATTEMPTS.
+
+    Loguea tipo de excepción/status en cada intento fallido para poder
+    distinguir rate-limit (429) de timeout o de JSON inválido en la
+    respuesta — antes fallaba en silencio y no había forma de saber por qué.
+    Pacea por RPM y por TPM (ver DD-033 update 2); el manejo de 429 se
+    mantiene como red de seguridad si el estimado de tokens falla, pero no
+    debería activarse casi nunca con el pacing por TPM en su lugar.
+    """
+    if not GROQ_API_KEY:
+        return None
+    prompt = _build_llm_prompt(caption, anchor_date)
+    est_tokens = _estimate_tokens(prompt) + GROQ_RESPONSE_TOKENS_EST
+
+    for attempt in range(1, GROQ_MAX_ATTEMPTS + 1):
+        _groq_rate_limit_wait()
+        used = _groq_tpm_wait(est_tokens)
+        _groq_token_window.append((time.time(), est_tokens))
+        try:
+            resp = requests.post(
+                GROQ_ENDPOINT,
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model":           GROQ_MODEL,
+                    "messages":        [{"role": "user", "content": prompt}],
+                    "temperature":     0.0,
+                    "response_format": {"type": "json_object"},
+                },
+                timeout=30,
+            )
+            if resp.status_code == 429:
+                wait = float(resp.headers.get("Retry-After", 2 ** attempt))
+                print(f"  ⚠️  Groq 429 rate-limit [{label}] intento {attempt}/{GROQ_MAX_ATTEMPTS}"
+                      f" (~{est_tokens} tok, ventana={used}) — esperando {wait:.1f}s", flush=True)
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"]
+            print(f"  🪙 Groq [{label}] ~{est_tokens} tok  (ventana 60s: {used + est_tokens})", flush=True)
+            return json.loads(content)
+        except Exception as e:
+            print(f"  ⚠️  Groq falló [{label}] intento {attempt}/{GROQ_MAX_ATTEMPTS}: "
+                  f"{type(e).__name__}: {e}", flush=True)
+            if attempt < GROQ_MAX_ATTEMPTS:
+                time.sleep(1.5)
+    return None
+
+
+_LLM_DEFAULTS = {
+    "is_public_invitation": None,
+    "is_upcoming":          None,
+    "clean_location":       None,
+    "clean_date":           None,
+    "clean_description":    None,
+    "reasoning":            None,
+}
+
+
+def _extract_llm_fields(data: Optional[dict]) -> dict:
+    if data is None:
+        return dict(_LLM_DEFAULTS)
+    return {
+        "is_public_invitation": data.get("is_public_invitation"),
+        "is_upcoming":          data.get("is_upcoming"),
+        "clean_location":       data.get("clean_location") or None,
+        "clean_date":           data.get("clean_date") or None,
+        "clean_description":    data.get("clean_description") or None,
+        "reasoning":            data.get("reasoning") or None,
+    }
+
+
+def llm_enrich_event_ollama(caption: str, post_timestamp: str = "", label: str = "") -> dict:
+    """Capa 3 vía Ollama local (modelo configurable vía OLLAMA_MODEL, default
+    qwen2.5:7b) — mismo prompt/esquema que la versión Groq (_build_llm_prompt),
+    solo cambia el transporte. Sin cuota que pacear: llamada secuencial, ver
+    _ollama_request.
+    """
+    if not caption:
+        return dict(_LLM_DEFAULTS)
+    anchor_date = (post_timestamp or "")[:10]
+    return _extract_llm_fields(_ollama_request(caption, anchor_date, label=label))
+
+
+def llm_enrich_event_groq(caption: str, post_timestamp: str = "", label: str = "") -> dict:
+    """Capa 3 vía Groq (llama-3.3-70b-versatile). Throttling RPM/TPM y
+    reintentos en _groq_request — ver DD-033 (update 2).
+    """
+    if not caption:
+        return dict(_LLM_DEFAULTS)
+    anchor_date = (post_timestamp or "")[:10]
+    return _extract_llm_fields(_groq_request(caption, anchor_date, label=label))
+
+
+def llm_enrich_event(caption: str, post_timestamp: str = "", label: str = "") -> dict:
+    """Capa 3 — limpia fecha/ubicación, redacta descripción y detecta noticias
+    institucionales sin invitación real al público. LLM_PROVIDER elige el
+    transporte: llm_enrich_event_ollama() (default) o llm_enrich_event_groq().
+
+    Se llama SOLO sobre candidatos que ya pasaron Capas 1+2 (~30-50/corrida en
+    pruebas, corpus completo en corridas reales). Si el transporte activo
+    falla se devuelven valores null — el caller aplica LLM_UNKNOWN_PENALTY
+    (penalización intermedia) en ese caso, ver DD-033.
+    """
+    fn = llm_enrich_event_groq if LLM_PROVIDER == "groq" else llm_enrich_event_ollama
+    return fn(caption, post_timestamp, label=label)
+
+
 # ── 7. Helpers — fechas y scores ──────────────────────────────────────────────
 # Patrones de fecha para extracción previa antes de dateparser
 _DATE_RE = re.compile(
@@ -551,11 +817,20 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
                 e.layer1Score  = $layer1Score,
                 e.postCount    = 1,
                 e.embedding    = $embedding,
-                e.createdAt    = $createdAt
+                e.createdAt    = $createdAt,
+                e.description        = $description,
+                e.isPublicInvitation = $isPublicInvitation,
+                e.isUpcoming         = $isUpcoming,
+                e.llmReasoning       = $llmReasoning,
+                e.sourcePostUrl      = $sourcePostUrl,
+                e.sourceAuthor       = $sourceAuthor,
+                e.sourcePostDate     = $sourcePostDate
         """, **{k: event[k] for k in [
             "id", "title", "type", "category", "rawDate", "eventDate",
             "locationName", "hotnessScore", "eventScore", "confidence",
             "layer1Score", "embedding", "createdAt",
+            "description", "isPublicInvitation", "isUpcoming", "llmReasoning",
+            "sourcePostUrl", "sourceAuthor", "sourcePostDate",
         ]})
         if event.get("locationName"):
             session.run("""
@@ -622,11 +897,16 @@ def run_extraction(
     high_quality: bool      = False,
 ):
     t_start = time.time()
-    print("\n🎭 Fase 4-B — Extracción de Eventos (2 capas)")
+    print("\n🎭 Fase 4-B — Extracción de Eventos (4 capas)")
     print("=" * 60)
+    if LLM_PROVIDER == "groq":
+        capa3_status = f"Groq({GROQ_MODEL})" if GROQ_API_KEY else "Groq(GROQ_API_KEY ausente!)"
+    else:
+        capa3_status = f"Ollama({OLLAMA_MODEL}@localhost:11434)"
     print(f"  L1≥{layer1_threshold}  L2≥{layer2_threshold}  "
           f"max_posts={max_posts or '∞'}  batch={batch_size}  "
-          f"sim≥{sim_threshold}  date±{date_window}d")
+          f"sim≥{sim_threshold}  date±{date_window}d  "
+          f"Capa3={capa3_status}")
     if accounts:
         print(f"  Filtro cuentas: {accounts}")
 
@@ -646,6 +926,7 @@ def run_extraction(
                    p.commentsCount AS comments,
                    p.timestamp     AS timestamp,
                    p.hashtags      AS hashtags,
+                   p.url           AS url,
                    a.username      AS author,
                    collect(DISTINCT [(p)-[:TAGS_USER]->(tu) | tu.username])[0] AS taggedUsers,
                    collect(DISTINCT [(p)-[:MENTIONS]->(m)   | m.username])[0]  AS mentions
@@ -785,7 +1066,31 @@ def run_extraction(
             post.get("comments", 0) or 0,
             post.get("timestamp", "") or "",
         )
-        event_score = compute_event_score(det_score, hotness, penalty) if is_event else 0.0
+
+        # Capa 3 — Groq, solo sobre candidatos que ya pasaron Capas 1+2 (is_event=True).
+        is_public_invitation = is_upcoming = clean_description = llm_reasoning = None
+        llm_penalty = 1.0
+        if is_event:
+            llm_out = llm_enrich_event(
+                post["caption"], post.get("timestamp", "") or "",
+                label=f"@{post.get('author', '?')}/{post.get('id', '?')}",
+            )
+            if llm_out.get("clean_location"):
+                loc_name = llm_out["clean_location"]
+            if llm_out.get("clean_date"):
+                event_date = llm_out["clean_date"]
+            is_public_invitation = llm_out.get("is_public_invitation")
+            is_upcoming          = llm_out.get("is_upcoming")
+            clean_description    = llm_out.get("clean_description")
+            llm_reasoning         = llm_out.get("reasoning")
+            if is_public_invitation is None or is_upcoming is None:
+                # Groq falló tras agotar reintentos — verdicto incierto, no
+                # confianza ciega (DD-033-update): penalización intermedia.
+                llm_penalty = LLM_UNKNOWN_PENALTY
+            else:
+                llm_penalty = 1.0 if (is_public_invitation and is_upcoming) else LLM_REJECT_PENALTY
+
+        event_score = compute_event_score(det_score, hotness, penalty * llm_penalty) if is_event else 0.0
 
         record = {
             "caption":     post["caption"],
@@ -799,6 +1104,9 @@ def run_extraction(
             "loc_name":    loc_name or "",
             "raw_date":    event_date or "",
             "top3":        top3,          # tipos de Capa 2b
+            "is_public_invitation": is_public_invitation,
+            "is_upcoming":          is_upcoming,
+            "clean_description":    clean_description or "",
         }
         diag_all.append(record)
         diag_cands.append(record)
@@ -836,6 +1144,16 @@ def run_extraction(
             "embedding":    event_emb,
             "organizerOrg": org_name,
             "createdAt":    datetime.now(timezone.utc).isoformat(),
+            # Capa 3 (Groq) — description/flags/reasoning; source* solo se
+            # fijan al crear el evento, nunca se sobreescriben al fusionar
+            # (representan la publicación ORIGINAL, ver DD-033).
+            "description":        clean_description or "",
+            "isPublicInvitation":  is_public_invitation,
+            "isUpcoming":          is_upcoming,
+            "llmReasoning":        llm_reasoning or "",
+            "sourcePostUrl":       post.get("url"),
+            "sourceAuthor":        post.get("author"),
+            "sourcePostDate":      post.get("timestamp"),
         }
 
         existing_id = find_similar_event(candidate, cache, sim_threshold, date_window)
@@ -907,6 +1225,10 @@ def run_extraction(
               f"L1={r['layer1']:.3f}  L2={r['layer2']:.3f}  hot={r['hotness']:.2f}")
         print(f"       loc={r['loc_name'] or '-'}  date={r['raw_date'] or '-'}")
         print(f"       Label  : {r['top3'][0][0] if r['top3'] else '-'}")
+        print(f"       LLM (Capa 3): is_public_invitation={r['is_public_invitation']}  "
+              f"is_upcoming={r['is_upcoming']}")
+        if r["clean_description"]:
+            print(f"       Descripción: {r['clean_description']}")
         print(f"       Caption: {r['caption'].replace(chr(10), ' ')}")
 
     # 2. Distribución de scores L1 y L2
@@ -1010,7 +1332,7 @@ def main(
     ),
 ):
     """
-    Fase 4-B: extracción de eventos en 2 capas.
+    Fase 4-B: extracción de eventos en 4 capas.
 
     Capa 1: sentence-transformers filtra candidatos por similitud coseno
     máxima contra 100 frases de referencia (--threshold).
@@ -1018,8 +1340,13 @@ def main(
     Capa 2a: NLI multilingüe ligero batcheado — detección binaria (--layer2-threshold).
     Capa 2b: MiniLMv2-L6 multi-label — tipificación solo sobre positivos.
              Usar --high-quality para activar mDeBERTa-v3-base (más lento).
+    Capa 3:  Ollama local (modelo configurable vía OLLAMA_MODEL, default
+             qwen2.5:7b) por defecto — o Groq si LLM_PROVIDER=groq
+             (vía GROQ_API_KEY en .env). Limpia fecha/ubicación, redacta
+             descripción y filtra noticias institucionales sin invitación
+             real. Solo corre sobre los positivos de 2a.
 
-    eventScore = (layer2_score × 0.6 + hotness_norm × 0.4) × political_penalty
+    eventScore = (layer2_score × 0.6 + hotness_norm × 0.4) × political_penalty × llm_penalty
     """
     driver.verify_connectivity()
     print("✅ Conexión Neo4j OK\n")

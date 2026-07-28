@@ -388,5 +388,107 @@ A general rule "username with LatAm city → penalize" would break legitimate di
 
 ---
 
-*Last updated: 2026-07-15*
+## DD-033 — Groq LLM as Layer 3 of event extraction
+
+**Date:** 2026-07-24
+**Decision:** Add a fourth layer to `4_enrich_events_extract.py`, running only on the candidates that already passed Layers 1+2 (~30-50 per run, never the full corpus). Uses Groq's free-hosted `llama-3.3-70b-versatile` (confirmed current on console.groq.com/docs/models at the time of writing — not assumed) via its OpenAI-compatible endpoint with `response_format: json_object`, called from `llm_enrich_event()`. It returns `is_public_invitation`, `is_upcoming`, `clean_location`, `clean_date`, `clean_description`, and `reasoning`. `clean_location`/`clean_date` override the spaCy NER / dateparser output when non-null (fallback to the existing values otherwise); `eventScore` gets an additional `llm_penalty` multiplier: `0.15` when `NOT (is_public_invitation AND is_upcoming)`, `1.0` otherwise — same soft-penalty pattern as the political-account penalty (DD-012): the event stays in the graph for traceability but becomes irrelevant in rankings, rather than being dropped outright. A Groq call failure (network error or invalid JSON) returns null values and is retried once; on a second failure `llm_penalty` stays at `1.0` (no penalty) so one bad caption never crashes the run or unfairly penalizes an event the LLM simply failed to score. `sourcePostUrl`/`sourceAuthor`/`sourcePostDate` are written on the `:Event` node only at creation time (not when an existing event is enriched by a later post) since they identify the original source post — `postCount` and the `MENTIONS_EVENT` relationships already cover full traceability across all corroborating posts.
+**Rationale:** Manual review of dry-run output showed two confirmed bug classes that Layers 1-2 cannot fix: (1) spaCy/dateparser extract dates with a "prefer future" bias baked in, producing wrong dates when the caption is actually about a past event; (2) institutional news items — a meeting with Hermès's CEO, an official visit by Macron, routine administrative consular notices — get classified as cultural "events" because they mention a date/place/org, even though there is no real open invitation to the public. No `:Event` node has been created in Neo4j yet (every run so far was `--dry-run`), so this design applies from the very first real event onward.
+**Why Layer 3 only on filtered candidates, not the full corpus:** Layers 1+2 already narrow ~thousands of captions down to ~30-50 per run. Running an LLM call over the full corpus would be unnecessary cost/latency for zero marginal benefit — captions rejected by Layers 1-2 were never going to become events.
+**Alternative considered 1:** Local LLM via Ollama.
+**Why rejected:** The user's machine has a RAM constraint that makes running a 70B-class (or even a smaller quantized) local model impractical alongside the rest of the pipeline (spaCy, sentence-transformers, transformers models already loaded).
+**Alternative considered 2:** Train a small classifier (e.g. SetFit) on `is_public_invitation`/`is_upcoming`.
+**Why rejected:** Not enough labeled data exists yet to train a reliable classifier for this mémoire's timeline; a hosted general-purpose LLM gets usable output today without a labeling phase.
+
+---
+
+## DD-033 (update) — Groq failure logging, rate-limit backoff, and revised fallback penalty
+
+**Date:** 2026-07-24
+**Problem found:** A real `--dry-run` (50 posts, 37 events) showed 7/37 `llm_enrich_event()` calls returning `None` with no logged cause. Because the original fallback was "failure → `llm_penalty = 1.0`" (no penalty), an institutional news item — Ecuador's ambassador assuming new duties, pure news with no public invitation — ranked **#1** of the whole run (`eventScore = 0.768`) specifically because its Groq call failed and therefore went unpenalized. The failure mode itself was invisible: no exception type, no status code, nothing to distinguish rate-limiting from a timeout or a JSON-parse error.
+**Decision:**
+1. `_groq_request()` now logs `type(e).__name__: e` on every failed attempt, and detects HTTP 429 explicitly (before `raise_for_status()`) to log it as a rate-limit event distinctly from other exceptions.
+2. Added `_groq_rate_limit_wait()`: a minimum-interval throttle (`GROQ_MAX_RPM = 25`, under the free tier's 30 req/min) applied before every attempt, plus 429-specific backoff that honors the `Retry-After` header when present (falls back to `2**attempt` seconds). Retries per call raised to `GROQ_MAX_ATTEMPTS = 3`. This replaces the previous single immediate retry, which was neither spaced out nor 429-aware — 37 back-to-back calls against a 30/min limit was guaranteed to trip it.
+3. Fallback penalty on unresolved verdict (`is_public_invitation`/`is_upcoming` still `None` after all retries) changed from `1.0` (blind trust) to `LLM_UNKNOWN_PENALTY = 0.5` — distinct from `LLM_REJECT_PENALTY = 0.15` used when Groq *does* respond and rejects the event. Three options were weighed explicitly before picking this one:
+   - **Keep 1.0 (no penalty):** simplest, but is exactly the bug above — an unresolved verdict is silently treated as a pass.
+   - **Intermediate penalty (chosen, 0.5):** bounds the damage in both directions — a real event isn't crushed by a transient Groq outage, but an unresolved institutional-news case can no longer reach the top of the ranking. Requires an arbitrary calibration constant.
+   - **Fail-closed (0.15, same as a confirmed reject):** safest against false positives at the top of the ranking, but punishes infrastructure flakiness (rate-limit, timeout) as if it were a content problem, demoting genuinely good events whenever Groq is merely unavailable.
+   User chose the intermediate option.
+**Verification:** Re-run `--dry-run --max-posts 50` after the fix; confirm failures are now logged with an identifiable cause and the failure rate drops substantially versus the original 7/37.
+
+---
+
+## DD-033 (update 2) — Token-per-minute throttle for Groq
+
+**Date:** 2026-07-24
+**Problem found:** A live `--dry-run --max-posts 150` still hit 429s with escalating `Retry-After` (2s → 13s → 560s) despite the RPM throttle from the first update. Groq's free tier limits **requests** per minute (30) *and* **tokens** per minute (assumed 6,000 at the time — later found to actually be 12,000, see update 3) independently; several corpus captions run 300-500+ words, sometimes duplicated in Spanish and French in the same post, so the token bucket emptied before the request-count bucket did.
+**Decision:**
+1. `_estimate_tokens()` — a `len(text)//4` heuristic — estimates the prompt's token cost before sending, plus a fixed `GROQ_RESPONSE_TOKENS_EST = 150` for the (short, fixed-shape) JSON output.
+2. `_groq_token_window` — a sliding list of `(timestamp, estimated_tokens)` pruned to the trailing 60s — tracks usage; `_groq_tpm_wait()` blocks *before* sending if `used + estimated > GROQ_TPM_SAFETY_MARGIN`, sleeping until the oldest window entry ages out, instead of firing and eating the 429. The existing 429 handling is kept as a safety net only.
+3. Caption truncation for the LLM prompt tightened from 1500 to 900 characters (`LLM_CAPTION_CHARS`) — checked with a synthetic long caption that this alone drops the per-call estimate from ~1000 to ~225 tokens, a meaningful reduction on the dominant cost driver. 900 characters is enough for the LLM to judge `is_public_invitation`/`is_upcoming`/`clean_location`, which are almost always decidable from a caption's first paragraph, not from trailing tagged-account lists or repeated-language blocks.
+**Verified with a fake clock** (no real waiting) that the token-window block/release logic is correct in isolation before running it live.
+
+---
+
+## DD-033 (update 3) — Migrate Layer 3 to local Ollama; Groq kept as opt-in fallback
+
+**Date:** 2026-07-24
+**Problem found:** Querying the pending backlog returned **724** posts still needing extraction, of which ~74% (≈536) require an LLM call. While diagnosing the update-2 fix live against Groq, its response headers revealed the *real* free-tier limits: **12,000 TPM** (not 6,000 as assumed) but also, per Groq's own rate-limit docs, a **100,000 tokens/day (TPD)** cap that isn't exposed in any per-request header — so neither this project's throttle nor a header-driven one can see it coming, only hit it. At ~650-700 tokens/call, that TPD cap allows only **~148 Groq calls/day** on the free tier — far short of the ~536 needed. The escalating multi-hundred-second `Retry-After` values seen in the 150-post test (and originally reported) are consistent with this daily bucket, not the per-minute one: math checks out closely (100,000/day ÷ 86,400s ≈ 1.16 tok/s trickle-refill; ~650 tokens/1.16 ≈ 560s, matching the largest observed `Retry-After`).
+**Decision:** Add `llm_enrich_event_ollama()` — later folded into a provider-dispatching `llm_enrich_event()` — that sends the *exact same* prompt/JSON schema (`_build_llm_prompt()`, shared between both transports) to a local Ollama instance (`qwen2.5:7b`, `http://localhost:11434/api/chat`, `format: "json"`) instead of Groq. A new `LLM_PROVIDER` env var (default `"ollama"`) selects the transport; Groq's code (`_groq_request`, its RPM/TPM throttling from update 2) is left intact and reachable via `LLM_PROVIDER=groq`, preserving the option to switch back or run a hybrid later without rewriting anything. Ollama has no quota to pace against — calls are sequential with no retry/backoff loop (that machinery was specific to Groq's quota, not applicable locally); a `ConnectionError` is caught and reported with an actionable message ("¿está corriendo `ollama serve` y el modelo qwen2.5:7b descargado?") instead of a raw traceback. The existing fallback policy is unchanged: any Ollama failure returns null verdicts, and the caller applies `LLM_UNKNOWN_PENALTY = 0.5` exactly as it already did for Groq failures.
+**Trade-off accepted:** local CPU inference on a 7B model is slower per call than a hosted 70B model, and quality may differ somewhat from `llama-3.3-70b-versatile`. Accepted because the daily quota ceiling makes Groq's free tier structurally unable to process the current backlog in reasonable time regardless of how well request pacing is tuned, whereas Ollama's only constraint is wall-clock compute time on the user's machine.
+**Not yet verified against a real Ollama call** — a real test run (`qwen2.5:7b` actually generating a response) is pending until the model finishes downloading. However, checking the local environment during implementation found Ollama's daemon already running (`v0.32.3`) with no models pulled yet (`ollama pull qwen2.5:7b` needed) — `_ollama_request()` was extended to detect this specific case (HTTP 404 + `"not found"` in the body) and print `Ollama: modelo qwen2.5:7b no está descargado — correr \`ollama pull qwen2.5:7b\`` distinctly from the "daemon unreachable" `ConnectionError` case, instead of a generic HTTP-error message.
+
+## DD-033 (update 4) — Local LLM (Ollama) and NLI invitation filter both rejected; full commitment to Groq
+
+**Date:** 2026-07-25
+**Problem investigated:** Two non-Groq alternatives were tested to avoid the
+Groq free-tier daily cap (148 calls/day, see update 3), motivated by the
+user's stated preference for full independence from third-party services.
+**Alternative 1 — Local Ollama, qwen2.5:14b:** Tested as a higher-capacity
+replacement for qwen2.5:7b (which had shown reasoning errors on
+`is_upcoming` for institutional-news captions in manual review). Direct
+`ollama run` succeeded, but invocation through the pipeline's HTTP API
+crashed with HTTP 500 when run alongside the rest of the pipeline's loaded
+models (sentence-transformers, NLI classifier, spaCy). Root cause confirmed
+via direct system measurement: the machine has 15.69GB total RAM, with as
+little as 0.56GB free during a real run. An isolated API call (no other
+models loaded) succeeded but took 36.7s for a trivial prompt, with
+`prompt_eval_duration` alone at 21.8s — consistent with memory-pressure
+swapping, not just slow CPU inference. At ~536 pending LLM calls, this is
+both unreliable (crashes under real pipeline conditions) and impractically
+slow (36s+/call). **Rejected for hardware reasons, not quality** — whether
+14B would have actually fixed the `is_upcoming` reasoning gap was never
+established.
+**Alternative 2 — NLI-based invitation filter (Capa 2c):** A new binary NLI
+layer (same lightweight model as Capa 2a, `MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli`,
+new hypothesis: "Esta publicación invita al público a asistir a un evento
+futuro") was added as a diagnostic-only signal (not gating scoring) and
+compared against the Groq LLM's `is_public_invitation` verdict on a 17-post
+dry-run. Agreement was 5/17 (29%) — worse than the trivial baseline of
+always predicting "not an invitation" (13/17, 76%). The model systematically
+scored institutional news items (ambassador meetings, official visits,
+commemorations) at 0.73-0.98, i.e. confidently *wrong* in the exact case
+this filter was meant to catch. Diagnosed as the lightweight NLI model
+conflating topical similarity ("this is about an event/meeting") with the
+actual speech act ("this invites the public") — the same class of failure
+anticipated for embeddings/cosine-similarity in an earlier discussion, just
+manifesting through a different technique. **Rejected outright, not tuned**
+— removed from the codebase rather than kept as a partial/adjusted signal.
+**Decision:** Revert `LLM_PROVIDER` default to `"groq"`. Accept the ~148
+calls/day free-tier cap as an operating constraint on the full corpus
+(~536 pending calls, ≈4 days at cap), relying on the pipeline's existing
+idempotent design (`eventExtracted` sentinel) to resume across days without
+manual intervention. Local/embedding/NLI alternatives remain open for future
+work (e.g. a heavier NLI model for the invitation axis, or a grammatical
+tense-detection rule layer for `is_upcoming`) but are out of scope for the
+current corpus run.
+**Known limitation for the mémoire:** the project cannot currently run
+Layer 3 (LLM semantic verification of institutional vs. genuine public
+invitations) independently of a third-party hosted LLM (Groq) — full
+reproducibility by a third party depends on that party also having a Groq
+API key subject to the same free-tier daily limit, or supplying their own
+paid LLM access.
+
+---
+
+*Last updated: 2026-07-25*
 *Next decisions to document: DD-023 (NLP account classifier), SetFit for v2, TikTok integration, human-in-the-loop for event review.*
