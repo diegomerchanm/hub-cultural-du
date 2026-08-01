@@ -19,11 +19,13 @@ Arquitectura de 4 capas:
              --high-quality activa mDeBERTa-v3 (más lento, mejor precisión).
 
   Capa 3 — LLM: Ollama local (modelo configurable vía OLLAMA_MODEL, default
-            qwen2.5:7b) por defecto, Groq disponible vía
-            LLM_PROVIDER=groq — ver DD-033 y DD-033 (update 3). Solo corre
+            qwen2.5:7b) por defecto, Groq disponible vía LLM_PROVIDER=groq
+            (ver DD-033 y DD-033 update 3) y Cerebras vía LLM_PROVIDER=cerebras
+            (ver DD-033 update 5 — mismo modelo llama-3.3-70b, ~10x cupo diario
+            gratis frente a Groq, endpoint OpenAI-compatible). Solo corre
             sobre los que pasaron 2a (~30-50/corrida en pruebas, corpus
             completo en corridas reales — Ollama no tiene tope diario de
-            tokens como el free tier de Groq). Limpia fecha/ubicación
+            tokens como el free tier de Groq/Cerebras). Limpia fecha/ubicación
             (spaCy/dateparser tienen bugs confirmados), redacta
             clean_description, y detecta noticias institucionales sin
             invitación real al público mediante is_public_invitation/is_upcoming.
@@ -66,7 +68,8 @@ load_dotenv()
 NEO4J_URI      = os.getenv("NEO4J_URI")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
-GROQ_API_KEY   = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY     = os.getenv("GROQ_API_KEY")
+CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY")
 
 if not all([NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD]):
     raise ValueError("Error: credenciales Neo4j ausentes en .env")
@@ -79,6 +82,18 @@ if not GROQ_API_KEY:
 # mejor soporte multilingüe entre los disponibles en producción.
 GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL    = "llama-3.3-70b-versatile"
+
+# Endpoint OpenAI-compatible de Cerebras (cloud.cerebras.ai). NO es el mismo
+# modelo que Groq — Cerebras retiró llama-3.3-70b de su catálogo público;
+# el modelo de producción vigente es gpt-oss-120b (OpenAI open-weight),
+# confirmado en inference-docs.cerebras.ai/models/overview el 2026-07-30 —
+# ver DD-033 (update 5, corregido). Al ser un modelo distinto, NO se puede
+# asumir calidad equivalente a Groq solo por compatibilidad de API: hay que
+# validar con --dry-run contra una muestra y revisar título/reasoning a mano
+# antes de usarlo para escritura real. Además su tier gratis exige tarjeta
+# verificada (no es "sin tarjeta" como se asumió inicialmente).
+CEREBRAS_ENDPOINT = "https://api.cerebras.ai/v1/chat/completions"
+CEREBRAS_MODEL    = "gpt-oss-120b"
 
 driver = GraphDatabase.driver(
     NEO4J_URI,
@@ -255,6 +270,10 @@ MIN_CAPTION_LEN = 40
 # confirmado) — demora acotada en ambas direcciones.
 LLM_REJECT_PENALTY  = 0.15
 LLM_UNKNOWN_PENALTY = 0.5
+# Clamp de sanidad sobre eventDate: si la fecha razonada por Capa 3 se aleja
+# del timestamp del post más de esto, se descarta (probable alucinación del
+# LLM, p.ej. confundir una fecha histórica conmemorada con la del evento).
+EVENT_DATE_CLAMP_DAYS = 1095
 # Capa 2a — detección binaria: modelo NLI multilingüe LIGERO (6 capas).
 # ⚠️ No sustituir por cross-encoder/nli-deberta-v3-small: es inglés-only.
 DET_MODEL       = "MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli"
@@ -435,13 +454,18 @@ def extract_ner(text: str, lang: str) -> dict:
     return result
 
 
-# ── 6b. Capa 3 — enriquecimiento LLM (Groq por defecto, Ollama como fallback) ──
-# LLM_PROVIDER selecciona el transporte; el prompt/esquema es EL MISMO para
-# ambos (ver _build_llm_prompt) — solo cambia a quién se le manda. Ver DD-033
-# (update 4): Ollama local descartado por límite de RAM de la máquina
-# (crashea/HTTP 500 junto al resto de modelos del pipeline, 36s+/llamada
-# incluso aislado). Groq free tier tiene tope de 100k tokens/día
-# (~148 llamadas/día, ver update 3) — se acepta como restricción operativa.
+# ── 6b. Capa 3 — enriquecimiento LLM (Groq por defecto, Ollama/Cerebras alt.) ──
+# LLM_PROVIDER selecciona el transporte: "groq" (default), "cerebras" o
+# "ollama". El prompt/esquema es EL MISMO para los tres (ver _build_llm_prompt)
+# — solo cambia a quién se le manda. Ver DD-033 (update 4): Ollama local
+# descartado por límite de RAM de la máquina (crashea/HTTP 500 junto al resto
+# de modelos del pipeline, 36s+/llamada incluso aislado). Groq free tier tiene
+# tope real observado de ~100k tokens/día (~78-80 llamadas/día en la práctica,
+# ver update 3) — Cerebras (update 5) sirve gpt-oss-120b (modelo DISTINTO a
+# Groq, no llama-3.3-70b — Cerebras retiró ese modelo de su catálogo público)
+# con ~1M tokens/día gratis pero solo 5 req/min. Al ser otro modelo, su
+# calidad de salida en este pipeline específico NO está validada todavía —
+# probar con --dry-run antes de usarlo para escritura real.
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").strip().lower()
 
 OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
@@ -451,14 +475,17 @@ _LLM_SCHEMA_HINT = """Responde ÚNICAMENTE con un objeto JSON (sin texto adicion
 {
   "is_public_invitation": bool,   // invita al público/diáspora a asistir; no es noticia, comunicado, recap o aviso administrativo
   "is_upcoming": bool,            // describe algo futuro respecto a la fecha de publicación, no algo que ya ocurrió
-  "clean_location": string o null,   // ubicación real del evento
+  "city": string o null,           // ciudad donde ocurre el EVENTO — solo si el caption la menciona o es inequívoca por contexto; NUNCA la ciudad de la cuenta/institución que publica si el caption no la confirma
+  "exact_address": string o null,  // dirección o venue específico (calle, número, nombre del lugar) SOLO si aparece textualmente en el caption; si no hay dirección exacta, null — no repitas aquí solo el nombre de la ciudad
   "clean_date": string "YYYY-MM-DD" o null,  // fecha real del evento, razonada por contexto
   "clean_description": string,   // 1-2 oraciones sin emojis/hashtags/menciones, para dashboard
+  "title": string,                // título editorial corto (6-10 palabras), sin emojis/hashtags, para mostrar como encabezado de la tarjeta del evento — no repitas la categoría, describe el evento concreto
+  "is_free": bool o null,          // true si el caption menciona explícitamente que es gratis/entrada libre, false si menciona un precio, null si el texto no lo aclara (no asumas)
   "reasoning": string             // breve justificación
 }"""
 
 LLM_CAPTION_CHARS = 900   # suficiente para juzgar is_public_invitation/is_upcoming/
-                           # clean_location sin el texto completo
+                           # city/exact_address sin el texto completo
 
 
 def _build_llm_prompt(caption: str, anchor_date: str) -> str:
@@ -470,7 +497,26 @@ def _build_llm_prompt(caption: str, anchor_date: str) -> str:
         "o si en realidad es una noticia institucional, un comunicado, la visita de una "
         "personalidad, un aviso administrativo o el recap de algo que ya pasó.\n"
         "Para clean_date razona explícitamente si la fecha mencionada es pasada o futura "
-        "según el contexto y la fecha de publicación — no asumas futuro por defecto.\n\n"
+        "según el contexto y la fecha de publicación — no asumas futuro por defecto. Si la "
+        "publicación conmemora un aniversario, hito histórico o fecha pasada (ej. \"a 197 años "
+        "de...\", \"en 1958...\"), clean_date NO es esa fecha histórica — es la fecha de la "
+        "conmemoración/publicación actual (usa la fecha de publicación si no hay otra más "
+        "específica).\n"
+        "Para title, redacta un título editorial corto (6-10 palabras) que describa el evento "
+        "concreto, no la categoría genérica. Para is_free, responde true/false solo si el "
+        "texto menciona explícitamente precio o gratuidad — si no hay ninguna pista, "
+        "responde null, no asumas.\n"
+        "Para city y exact_address: el nombre de la cuenta o institución que publica NO es "
+        "evidencia suficiente de dónde ocurre el evento (ej. una cuenta llamada \"Alianza "
+        "Francesa de Medellín\" no implica que el evento sea en Medellín si el caption no lo "
+        "dice explícitamente) — usa exclusivamente lo que el texto del caption confirma. Si el "
+        "caption no da ninguna pista clara de ciudad o dirección, responde null en ambos "
+        "campos; es preferible null a una ubicación adivinada.\n"
+        "IMPORTANTE — idioma: title y clean_description deben estar en ESPAÑOL, sin importar "
+        "el idioma del caption original (aunque esté en francés o inglés) — el público de este "
+        "hub es la diáspora colombiana/latinoamericana en Francia. Excepción: mantén sin "
+        "traducir los nombres propios (lugares, instituciones, títulos de eventos) tal como "
+        "aparecen en el caption.\n\n"
         f"{_LLM_SCHEMA_HINT}"
     )
 
@@ -610,12 +656,109 @@ def _groq_request(caption: str, anchor_date: str, label: str = "") -> Optional[d
     return None
 
 
+# ── 6b-iii. Transporte Cerebras (disponible vía LLM_PROVIDER=cerebras) ───────
+# Free tier de gpt-oss-120b en Cerebras (confirmado en
+# inference-docs.cerebras.ai/support/rate-limits el 2026-07-30, tabla "Free
+# Trial"): 5 req/min, 30,000 tokens/min (TPM), 1,000,000 tokens/día (TPD) —
+# el TPD sigue siendo ~10x el de Groq, pero el RPM es MÁS bajo que Groq (5
+# vs 25), así que cada llamada individual va más espaciada aunque el cupo
+# diario total sea mayor. Modelo distinto a Groq (gpt-oss-120b, no
+# llama-3.3-70b) — pendiente de validar output contra el baseline de calidad
+# ya medido con Groq (ver verify_events_extraction.py show_groq_quality_sample)
+# antes de confiar en esto para escritura real.
+CEREBRAS_MAX_RPM             = 4
+CEREBRAS_MAX_TPM             = 30000
+CEREBRAS_TPM_SAFETY_MARGIN   = 26000   # margen bajo el límite real de 30,000
+CEREBRAS_MAX_ATTEMPTS        = 3
+CEREBRAS_RESPONSE_TOKENS_EST = 150     # mismo JSON de salida, corto y de forma fija
+_last_cerebras_call_ts       = 0.0
+_cerebras_token_window: list = []      # [(timestamp, tokens_estimados), ...] últimos 60s
+
+
+def _cerebras_rate_limit_wait() -> None:
+    """Espacia llamadas para no superar CEREBRAS_MAX_RPM, antes de cada intento."""
+    global _last_cerebras_call_ts
+    min_interval = 60.0 / CEREBRAS_MAX_RPM
+    elapsed = time.time() - _last_cerebras_call_ts
+    if elapsed < min_interval:
+        time.sleep(min_interval - elapsed)
+    _last_cerebras_call_ts = time.time()
+
+
+def _cerebras_tokens_used_last_60s() -> int:
+    global _cerebras_token_window
+    cutoff = time.time() - 60
+    _cerebras_token_window = [(ts, tok) for ts, tok in _cerebras_token_window if ts >= cutoff]
+    return sum(tok for _, tok in _cerebras_token_window)
+
+
+def _cerebras_tpm_wait(estimated_tokens: int) -> int:
+    """Bloquea hasta que quepan estimated_tokens en la ventana de 60s bajo
+    CEREBRAS_TPM_SAFETY_MARGIN, en vez de disparar la llamada y esperar el 429."""
+    while True:
+        used = _cerebras_tokens_used_last_60s()
+        if used + estimated_tokens <= CEREBRAS_TPM_SAFETY_MARGIN or not _cerebras_token_window:
+            return used
+        oldest_ts = _cerebras_token_window[0][0]
+        wait = max(0.5, 60 - (time.time() - oldest_ts) + 0.1)
+        print(f"  ⏳ Cerebras TPM: {used}+{estimated_tokens} tok > {CEREBRAS_TPM_SAFETY_MARGIN} margen"
+              f" — esperando {wait:.1f}s", flush=True)
+        time.sleep(wait)
+
+
+def _cerebras_request(caption: str, anchor_date: str, label: str = "") -> Optional[dict]:
+    """Llama a Cerebras con reintentos. None si falla tras agotar
+    CEREBRAS_MAX_ATTEMPTS. Mismo patrón que _groq_request (endpoint
+    OpenAI-compatible, mismo prompt/esquema) — ver DD-033 update 5.
+    """
+    if not CEREBRAS_API_KEY:
+        return None
+    prompt = _build_llm_prompt(caption, anchor_date)
+    est_tokens = _estimate_tokens(prompt) + CEREBRAS_RESPONSE_TOKENS_EST
+
+    for attempt in range(1, CEREBRAS_MAX_ATTEMPTS + 1):
+        _cerebras_rate_limit_wait()
+        used = _cerebras_tpm_wait(est_tokens)
+        _cerebras_token_window.append((time.time(), est_tokens))
+        try:
+            resp = requests.post(
+                CEREBRAS_ENDPOINT,
+                headers={"Authorization": f"Bearer {CEREBRAS_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model":           CEREBRAS_MODEL,
+                    "messages":        [{"role": "user", "content": prompt}],
+                    "temperature":     0.0,
+                    "response_format": {"type": "json_object"},
+                },
+                timeout=30,
+            )
+            if resp.status_code == 429:
+                wait = float(resp.headers.get("Retry-After", 2 ** attempt))
+                print(f"  ⚠️  Cerebras 429 rate-limit [{label}] intento {attempt}/{CEREBRAS_MAX_ATTEMPTS}"
+                      f" (~{est_tokens} tok, ventana={used}) — esperando {wait:.1f}s", flush=True)
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"]
+            print(f"  🧠 Cerebras [{label}] ~{est_tokens} tok  (ventana 60s: {used + est_tokens})", flush=True)
+            return json.loads(content)
+        except Exception as e:
+            print(f"  ⚠️  Cerebras falló [{label}] intento {attempt}/{CEREBRAS_MAX_ATTEMPTS}: "
+                  f"{type(e).__name__}: {e}", flush=True)
+            if attempt < CEREBRAS_MAX_ATTEMPTS:
+                time.sleep(1.5)
+    return None
+
+
 _LLM_DEFAULTS = {
     "is_public_invitation": None,
     "is_upcoming":          None,
-    "clean_location":       None,
+    "city":                 None,
+    "exact_address":        None,
     "clean_date":           None,
     "clean_description":    None,
+    "title":                None,
+    "is_free":              None,
     "reasoning":            None,
 }
 
@@ -626,9 +769,12 @@ def _extract_llm_fields(data: Optional[dict]) -> dict:
     return {
         "is_public_invitation": data.get("is_public_invitation"),
         "is_upcoming":          data.get("is_upcoming"),
-        "clean_location":       data.get("clean_location") or None,
+        "city":                 data.get("city") or None,
+        "exact_address":        data.get("exact_address") or None,
         "clean_date":           data.get("clean_date") or None,
         "clean_description":    data.get("clean_description") or None,
+        "title":                data.get("title") or None,
+        "is_free":              data.get("is_free"),
         "reasoning":            data.get("reasoning") or None,
     }
 
@@ -655,18 +801,71 @@ def llm_enrich_event_groq(caption: str, post_timestamp: str = "", label: str = "
     return _extract_llm_fields(_groq_request(caption, anchor_date, label=label))
 
 
+def llm_enrich_event_cerebras(caption: str, post_timestamp: str = "", label: str = "") -> dict:
+    """Capa 3 vía Cerebras (llama-3.3-70b, mismo modelo que Groq). Throttling
+    RPM/TPM y reintentos en _cerebras_request — ver DD-033 (update 5).
+    """
+    if not caption:
+        return dict(_LLM_DEFAULTS)
+    anchor_date = (post_timestamp or "")[:10]
+    return _extract_llm_fields(_cerebras_request(caption, anchor_date, label=label))
+
+
+# ── 6b-iv. Fallback automático entre proveedores cloud (DD-033 update 7) ────
+# Cuando el proveedor preferido (LLM_PROVIDER) agota su cupo diario a mitad
+# de una corrida, en vez de solo esperar/detenerse, se cambia automáticamente
+# al otro proveedor cloud (Groq <-> Cerebras) para el resto de la corrida —
+# así se aprovecha el cupo combinado de ambos sin que el usuario tenga que
+# pararla y reiniciarla manualmente cambiando LLM_PROVIDER a mano (como se
+# hizo antes de este fix). Ollama queda fuera: no tiene cupo diario que se
+# agote, y mezclar local+nube automáticamente no es lo que se pidió.
+_CLOUD_PROVIDERS = {
+    "groq":     llm_enrich_event_groq,
+    "cerebras": llm_enrich_event_cerebras,
+}
+_provider_failed_this_run: set = set()
+
+
+def _llm_call_failed(result: dict) -> bool:
+    """Mismo criterio que ya usa el caller para LLM_UNKNOWN_PENALTY: si
+    is_public_invitation e is_upcoming vinieron ambos en None, el transporte
+    no devolvió nada usable (agotó sus reintentos internos) — señal de que
+    vale la pena probar el otro proveedor en vez de seguir insistiendo."""
+    return result.get("is_public_invitation") is None and result.get("is_upcoming") is None
+
+
 def llm_enrich_event(caption: str, post_timestamp: str = "", label: str = "") -> dict:
     """Capa 3 — limpia fecha/ubicación, redacta descripción y detecta noticias
     institucionales sin invitación real al público. LLM_PROVIDER elige el
-    transporte: llm_enrich_event_ollama() (default) o llm_enrich_event_groq().
+    transporte preferido: llm_enrich_event_ollama() (default), o uno de los
+    dos proveedores cloud (llm_enrich_event_groq()/llm_enrich_event_cerebras()).
+
+    Si LLM_PROVIDER es un proveedor cloud y falla (cupo agotado u otro error
+    tras sus reintentos internos), se reintenta automáticamente con el otro
+    proveedor cloud antes de rendirse — ver DD-033 (update 7). Un proveedor
+    que falla se marca para el resto de esta corrida (no se reintenta post
+    a post; los cupos diarios no se recuperan a mitad de una corrida).
 
     Se llama SOLO sobre candidatos que ya pasaron Capas 1+2 (~30-50/corrida en
-    pruebas, corpus completo en corridas reales). Si el transporte activo
-    falla se devuelven valores null — el caller aplica LLM_UNKNOWN_PENALTY
-    (penalización intermedia) en ese caso, ver DD-033.
+    pruebas, corpus completo en corridas reales). Si TODOS los transportes
+    disponibles fallan se devuelven valores null — el caller aplica
+    LLM_UNKNOWN_PENALTY (penalización intermedia) en ese caso, ver DD-033.
     """
-    fn = llm_enrich_event_groq if LLM_PROVIDER == "groq" else llm_enrich_event_ollama
-    return fn(caption, post_timestamp, label=label)
+    if LLM_PROVIDER not in _CLOUD_PROVIDERS:
+        return llm_enrich_event_ollama(caption, post_timestamp, label=label)
+
+    order = [LLM_PROVIDER] + [p for p in _CLOUD_PROVIDERS if p != LLM_PROVIDER]
+    result = dict(_LLM_DEFAULTS)
+    for provider in order:
+        if provider in _provider_failed_this_run:
+            continue
+        result = _CLOUD_PROVIDERS[provider](caption, post_timestamp, label=label)
+        if not _llm_call_failed(result):
+            return result
+        print(f"  🔀 {provider} agotado/fallando — cambiando de proveedor "
+              f"para el resto de esta corrida.", flush=True)
+        _provider_failed_this_run.add(provider)
+    return result
 
 
 # ── 7. Helpers — fechas y scores ──────────────────────────────────────────────
@@ -811,6 +1010,8 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
                 e.rawDate      = $rawDate,
                 e.eventDate    = $eventDate,
                 e.locationName = $locationName,
+                e.cityName     = $cityName,
+                e.exactAddress = $exactAddress,
                 e.hotnessScore = $hotnessScore,
                 e.eventScore   = $eventScore,
                 e.confidence   = $confidence,
@@ -821,15 +1022,16 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
                 e.description        = $description,
                 e.isPublicInvitation = $isPublicInvitation,
                 e.isUpcoming         = $isUpcoming,
+                e.isFree             = $isFree,
                 e.llmReasoning       = $llmReasoning,
                 e.sourcePostUrl      = $sourcePostUrl,
                 e.sourceAuthor       = $sourceAuthor,
                 e.sourcePostDate     = $sourcePostDate
         """, **{k: event[k] for k in [
             "id", "title", "type", "category", "rawDate", "eventDate",
-            "locationName", "hotnessScore", "eventScore", "confidence",
+            "locationName", "cityName", "exactAddress", "hotnessScore", "eventScore", "confidence",
             "layer1Score", "embedding", "createdAt",
-            "description", "isPublicInvitation", "isUpcoming", "llmReasoning",
+            "description", "isPublicInvitation", "isUpcoming", "isFree", "llmReasoning",
             "sourcePostUrl", "sourceAuthor", "sourcePostDate",
         ]})
         if event.get("locationName"):
@@ -901,6 +1103,8 @@ def run_extraction(
     print("=" * 60)
     if LLM_PROVIDER == "groq":
         capa3_status = f"Groq({GROQ_MODEL})" if GROQ_API_KEY else "Groq(GROQ_API_KEY ausente!)"
+    elif LLM_PROVIDER == "cerebras":
+        capa3_status = f"Cerebras({CEREBRAS_MODEL})" if CEREBRAS_API_KEY else "Cerebras(CEREBRAS_API_KEY ausente!)"
     else:
         capa3_status = f"Ollama({OLLAMA_MODEL}@localhost:11434)"
     print(f"  L1≥{layer1_threshold}  L2≥{layer2_threshold}  "
@@ -929,7 +1133,8 @@ def run_extraction(
                    p.url           AS url,
                    a.username      AS author,
                    collect(DISTINCT [(p)-[:TAGS_USER]->(tu) | tu.username])[0] AS taggedUsers,
-                   collect(DISTINCT [(p)-[:MENTIONS]->(m)   | m.username])[0]  AS mentions
+                   collect(DISTINCT [(p)-[:MENTIONS]->(m)   | m.username])[0]  AS mentions,
+                   [(p)-[:TAGGED_AT]->(loc:Location) | loc.name][0]            AS taggedLocation
             {limit_clause}
         """, accounts=accounts or []).data()
 
@@ -971,6 +1176,7 @@ def run_extraction(
     enriched      = 0
     skipped_l1    = rejected_l1
     skipped_l2    = 0
+    dates_clamped = 0
     cand_set      = set(candidates_idx)   # una sola vez, no dentro del loop
     processed_ids = [posts[i]["id"] for i in range(len(posts)) if i not in cand_set]
     dry_counts:   dict = defaultdict(int)
@@ -1052,12 +1258,19 @@ def run_extraction(
 
         # NER + fechas solo cuando hace falta (eventos, o todo en dry-run
         # para diagnóstico) — evita pasar spaCy/langdetect por cada candidato.
+        # NOTA (DD-033 update 6): loc_name YA NO sale de ner["locations"][0].
+        # Ese fallback tomaba la primera entidad LOC/GPE/FAC que spaCy
+        # encontrara en cualquier parte del caption sin verificar relevancia
+        # — producía ubicaciones erróneas con frecuencia (ej. "Pisa" para un
+        # evento en París, solo porque esa palabra apareció en el texto).
+        # La ubicación ahora sale EXCLUSIVAMENTE de Capa 3 (city/exact_address,
+        # más abajo) — si Capa 3 no corre o no la da, queda null en vez de
+        # adivinada. ner["locations"] ya no se usa para nada.
         loc_name = org_name = event_date = None
         if is_event or dry_run:
             lang       = detect_text_lang(post["caption"])
             ner        = extract_ner(post["caption"], lang)
-            loc_name   = ner["locations"][0] if ner["locations"] else None
-            org_name   = ner["orgs"][0]      if ner["orgs"]      else None
+            org_name   = ner["orgs"][0] if ner["orgs"] else None
             # FIX 2: fechas ancladas al timestamp del post, no a datetime.now()
             event_date = extract_dates(post["caption"], post.get("timestamp", "") or "")
 
@@ -1069,20 +1282,43 @@ def run_extraction(
 
         # Capa 3 — Groq, solo sobre candidatos que ya pasaron Capas 1+2 (is_event=True).
         is_public_invitation = is_upcoming = clean_description = llm_reasoning = None
+        llm_title = llm_is_free = None
+        llm_city = llm_exact_address = None
         llm_penalty = 1.0
         if is_event:
             llm_out = llm_enrich_event(
                 post["caption"], post.get("timestamp", "") or "",
                 label=f"@{post.get('author', '?')}/{post.get('id', '?')}",
             )
-            if llm_out.get("clean_location"):
-                loc_name = llm_out["clean_location"]
+            llm_city          = llm_out.get("city")
+            # Si el caption no menciona dirección explícita, caemos al geotag
+            # propio de Instagram en el post (Post -[:TAGGED_AT]-> Location)
+            # antes de dejarla en null — es una señal independiente y más
+            # confiable que texto libre cuando existe (el usuario la marcó
+            # directamente al publicar, no requiere inferencia).
+            llm_exact_address = llm_out.get("exact_address") or post.get("taggedLocation")
+            # locationName preferido: dirección exacta > ciudad > null.
+            # Ambos vienen del mismo prompt reforzado que evita inferir la
+            # ciudad solo del nombre de la cuenta/institución (DD-033 update 6).
+            loc_name = llm_exact_address or llm_city or None
             if llm_out.get("clean_date"):
                 event_date = llm_out["clean_date"]
+                try:
+                    ed = datetime.fromisoformat(event_date.replace("Z", "+00:00")).replace(tzinfo=None)
+                    pd = datetime.fromisoformat(
+                        (post.get("timestamp", "") or "").replace("Z", "+00:00")
+                    ).replace(tzinfo=None)
+                    if abs((ed - pd).days) > EVENT_DATE_CLAMP_DAYS:
+                        event_date = None
+                        dates_clamped += 1
+                except (ValueError, TypeError):
+                    pass
             is_public_invitation = llm_out.get("is_public_invitation")
             is_upcoming          = llm_out.get("is_upcoming")
             clean_description    = llm_out.get("clean_description")
             llm_reasoning         = llm_out.get("reasoning")
+            llm_title            = llm_out.get("title")
+            llm_is_free          = llm_out.get("is_free")
             if is_public_invitation is None or is_upcoming is None:
                 # Groq falló tras agotar reintentos — verdicto incierto, no
                 # confianza ciega (DD-033-update): penalización intermedia.
@@ -1107,6 +1343,10 @@ def run_extraction(
             "is_public_invitation": is_public_invitation,
             "is_upcoming":          is_upcoming,
             "clean_description":    clean_description or "",
+            "title":                llm_title or "",
+            "is_free":              llm_is_free,
+            "city":                 llm_city or "",
+            "exact_address":        llm_exact_address or "",
         }
         diag_all.append(record)
         diag_cands.append(record)
@@ -1131,12 +1371,16 @@ def run_extraction(
 
         candidate = {
             "id":           event_id,
-            "title":        top_label.title(),
+            # Título editorial del LLM si existe; si no (Groq falló o el
+            # post no llegó a Capa 3), cae al nombre de categoría como antes.
+            "title":        llm_title or top_label.title(),
             "type":         top_label,
             "category":     category,
             "rawDate":      event_date or "",
             "eventDate":    event_date or "",
             "locationName": loc_name or "",
+            "cityName":     llm_city,
+            "exactAddress": llm_exact_address,
             "hotnessScore": hotness,
             "eventScore":   event_score,
             "confidence":   round(det_score, 4),
@@ -1150,6 +1394,7 @@ def run_extraction(
             "description":        clean_description or "",
             "isPublicInvitation":  is_public_invitation,
             "isUpcoming":          is_upcoming,
+            "isFree":              llm_is_free,
             "llmReasoning":        llm_reasoning or "",
             "sourcePostUrl":       post.get("url"),
             "sourceAuthor":        post.get("author"),
@@ -1201,6 +1446,7 @@ def run_extraction(
     print(f"  🔵 Descartados Capa 1  : {skipped_l1}  (L1<{layer1_threshold})")
     print(f"  🟠 Candidatos Capa 2   : {len(cand_posts)}")
     print(f"  ⏭️  Descartados Capa 2  : {skipped_l2}")
+    print(f"  🗓️  Fechas clampeadas   : {dates_clamped}  (>{EVENT_DATE_CLAMP_DAYS}d del post)")
     print(f"  🎭 Eventos detectados  : {len(detected)}")
     if not dry_run:
         print(f"  🆕 Eventos creados     : {created}")
@@ -1342,7 +1588,8 @@ def main(
              Usar --high-quality para activar mDeBERTa-v3-base (más lento).
     Capa 3:  Ollama local (modelo configurable vía OLLAMA_MODEL, default
              qwen2.5:7b) por defecto — o Groq si LLM_PROVIDER=groq
-             (vía GROQ_API_KEY en .env). Limpia fecha/ubicación, redacta
+             (vía GROQ_API_KEY en .env), o Cerebras si LLM_PROVIDER=cerebras
+             (vía CEREBRAS_API_KEY en .env). Limpia fecha/ubicación, redacta
              descripción y filtra noticias institucionales sin invitación
              real. Solo corre sobre los positivos de 2a.
 

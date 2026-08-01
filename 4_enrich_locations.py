@@ -112,19 +112,32 @@ def geocode_location(
     """
     Intenta geocodificar `name` con hasta 3 queries progresivamente más amplias.
     Respeta el rate limit de Nominatim con `pause_sec` entre llamadas.
+
+    Devuelve además `geo["confidence"]` indicando qué query tuvo éxito:
+    "exact" (el nombre solo), "city_combined" (nombre + hint) o
+    "city_hint_only" (el hint solo, sin relación real con `name` más allá
+    de la ciudad) — este último es el tier menos confiable: si `name` y
+    `name+hint` fallan, Nominatim geocodifica literalmente el hint y eso
+    puede parecer un resultado "encontrado" aunque no tenga nada que ver
+    con el lugar real (ver DD-033 update 6). No se descarta automáticamente
+    — se deja visible como propiedad para que se pueda filtrar/revisar.
     """
     queries = [
-        name,
-        f"{name}, {city_hint}",
-        city_hint,  # último recurso: solo la ciudad hint
+        ("exact", name),
+        ("city_combined", f"{name}, {city_hint}" if city_hint else None),
+        ("city_hint_only", city_hint or None),  # último recurso, el menos confiable
     ]
 
-    for query in queries:
+    for tier, query in queries:
+        if not query:
+            continue
         time.sleep(pause_sec)
         try:
             result = geocoder.geocode(query, language="es", addressdetails=True, timeout=10)
             if result:
-                return parse_address(result.raw)
+                geo = parse_address(result.raw)
+                geo["confidence"] = tier
+                return geo
         except (GeocoderTimedOut, GeocoderServiceError):
             time.sleep(pause_sec * 2)
 
@@ -135,18 +148,20 @@ def geocode_location(
 def write_location_geo(session, loc_name: str, geo: dict):
     session.run("""
         MATCH (l:Location {name: $name})
-        SET l.lat            = $lat,
-            l.lon            = $lon,
-            l.city           = $city,
-            l.country        = $country,
-            l.countryCode    = $countryCode,
-            l.quartier       = $quartier,
-            l.arrondissement = $arrondissement,
-            l.displayName    = $displayName,
-            l.geocodedAt     = $geocodedAt
+        SET l.lat              = $lat,
+            l.lon              = $lon,
+            l.city             = $city,
+            l.country          = $country,
+            l.countryCode      = $countryCode,
+            l.quartier         = $quartier,
+            l.arrondissement   = $arrondissement,
+            l.displayName      = $displayName,
+            l.geocodeConfidence = $confidence,
+            l.geocodedAt       = $geocodedAt
     """,
         name            = loc_name,
         geocodedAt      = datetime.now().isoformat(timespec="seconds"),
+        confidence      = geo.get("confidence", ""),
         **{k: geo[k] for k in ["lat", "lon", "city", "country", "countryCode",
                                 "quartier", "arrondissement", "displayName"]},
     )
@@ -221,10 +236,19 @@ def run_geocoding(
     print("=" * 55)
 
     with driver.session() as session:
+        # Hint por-location: la ciudad que Capa 3 (LLM) extrajo del evento
+        # que originó ese Location, en vez de un city_hint global fijo
+        # (ver DD-033 update 6 — antes TODO se pistaba hacia "Paris" por
+        # defecto, forzando resultados franceses para eventos colombianos
+        # cuando el nombre exacto no matcheaba). Si ningún evento asociado
+        # tiene cityName, cae al --city-hint de la CLI como antes.
         locations = session.run("""
             MATCH (l:Location)
             WHERE l.lat IS NULL
-            RETURN l.name AS name
+            OPTIONAL MATCH (e:Event)-[:LOCATED_AT]->(l)
+            WHERE e.cityName IS NOT NULL AND e.cityName <> ''
+            WITH l, collect(DISTINCT e.cityName) AS cityHints
+            RETURN l.name AS name, cityHints[0] AS eventCityHint
             ORDER BY l.name
         """).data()
 
@@ -232,34 +256,38 @@ def run_geocoding(
         print("  ✅ Todas las localizaciones ya geocodificadas.")
         return
 
-    names = [r["name"] for r in locations if r.get("name")]
-    print(f"  🔍 {len(names)} localizaciones pendientes")
-    print(f"  ⏱️  Rate limit: {pause_sec}s/req → ~{len(names) * pause_sec / 60:.1f} min estimado")
-    print(f"  🏙️  City hint: {city_hint}\n")
+    rows = [(r["name"], r.get("eventCityHint")) for r in locations if r.get("name")]
+    n_with_own_hint = sum(1 for _, h in rows if h)
+    print(f"  🔍 {len(rows)} localizaciones pendientes")
+    print(f"  ⏱️  Rate limit: {pause_sec}s/req → ~{len(rows) * pause_sec / 60:.1f} min estimado")
+    print(f"  🏙️  City hint por defecto (fallback): {city_hint}")
+    print(f"  🎯 Con hint propio de su evento: {n_with_own_hint}/{len(rows)}\n")
 
     geocoder = Nominatim(user_agent="hub-cultural-du/1.0 (research)")
 
     n_found  = 0
     n_failed = 0
 
-    for i in tqdm(range(0, len(names), batch_size), desc="  geocoding"):
-        batch = names[i: i + batch_size]
+    for i in tqdm(range(0, len(rows), batch_size), desc="  geocoding"):
+        batch = rows[i: i + batch_size]
 
-        for name in batch:
-            geo = geocode_location(geocoder, name, city_hint, pause_sec)
+        for name, own_hint in batch:
+            effective_hint = own_hint or city_hint
+            geo = geocode_location(geocoder, name, effective_hint, pause_sec)
 
             if not geo or (geo["lat"] == 0 and geo["lon"] == 0):
                 n_failed += 1
                 if dry_run:
-                    print(f"  [dry-run] ❌ No encontrado: {name!r}")
+                    print(f"  [dry-run] ❌ No encontrado: {name!r} (hint={effective_hint!r})")
                 continue
 
             n_found += 1
             if dry_run:
                 print(
-                    f"  [dry-run] ✅ {name!r} → "
+                    f"  [dry-run] ✅ {name!r} (hint={effective_hint!r}) → "
                     f"lat={geo['lat']:.4f} lon={geo['lon']:.4f} "
-                    f"city={geo['city']!r} arr={geo['arrondissement']!r}"
+                    f"city={geo['city']!r} arr={geo['arrondissement']!r} "
+                    f"confidence={geo.get('confidence')!r}"
                 )
                 continue
 
@@ -268,11 +296,11 @@ def run_geocoding(
                 write_hierarchy(session, name, geo)
 
     if not dry_run:
-        log_session(len(names), n_found, n_failed)
+        log_session(len(rows), n_found, n_failed)
 
     print(f"\n  ✅ Geocodificadas : {n_found}")
     print(f"  ❌ No encontradas : {n_failed}")
-    print(f"  💰 FinOps — {len(names)} requests Nominatim (gratuito, ~1 req/s)")
+    print(f"  💰 FinOps — {len(rows)} requests Nominatim (gratuito, ~1 req/s)")
 
 
 # ── 8. Resumen ────────────────────────────────────────────────────────────────

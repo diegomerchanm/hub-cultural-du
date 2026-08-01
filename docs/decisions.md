@@ -490,5 +490,181 @@ paid LLM access.
 
 ---
 
-*Last updated: 2026-07-25*
-*Next decisions to document: DD-023 (NLP account classifier), SetFit for v2, TikTok integration, human-in-the-loop for event review.*
+## DD-033 (update 5) — Cerebras added as opt-in Layer 3 transport; prompt now forces Spanish output
+
+**Date:** 2026-07-31
+**Motivation:** Groq's free-tier daily cap (empirically ~78-80 calls/day
+observed in real runs, see update 3) was slowing down the backfill of 486
+legacy `:Event` nodes lacking Layer 3 fields. User asked whether the market
+had a comparable free alternative before resorting to a second Groq account
+(rejected: likely ToS violation, and bad practice for a reproducible
+mémoire methodology).
+**Cerebras evaluated as an alternative transport.** Initial implementation
+assumed Cerebras served the same `llama-3.3-70b` model as Groq (based on
+third-party rate-limit aggregator sites), with an initial guess of 30 RPM /
+60K TPM / 1M TPD and no payment method required. **Both assumptions were
+wrong**, discovered via real 404 errors and confirmed against Cerebras's
+own docs (`inference-docs.cerebras.ai`), not third-party aggregators:
+- Cerebras retired `llama-3.3-70b` from its public model catalog. The
+  current production free-tier model is `gpt-oss-120b` (OpenAI's
+  open-weight model) — a genuinely different model, not the same weights
+  as Groq's Llama 3.3 70B.
+- The Free Trial tier requires a verified payment method (not charged
+  unless the $5 credit is exceeded, but a card is required to activate —
+  contradicts the initial "no card needed" claim).
+- Real free-tier limits: 5 RPM / 30,000 TPM / 1,000,000 TPD (not the
+  30 RPM / 60K TPM initially assumed). TPD is still ~10x Groq's, but RPM is
+  *lower* than Groq's (5 vs 25) — each individual call is more spaced out
+  even though total daily volume is higher.
+**Lesson:** third-party rate-limit aggregator sites go stale fast (weekly
+model/limit changes observed even between two editions of the same site
+a month apart during this session's research) — verify against the
+provider's own docs before implementing, not just before recommending.
+**Quality validation (30-event dry-run sample, gpt-oss-120b):** classification
+logic (`is_public_invitation`/`is_upcoming`/penalty) matched Groq's quality
+bar — no obvious false positives/negatives, correctly rejected institutional
+news, government announcements, and even an unrelated real-estate listing
+that had passed Capas 1+2. **Real regression found:** ~20/30 titles came
+back in English despite the source captions being Spanish/French-facing
+content for a Colombian diaspora audience. Root cause: `_build_llm_prompt`
+never explicitly specified an output language for `title`/`clean_description`
+— Groq's `llama-3.3-70b-versatile` happened to default to Spanish/French
+output, but `gpt-oss-120b` does not share that implicit behavior.
+**Fix:** added an explicit instruction to `_build_llm_prompt` — `title` and
+`clean_description` must be in Spanish regardless of the caption's source
+language, except for untranslated proper nouns (places, institutions, event
+names). This applies to all three transports (Groq/Cerebras/Ollama) since
+they share one prompt, closing a behavior gap that was previously undefined
+rather than intentionally decided.
+**Decision:** `LLM_PROVIDER` default remains `"groq"`. Cerebras
+(`LLM_PROVIDER=cerebras`, `CEREBRAS_API_KEY` in `.env`) is available as an
+opt-in transport for extending daily throughput once quota runs out on
+Groq, sharing the same prompt/schema (`llm_enrich_event_cerebras()` in
+`4_enrich_events_extract.py`, auto-picked up by `backfill_events_capa3.py`
+via its existing import of `llm_enrich_event`). Not yet promoted to default
+pending a second, larger quality sample after the language fix.
+**Known limitation for the mémoire (extends update 4's note):** Layer 3 now
+depends on potentially *two* third-party hosted LLMs across different
+underlying model families (Llama 3.3 70B via Groq, GPT-OSS-120B via
+Cerebras) depending on which quota is available on a given day — full
+reproducibility requires documenting which transport produced which
+`:Event` node (not currently tracked as a property; `sourceAuthor`/
+`llmReasoning` are stored but not which provider/model generated them).
+
+---
+
+## DD-033 (update 6) — Location extraction rebuilt: city/exact_address fields, dropped naive NER fallback, per-event geocoding hint
+
+**Date:** 2026-07-31
+**Problem diagnosed:** manual review of `verify_events_extraction.py` output
+found location quality was the weakest dimension of the pipeline (unlike
+dates/titles/descriptions, which were mostly correct) — roughly 9/10 in a
+manual spot-check. Two separate, compounding root causes were found by
+reading the actual code rather than assuming:
+1. **Extraction (`4_enrich_events_extract.py`):** `locationName` fell back
+   to `ner["locations"][0]` — the *first* spaCy LOC/GPE/FAC entity found
+   anywhere in the caption, with zero relevance ranking, whenever the LLM's
+   `clean_location` field was empty. This produced concrete, evidenced
+   errors (`evt_62e74f83aba4`, account `@alianzafrancesademedellin`, event
+   at "La Puerta Rosa" → `locationName="Pisa"`, a city in Italy unrelated to
+   either the account or the venue). The LLM's own `clean_location` field
+   was also under-specified (`"ubicación real del evento"`, no guardrail
+   against inferring the city from the publishing account/institution's
+   name, e.g. treating "Alianza Francesa de Medellín" as proof the event is
+   in Medellín absent textual confirmation).
+2. **Geocoding (`4_enrich_locations.py`):** `city_hint` was a single global
+   value (default `"Paris, France"`) applied to every `:Location` in a run,
+   regardless of whether the event was actually in Colombia. `geocode_location()`'s
+   third and last-resort query tries the bare `city_hint` alone — meaning
+   any location string that didn't match on its own or combined with the
+   hint would silently resolve to Paris's coordinates, for Colombian events
+   too. This is a distinct bug from (1), not just a downstream symptom —
+   confirmed by reading `run_geocoding()`'s default signature directly.
+   A specific case initially misdiagnosed as this bug (`evt_36206696987d`,
+   `locationName="Paříži"`, Czech) was later corrected: that string lives on
+   the Event's own `locationName`, set during Capa 1-3 extraction, not on a
+   geocoded `:Location` node — so it's actually an instance of bug (1), not
+   (2). Correction made transparently once traced.
+**Fix — extraction:** `clean_location` replaced by two fields, `city` and
+`exact_address`, with an explicit prompt instruction: the publishing
+account/institution's name is *not* sufficient evidence of the event's
+city unless the caption text itself confirms it; respond `null` rather
+than guess. `locationName` is now computed as `exact_address or city or
+None` — the naive `ner["locations"][0]` fallback was removed entirely
+(same "prefer null over invented" principle already applied to dates via
+`EVENT_DATE_CLAMP_DAYS`). New `Event.cityName` / `Event.exactAddress`
+properties persist the structured fields independently of the combined
+`locationName` string.
+**Fix — geocoding:** `run_geocoding()` now fetches, per pending
+`:Location`, the `cityName` of an `:Event` connected via `LOCATED_AT`, and
+uses that as the geocoding hint instead of the single global default — the
+CLI `--city-hint` value is kept only as a fallback for locations with no
+linked event `cityName` yet (e.g. legacy events not yet backfilled).
+`geocode_location()` also now tags which query tier succeeded
+(`"exact"` / `"city_combined"` / `"city_hint_only"`) as
+`Location.geocodeConfidence` — the last tier is the one responsible for
+the Paris-bias bug, kept visible instead of hard-filtered by country
+(a hardcoded country whitelist was considered and rejected: the account
+network legitimately includes non-Colombia/non-France embassies posting
+from France, e.g. `@embacubafrancia`, `@arg_enfrancia`, `@embpanamafra` —
+a whitelist risks a new false-negative class rather than fixing the
+original bug).
+**Verification:** unit-tested `geocode_location()`'s tier selection against
+a mock geocoder (exact / combined / hint-only / no-match-no-crash cases,
+all correct) and confirmed a real `names`-variable regression the rewrite
+introduced (missed by `ast.parse`, caught by `grep` before running) —
+fixed before considering this done. Not yet run against production data
+(needs fresh Groq/Cerebras quota for extraction and Nominatim's 1 req/s
+rate limit for geocoding).
+**Scope:** applies going forward to new extraction only. Existing
+`:Event.locationName` values are corrected opportunistically by
+`backfill_events_capa3.py` (mirrors the `title` overwrite pattern: replaces
+`locationName` with `exact_address or city` when Capa 3 provides one) but
+a full re-geocoding pass for already-`:Location`-linked nodes with bad
+coordinates has not been run or decided yet.
+
+---
+
+## DD-033 (update 7) — Automatic Groq↔Cerebras failover; broadened backfill criteria to include location
+
+**Date:** 2026-07-31
+**Motivation:** until now, when the active `LLM_PROVIDER` exhausted its
+daily quota mid-run, the only recovery was manual — stop the script, export
+a different `LLM_PROVIDER`, restart. User asked whether the two cloud
+transports could hand off to each other automatically within a single run
+to use their combined daily budget without manual intervention, given both
+are similar quality and share the same prompt/schema.
+**Implementation:** `llm_enrich_event()`'s dispatcher (the shared entry
+point used by both `4_enrich_events_extract.py`'s main loop and
+`backfill_events_capa3.py`) now tries the configured `LLM_PROVIDER` first,
+and — only if it's a cloud provider (`groq`/`cerebras`, not `ollama`) —
+automatically retries with the other cloud provider if the first one
+returns a failed result (`is_public_invitation` and `is_upcoming` both
+`None`, the same signal already used elsewhere for `LLM_UNKNOWN_PENALTY`).
+A provider that fails once is marked in an in-memory set
+(`_provider_failed_this_run`) and skipped for the rest of that process
+run — daily quotas don't recover mid-run, so there's no value retrying it
+per-post. The set resets naturally on every fresh script invocation (no
+persistence needed — a new run means quotas may have reset too).
+**Verification:** the dispatcher logic was copied into an isolated test
+harness (the real module can't be imported in the sandbox — needs spaCy/
+sentence-transformers/scipy, not installed there) and exercised against 4
+mocked scenarios: preferred provider fails → falls back and succeeds;
+second call in the same run skips the already-failed provider without
+retrying it; both providers fail → returns defaults without crashing;
+`LLM_PROVIDER=ollama` never touches the cloud fallback logic. All 4 passed.
+**Side effect requiring a separate fix:** `backfill_events_capa3.py`'s
+pending criteria was `sourceAuthor IS NULL` only — since all 486 legacy
+events already have `sourceAuthor` set (completed earlier this session),
+simply re-running the backfill script would have found 0 pending events
+and silently done nothing for the new `city`/`exactAddress` fields from
+update 6. Broadened the criteria to `sourceAuthor IS NULL OR (cityName IS
+NULL AND exactAddress IS NULL)` — this now also catches every event
+processed before today's schema change (both the original 486 legacy ones
+and the ~137 that already had Capa 3 via the main pipeline), regardless of
+which script originally processed them.
+
+---
+
+*Last updated: 2026-07-31*
+*Next decisions to document: DD-023 (NLP account classifier), SetFit for v2, TikTok integration, human-in-the-loop for event review; consider adding an `llmProvider`/`llmModel` property to `:Event` nodes for mémoire reproducibility now that Layer 3 has more than one active transport (now more relevant given automatic failover makes the active provider even less predictable per-event); consider whether existing geocoded `:Location` nodes with `geocodeConfidence="city_hint_only"` warrant a re-geocoding pass now that per-event hints exist.*

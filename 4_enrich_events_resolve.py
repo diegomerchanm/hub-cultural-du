@@ -40,6 +40,11 @@ driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
 INCOMING_REL_TYPES = ["MENTIONS_EVENT", "ORGANIZED", "PARTICIPATED_IN", "SUPPORTED"]
 OUTGOING_REL_TYPES = ["LOCATED_AT", "HAS_HASHTAG"]
 
+LOCATION_GROUP_MAX_FOR_EVIDENCE = 10  # grupos de ubicación más grandes
+# que esto son demasiado genéricos (ej. "paris", "francia") para contar
+# como evidencia de que dos eventos son el mismo — coincidencia de
+# string, no de lugar específico.
+
 
 # ── 2. Helpers ────────────────────────────────────────────────────────────────
 def normalize_loc(loc: Optional[str]) -> str:
@@ -59,6 +64,20 @@ def dates_close(d1: Optional[str], d2: Optional[str], window: int) -> bool:
         return abs((dt1 - dt2).days) <= window
     except Exception:
         return True
+
+
+def dates_really_close(d1: Optional[str], d2: Optional[str], window: int) -> bool:
+    """True solo si AMBAS fechas existen, parsean, y están dentro de la
+    ventana — a diferencia de dates_close(), no asume corroboración
+    cuando falta una fecha."""
+    if not d1 or not d2:
+        return False
+    try:
+        dt1 = datetime.fromisoformat(d1)
+        dt2 = datetime.fromisoformat(d2)
+        return abs((dt1 - dt2).days) <= window
+    except Exception:
+        return False
 
 
 def cosine_sim(a: list, b: list) -> float:
@@ -141,9 +160,9 @@ def resolve_duplicates(
     threshold: float = 0.75,
     date_window: int = 3,
     dry_run: bool = False,
-) -> tuple[int, int]:
+) -> tuple[int, int, int, int]:
     """
-    Retorna (n_pares_duplicados, n_relaciones_redirigidas).
+    Retorna (n_pares_duplicados, n_relaciones_redirigidas, n_sin_evidencia, n_fechas_lejanas).
     """
     print("\n🔍 Cargando eventos desde Neo4j...")
     with driver.session() as session:
@@ -151,7 +170,7 @@ def resolve_duplicates(
 
     if not events:
         print("  ⚠️  No hay eventos en la base de datos.")
-        return 0, 0
+        return 0, 0, 0, 0
 
     # Filtrar los que tienen embedding
     with_emb    = [e for e in events if e.get("embedding")]
@@ -160,7 +179,7 @@ def resolve_duplicates(
 
     if len(with_emb) < 2:
         print("  ✅ Menos de 2 eventos con embedding — nada que resolver.")
-        return 0, 0
+        return 0, 0, 0, 0
 
     # Agrupar por locationName normalizado (None → grupo especial "")
     # normalize_loc: lowercase + strip + unidecode → "París" = "Paris" = "paris"
@@ -174,11 +193,15 @@ def resolve_duplicates(
     merged_ids:   set  = set()
     n_pairs      = 0
     n_redirected = 0
+    n_no_evidence = 0   # pares descartados: sin fecha y sin ubicación específica
+    n_dates_far   = 0   # pares descartados: ambas fechas conocidas pero lejanas
     near_misses: list  = []   # pares que pasan loc+fecha pero sim < threshold
 
     for loc_key, group in tqdm(by_location.items(), desc="  Localizaciones"):
         if len(group) < 2:
             continue
+
+        loc_is_specific = bool(loc_key) and len(group) <= LOCATION_GROUP_MAX_FOR_EVIDENCE
 
         # Comparar todos los pares dentro del grupo
         for i in range(len(group)):
@@ -189,9 +212,22 @@ def resolve_duplicates(
                 if ea["id"] in merged_ids or eb["id"] in merged_ids:
                     continue
 
-                # Filtro por fecha
-                if not dates_close(ea.get("eventDate"), eb.get("eventDate"), date_window):
-                    continue
+                # Evidencia real: si AMBAS fechas existen, deben estar cerca
+                # sin excepción — una ubicación específica no rescata un par
+                # con fechas conocidas y lejanas (ej. 'suecia' con 6 meses de
+                # diferencia debe descartarse pase lo que pase con loc_is_specific).
+                # Solo cuando falta una fecha (o ambas) cae al fallback de ubicación.
+                d1, d2 = ea.get("eventDate"), eb.get("eventDate")
+                if d1 and d2:
+                    if not dates_really_close(d1, d2, date_window):
+                        n_dates_far += 1
+                        continue  # fechas conocidas y lejanas -> nunca fusionar
+                    has_date_evidence = True
+                else:
+                    has_date_evidence = False
+                    if not loc_is_specific:
+                        n_no_evidence += 1
+                        continue  # sin fecha y sin ubicación específica -> no fusionar
 
                 sim = cosine_sim(ea["embedding"], eb["embedding"])
 
@@ -240,7 +276,7 @@ def resolve_duplicates(
             print(f"    A: {r['title_a']}")
             print(f"    B: {r['title_b']}")
 
-    return n_pairs, n_redirected
+    return n_pairs, n_redirected, n_no_evidence, n_dates_far
 
 
 # ── 6. Reporte de eventos ──────────────────────────────────────────────────────
@@ -316,7 +352,7 @@ def main(
 
     print(f"⚙️  Parámetros: threshold={threshold}  date_window=±{date_window}d  dry_run={dry_run}")
 
-    n_pairs, n_redirected = resolve_duplicates(
+    n_pairs, n_redirected, n_no_evidence, n_dates_far = resolve_duplicates(
         threshold=threshold,
         date_window=date_window,
         dry_run=dry_run,
@@ -325,6 +361,9 @@ def main(
     tag = "[dry-run] " if dry_run else ""
     print(f"\n  {tag}Pares duplicados encontrados : {n_pairs}")
     print(f"  {tag}Relaciones redirigidas       : {n_redirected}")
+    print(f"  {tag}Pares sin evidencia real     : {n_no_evidence}  (sin fecha y sin ubicación específica)")
+    print(f"  {tag}Pares con fechas lejanas     : {n_dates_far}  (ambas fechas conocidas, fuera de ventana)")
+    print(f"  {tag}Total descartados sin fusión : {n_no_evidence + n_dates_far}")
 
     if summary:
         print_event_summary()
