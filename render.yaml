@@ -1,0 +1,18 @@
+# render.yaml — Hub Cultural DU
+# Blueprint de Render: al conectar el repo, Render lee esto y preconfigura
+# el servicio solo. Las variables marcadas "sync: false" las pide Render
+# por su propia UI (nunca quedan en el repo).
+services:
+  - type: web
+    name: hub-cultural-du
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements-web.txt
+    startCommand: gunicorn wsgi:server
+    envVars:
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USERNAME
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false

@@ -1,0 +1,106 @@
+name: Pipeline Hub Cultural DU
+
+# Disparo manual únicamente (botón "Run workflow" en la pestaña Actions de
+# GitHub) — a propósito, para no gastar presupuesto de Apify/Groq/Cerebras
+# sin que alguien lo decida explícitamente cada vez.
+on:
+  workflow_dispatch:
+    inputs:
+      run_extraction_and_ingestion:
+        description: "Fase 1+2 — Scraping Apify + ingestión a Neo4j (acopladas: data_raw/ está en .gitignore, no persiste entre corridas, así que ingestión solo tiene sentido si se acaba de scrapear en esta misma corrida)"
+        type: boolean
+        default: false
+      run_analysis:
+        description: "Fase 3 — 3_analyze_network.py run-all (igraph/leidenalg local, no GDS)"
+        type: boolean
+        default: true
+      run_nlp:
+        description: "Fase 4-A — 4_enrich_nodes_nlp.py (idioma/NER/keywords)"
+        type: boolean
+        default: true
+      run_events:
+        description: "Fase 4-B+C — 4_enrich_events_extract.py + 4_enrich_events_resolve.py"
+        type: boolean
+        default: true
+      run_geo:
+        description: "Fase 5 — 4_enrich_locations.py (Nominatim)"
+        type: boolean
+        default: true
+      run_capa3_backfill:
+        description: "backfill_events_capa3.py — catch-up de eventos con Capa 3 pendiente"
+        type: boolean
+        default: false
+      llm_provider:
+        description: "Proveedor LLM para Capa 3 (Groq gratis primero, cae a Cerebras si se agota)"
+        type: choice
+        options: [groq, cerebras]
+        default: groq
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+      NEO4J_URI: ${{ secrets.NEO4J_URI }}
+      NEO4J_USERNAME: ${{ secrets.NEO4J_USERNAME }}
+      NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+      LLM_PROVIDER: ${{ inputs.llm_provider }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Instalar dependencias del pipeline
+        run: pip install -r requirements.txt
+
+      # ── Fase 1+2 ────────────────────────────────────────────────────────
+      - name: "Fase 1 — Extracción Instagram (Apify)"
+        if: inputs.run_extraction_and_ingestion == 'true'
+        run: python extract_profiles.py
+
+      - name: "Fase 2 — Ingestión a Neo4j"
+        if: inputs.run_extraction_and_ingestion == 'true'
+        run: python 2_build_graph.py
+
+      # ── Fase 3 ──────────────────────────────────────────────────────────
+      - name: "Fase 3 — Análisis de red (igraph/leidenalg)"
+        if: inputs.run_analysis == 'true'
+        run: python 3_analyze_network.py run-all
+
+      # ── Fase 4 ──────────────────────────────────────────────────────────
+      - name: "Fase 4-A — NLP (idioma/NER/keywords)"
+        if: inputs.run_nlp == 'true'
+        run: python 4_enrich_nodes_nlp.py
+
+      - name: "Fase 4-B — Extracción de eventos"
+        if: inputs.run_events == 'true'
+        run: python 4_enrich_events_extract.py
+
+      - name: "Fase 4-C — Deduplicación de eventos"
+        if: inputs.run_events == 'true'
+        run: python 4_enrich_events_resolve.py
+
+      # ── Fase 5 ──────────────────────────────────────────────────────────
+      - name: "Fase 5 — Geocodificación"
+        if: inputs.run_geo == 'true'
+        run: python 4_enrich_locations.py
+
+      # ── Backfill puntual ────────────────────────────────────────────────
+      - name: "Backfill Capa 3 pendiente"
+        if: inputs.run_capa3_backfill == 'true'
+        run: python backfill_events_capa3.py
+
+      # ── Refrescar el sitio ──────────────────────────────────────────────
+      # Reinicia el servicio en Render para que cargue los datos nuevos —
+      # dash_common.py solo lee de Neo4j UNA vez al arrancar el proceso
+      # (DATA = fetch_data() a nivel de módulo), así que sin este paso el
+      # sitio seguiría mostrando los datos viejos hasta el próximo reinicio.
+      - name: "Refrescar sitio en Render"
+        if: always() && secrets.RENDER_DEPLOY_HOOK_URL != ''
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
