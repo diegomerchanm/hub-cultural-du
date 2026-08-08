@@ -31,6 +31,11 @@ APIFY_TOKEN = os.getenv("APIFY_TOKEN")
 if not APIFY_TOKEN:
     raise ValueError("Error: APIFY_TOKEN not found in .env file")
 
+# Fallback legacy cuando no se pasa --seeds. El generador de este CSV
+# (old/1_harvest_account_classifier.py) fue archivado — quedó corto para
+# el alcance ampliado (cultura general en Francia, no solo diáspora
+# colombiana). El CSV existente se sigue leyendo si está ahí, pero ya no
+# se regenera desde la raíz del repo. Usa --seeds en vez de este fallback.
 ACCOUNT_SCORES_CSV = "data_processed/account_scores.csv"
 EXCLUDED_USERNAMES = {"williamsanchezinmobiliaria"}  # falso positivo del clasificador — exclusión manual (DD-028)
 

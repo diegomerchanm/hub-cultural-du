@@ -14,16 +14,16 @@ on:
         description: "Fase 3 — 3_analyze_network.py run-all (igraph/leidenalg local, no GDS)"
         type: boolean
         default: true
-      run_nlp:
-        description: "Fase 4-A — 4_enrich_nodes_nlp.py (idioma/NER/keywords)"
+      run_manual_categorization:
+        description: "Fase 4 — load_manual_account_categorization.py (sube cuentas_instagram_completo_v4.xlsx a Neo4j; solo tiene efecto si ese archivo cambió)"
         type: boolean
-        default: true
+        default: false
       run_events:
-        description: "Fase 4-B+C — 4_enrich_events_extract.py + 4_enrich_events_resolve.py"
+        description: "Fase 5 — 4_enrich_events_extract.py + 4_enrich_events_resolve.py"
         type: boolean
         default: true
       run_geo:
-        description: "Fase 5 — 4_enrich_locations.py (Nominatim)"
+        description: "Fase 6 — 4_enrich_locations.py (Nominatim)"
         type: boolean
         default: true
       run_capa3_backfill:
@@ -74,20 +74,21 @@ jobs:
         run: python 3_analyze_network.py run-all
 
       # ── Fase 4 ──────────────────────────────────────────────────────────
-      - name: "Fase 4-A — NLP (idioma/NER/keywords)"
-        if: inputs.run_nlp == 'true'
-        run: python 4_enrich_nodes_nlp.py
+      - name: "Fase 4 — Categorización manual (spreadsheet curado → Neo4j)"
+        if: inputs.run_manual_categorization == 'true'
+        run: python load_manual_account_categorization.py
 
-      - name: "Fase 4-B — Extracción de eventos"
+      # ── Fase 5 ──────────────────────────────────────────────────────────
+      - name: "Fase 5-A — Extracción de eventos"
         if: inputs.run_events == 'true'
         run: python 4_enrich_events_extract.py
 
-      - name: "Fase 4-C — Deduplicación de eventos"
+      - name: "Fase 5-B — Deduplicación de eventos"
         if: inputs.run_events == 'true'
         run: python 4_enrich_events_resolve.py
 
-      # ── Fase 5 ──────────────────────────────────────────────────────────
-      - name: "Fase 5 — Geocodificación"
+      # ── Fase 6 ──────────────────────────────────────────────────────────
+      - name: "Fase 6 — Geocodificación"
         if: inputs.run_geo == 'true'
         run: python 4_enrich_locations.py
 

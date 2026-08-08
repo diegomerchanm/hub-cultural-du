@@ -1,30 +1,34 @@
 # Hub Cultural DU
 
-🚧 Work in progress — active research project. The pipeline runs end-to-end but the scope, scoring and documentation are still evolving.
+🚧 Work in progress — active research project. The pipeline runs end-to-end and a live dashboard is deployed; scope, scoring and documentation are still evolving.
 
-Mapping and analysis of cultural actor networks on social media. The project scrapes public profiles, builds a graph of the cultural ecosystem in a Neo4j database, and runs graph algorithms + NLP to measure cultural influence and detect communities.
+Mapping and analysis of cultural actor networks on social media. The project scrapes public profiles, builds a graph of the cultural ecosystem in a Neo4j database, and combines graph analysis, NLP and hand-curated categorization to measure cultural relevance and detect communities. Originally focused on the Colombian diaspora in France, the scope has broadened to general cultural accounts in France.
 
 Built to answer questions like: who are the structuring actors of a cultural scene, how do they connect, and which communities and events emerge from their interactions?
 
 ## What it does
 
-A data pipeline in five stages:
+A data pipeline in six stages:
 
-1. **Extraction** — scrape public social-media profiles and posts (Instagram via Apify) → raw JSON.
-2. **Ingestion** — load the data into a Neo4j graph (accounts, posts, hashtags, mentions, locations…).
-3. **Graph analysis** — run Graph Data Science algorithms (PageRank, degree, betweenness, Leiden community detection, k-core) and compute a Cultural Relevance Score.
-4. **NLP enrichment** — language detection, named-entity recognition, keywords, multilingual embeddings, and zero-shot event extraction (`:Event` nodes with de-duplication).
-5. **Geo** — geocoding of locations (Nominatim) and a Location → City → Country hierarchy.
+1. **Extraction** — scrape public Instagram profiles and posts via Apify → raw JSON. Target accounts come from curated seed files (`config/seeds_*.json`) or an incremental, Neo4j-driven scan of accounts not yet scraped.
+2. **Ingestion** — load the data into a Neo4j graph (accounts, posts, hashtags, mentions, locations…), with per-node ingestion timestamps (`firstSeenAt` / `lastUpdatedAt`) so old and new batches stay distinguishable.
+3. **Graph analysis** — local network metrics (igraph / leidenalg: PageRank, betweenness, Leiden community detection, k-core, participation coefficient) computed offline, no Neo4j GDS server required.
+4. **Manual categorization** — a hand-curated spreadsheet (art type, institution type, cultural identity, geographic zone, pricing/free-events info, verified follower counts) uploaded onto accounts, complementing the automated signal rather than replacing it.
+5. **Event detection** — zero-shot classification of captions into `:Event` nodes, with inline and standalone de-duplication passes.
+6. **Geo** — geocoding of locations (Nominatim) and a Location → Arrondissement → City → Country hierarchy.
+
+A companion Dash dashboard (multi-page, deployed on Render) surfaces the results: an events agenda, a network map, and a filterable account directory built from the manual categorization.
 
 ## Key ideas
 
-- **Cultural Relevance Score** — a composite influence score: percentile-normalized PageRank + Degree + Betweenness, with a deliberate down-weighting of political accounts so the signal stays cultural. Popularity (followers) is reported separately, not baked into the score.
+- **Layered relevance signal** — automated network centrality (`3_analyze_network.py`) and hand-curated categorization (`load_manual_account_categorization.py`) are kept as distinct, non-overlapping property sets on the same `:Account` nodes, so either can be re-run without clobbering the other. An earlier Neo4j GDS-based scoring path (`old/run_gds_algorithms.py`) is archived — it depends on the GDS plugin, which standard AuraDB doesn't include.
 - **Multiplex network** — the social layer (mentions / tags / co-authorship) is kept separate from the algorithmic layer, so structural and interaction dynamics can be read independently.
-- **Offline alternative** — a local analysis path (igraph / leidenalg) reproduces the core metrics without a Neo4j GDS server, exporting to CSV.
+- **Ingestion provenance** — every node touched by the pipeline is timestamped, and a one-time sealing script (`seal_legacy_batch.py`) tags pre-existing, undated data as a distinguishable legacy batch — a prerequisite for ever cleaning up old or irrelevant accounts safely.
+- **Manual curation at scale** — for accounts where automated scraping falls short (missing bios, ambiguous categorization), verification is done directly against Instagram (via a browser session) rather than left blank.
 
 ## Stack
 
-Python · Apify · Neo4j (Aura) · Neo4j Graph Data Science · igraph / leidenalg · spaCy (multilingual) · sentence-transformers · Nominatim
+Python · Apify · Neo4j (Aura) · igraph / leidenalg · spaCy (multilingual) · sentence-transformers · Nominatim · Dash / Plotly / Cytoscape · Render
 
 ## Getting started
 
@@ -44,20 +48,36 @@ NEO4J_PASSWORD=...
 Run the pipeline (in order):
 
 ```bash
-python extract_profiles.py            # 1. scrape pending profiles (cost-aware)
-python 2_build_graph.py               # 2. ingest JSON into Neo4j
-python run_gds_algorithms.py          # 3. graph algorithms + Cultural Relevance Score
-# local alternative (no GDS server):  python 3_analyze_network.py run-all
-python 4_enrich_nodes_nlp.py          # 4a. language / NER / keywords
-python 4_enrich_events_extract.py     # 4b. detect events
-python 4_enrich_locations.py          # 5. geocode locations
+python extract_profiles.py                                      # 1. scrape pending profiles (cost-aware)
+python 1_harvest_ig_profiles.py --seeds config/seeds_idf.json    #    or: scrape a curated seeds file
+python 1_harvest_ig_posts.py --seeds config/seeds_idf.json       #    posts for the same seeds file
+python 2_build_graph.py                                          # 2. ingest JSON into Neo4j
+python 3_analyze_network.py run-all                              # 3. local graph analysis (igraph/leidenalg)
+python load_manual_account_categorization.py                     # 4. upload curated spreadsheet
+python 4_enrich_events_extract.py                                # 5a. detect events
+python 4_enrich_events_resolve.py                                # 5b. de-duplicate events
+python 4_enrich_locations.py                                     # 6. geocode locations
+
+python 5_visualize_dashboard.py                                  # run the dashboard locally
 ```
+
+See `CLAUDE.md` for the full command reference, options, and architecture notes.
 
 ## Project status
 
-- ✅ Extraction, Neo4j ingestion, influence scoring, community detection.
-- ✅ NLP enrichment (NER, keywords, embeddings, event extraction) and geocoding.
-- 🔩 In progress: visualization/dashboard, scoring refinements, broader documentation.
+- ✅ Extraction, Neo4j ingestion, local graph analysis, community detection.
+- ✅ Manual categorization pipeline (art type, institution, cultural identity, geo zone) with a filterable directory in the dashboard.
+- ✅ Event extraction/de-duplication and geocoding.
+- ✅ Dashboard deployed (Render), multi-page (agenda, network view, account directory).
+- 🔩 In progress: broader geographic coverage, scoring refinements, French/Spanish documentation parity.
+
+## Project layout
+
+- Numbered scripts at the repo root (`1_`–`6_`-ish) are the active pipeline, run in order — see `CLAUDE.md`.
+- `pages/` + `dash_common.py` + `5_visualize_dashboard.py` / `wsgi.py` — the Dash dashboard.
+- `config/` — seed lists and account tiers. `docs/` — project notes.
+- `old/` — superseded or environment-incompatible scripts, kept for reference, not run.
+- `testing/` — verification/diagnostic scripts, useful for QA but outside the main pipeline flow.
 
 ## Data & ethics
 
