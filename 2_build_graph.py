@@ -24,7 +24,9 @@ def load_profile(tx, p):
     # Propiedades base
     tx.run("""
         MERGE (a:Account {username: $username})
-        SET a.id                  = $id,
+        ON CREATE SET a.firstSeenAt = datetime()
+        SET a.lastUpdatedAt       = datetime(),
+            a.id                  = $id,
             a.fullName            = $fullName,
             a.biography           = $biography,
             a.followersCount      = $followersCount,
@@ -64,7 +66,9 @@ def load_profile(tx, p):
         tx.run("""
             MATCH (a:Account {username: $username})
             MERGE (l:Location {name: $city})
-            SET l.latitude       = $lat,
+            ON CREATE SET l.firstSeenAt = datetime()
+            SET l.lastUpdatedAt = datetime(),
+                l.latitude       = $lat,
                 l.longitude      = $lon,
                 l.streetAddress  = $street,
                 l.zipCode        = $zip
@@ -85,7 +89,9 @@ def load_profile(tx, p):
         tx.run("""
             MATCH (a:Account {username: $src})
             MERGE (b:Account {username: $dst})
-            SET b.id            = $id,
+            ON CREATE SET b.firstSeenAt = datetime()
+            SET b.lastUpdatedAt = datetime(),
+                b.id            = $id,
                 b.fullName      = $fullName,
                 b.verified      = $verified,
                 b.private       = $private,
@@ -113,7 +119,9 @@ def load_posts(tx, username, posts):
         tx.run("""
             MATCH (a:Account {username: $username})
             MERGE (p:Post {id: $id})
-            SET p.type               = $type,
+            ON CREATE SET p.firstSeenAt = datetime()
+            SET p.lastUpdatedAt      = datetime(),
+                p.type               = $type,
                 p.shortCode          = $shortCode,
                 p.url                = $url,
                 p.caption            = $caption,
@@ -152,6 +160,7 @@ def load_posts(tx, username, posts):
             tx.run("""
                 MATCH (p:Post {id: $pid})
                 MERGE (h:Hashtag {name: $tag})
+                ON CREATE SET h.firstSeenAt = datetime()
                 MERGE (p)-[:HAS_HASHTAG]->(h)
             """, pid=pid, tag=tag.lower())
 
@@ -162,6 +171,7 @@ def load_posts(tx, username, posts):
             tx.run("""
                 MATCH (p:Post {id: $pid})
                 MERGE (a:Account {username: $mention})
+                ON CREATE SET a.firstSeenAt = datetime()
                 MERGE (p)-[:MENTIONS]->(a)
             """, pid=pid, mention=mention)
 
@@ -172,7 +182,9 @@ def load_posts(tx, username, posts):
             tx.run("""
                 MATCH (p:Post {id: $pid})
                 MERGE (a:Account {username: $username})
-                SET a.id            = $id,
+                ON CREATE SET a.firstSeenAt = datetime()
+                SET a.lastUpdatedAt = datetime(),
+                    a.id            = $id,
                     a.fullName      = $fullName,
                     a.verified      = $verified,
                     a.profilePicUrl = $pic
@@ -193,7 +205,9 @@ def load_posts(tx, username, posts):
             tx.run("""
                 MATCH (p:Post {id: $pid})
                 MERGE (a:Account {username: $username})
-                SET a.id            = $id,
+                ON CREATE SET a.firstSeenAt = datetime()
+                SET a.lastUpdatedAt = datetime(),
+                    a.id            = $id,
                     a.verified      = $verified,
                     a.profilePicUrl = $pic
                 MERGE (p)-[:COAUTHORED_BY]->(a)
@@ -212,6 +226,7 @@ def load_posts(tx, username, posts):
             tx.run("""
                 MATCH (p:Post {id: $pid})
                 MERGE (l:Location {name: $name})
+                ON CREATE SET l.firstSeenAt = datetime()
                 SET l.locationId = $lid
                 MERGE (p)-[:TAGGED_AT]->(l)
             """, pid=pid, name=loc_name, lid=loc_id or "")
@@ -222,6 +237,7 @@ def load_posts(tx, username, posts):
             tx.run("""
                 MATCH (p:Post {id: $pid})
                 MERGE (t:Track {audioId: $audioId})
+                ON CREATE SET t.firstSeenAt = datetime()
                 SET t.songName          = $song,
                     t.artistName        = $artist,
                     t.usesOriginalAudio = $original
@@ -246,7 +262,9 @@ def load_posts(tx, username, posts):
             tx.run("""
                 MATCH (p:Post {id: $pid})
                 MERGE (a:Account {username: $username})
+                ON CREATE SET a.firstSeenAt = datetime()
                 MERGE (cm:Comment {id: $cid})
+                ON CREATE SET cm.firstSeenAt = datetime()
                 SET cm.text       = $text,
                     cm.timestamp  = $timestamp,
                     cm.likesCount = $likes
@@ -272,7 +290,9 @@ def load_igtv(tx, username, videos):
         tx.run("""
             MATCH (a:Account {username: $username})
             MERGE (iv:IgtvVideo {id: $id})
-            SET iv.shortCode      = $shortCode,
+            ON CREATE SET iv.firstSeenAt = datetime()
+            SET iv.lastUpdatedAt  = datetime(),
+                iv.shortCode      = $shortCode,
                 iv.title          = $title,
                 iv.caption        = $caption,
                 iv.url            = $url,
@@ -304,6 +324,7 @@ def load_igtv(tx, username, videos):
             tx.run("""
                 MATCH (iv:IgtvVideo {id: $vid})
                 MERGE (h:Hashtag {name: $tag})
+                ON CREATE SET h.firstSeenAt = datetime()
                 MERGE (iv)-[:HAS_HASHTAG]->(h)
             """, vid=vid, tag=tag.lower())
 
@@ -313,6 +334,7 @@ def load_igtv(tx, username, videos):
             tx.run("""
                 MATCH (iv:IgtvVideo {id: $vid})
                 MERGE (a:Account {username: $mention})
+                ON CREATE SET a.firstSeenAt = datetime()
                 MERGE (iv)-[:MENTIONS]->(a)
             """, vid=vid, mention=mention)
 

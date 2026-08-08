@@ -18,7 +18,7 @@ import csv
 import json
 import math
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import typer
 from apify_client import ApifyClient
@@ -54,6 +54,24 @@ def load_target_usernames() -> list[str]:
 
     print(f"📋 {len(rows)} filas en '{ACCOUNT_SCORES_CSV}' — {len(usernames)} con keep=True "
           f"({excluded_present} excluidas manualmente)")
+    return usernames
+
+
+def usernames_from_seeds(path: str) -> list[str]:
+    """Lee un archivo formato seeds ({"seeds": [{"handle": "..."}]}) — mismo
+    formato que consume 1_harvest_ig_profiles.py --seeds. Permite apuntar
+    este script a un lote curado a mano (p.ej. config/seeds_idf.json) en vez
+    de depender de account_scores.csv, que viene del clasificador V1/V2
+    (alcance acotado a la diáspora colombiana) y no cubre las cuentas
+    agregadas tras ampliar el alcance a cultura general en Francia."""
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    seeds = data.get("seeds", [])
+    usernames = [(s.get("handle") or "").strip() for s in seeds]
+    usernames = [u for u in usernames if u and u not in EXCLUDED_USERNAMES]
+
+    print(f"📋 {len(seeds)} seeds en '{path}' — {len(usernames)} con handle válido")
     return usernames
 
 
@@ -264,6 +282,32 @@ def scrape_posts(targets: list[tuple[str, int]], client: ApifyClient) -> dict:
                 cost_log_entries.append({"username": username, "posts": 0, "cost": run_cost})
                 continue
 
+            # Verificación local de la ventana: no confiamos ciegamente en que
+            # el actor de Apify haya respetado onlyPostsNewerThan. Cualquier
+            # post con timestamp más viejo que la ventana pedida (+1 día de
+            # margen por husos horarios) se descarta acá, y se avisa si pasó.
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days_for_account + 1)
+            in_window, out_of_window = [], 0
+            for item in dataset_items:
+                ts = _parse_timestamp(item.get("timestamp")) if isinstance(item, dict) else None
+                if ts is not None:
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    if ts < cutoff:
+                        out_of_window += 1
+                        continue
+                in_window.append(item)
+
+            if out_of_window:
+                print(f"  ⚠️  {out_of_window} posts devueltos fuera de la ventana de "
+                      f"{days_for_account}d pedida a Apify — descartados localmente")
+            dataset_items = in_window
+
+            if not dataset_items:
+                cost_log_entries.append({"username": username, "posts": 0, "cost": run_cost})
+                print(f"  ⚠️  Sin posts para @{username} tras filtrar por ventana")
+                continue
+
             existing = _load_existing_posts(filepath)
             merged   = merge_and_cap(existing, dataset_items, RESULTS_LIMIT)
 
@@ -295,12 +339,15 @@ def scrape_posts(targets: list[tuple[str, int]], client: ApifyClient) -> dict:
 def main(
     days: int = typer.Option(10, "--days",
                              help="Ventana de recencia en días (onlyPostsNewerThan)."),
+    seeds: str = typer.Option(None, "--seeds",
+                              help="Ruta a un archivo seeds (ej. config/seeds_idf.json) en vez "
+                                   "de usar account_scores.csv."),
 ):
     os.makedirs("data_raw", exist_ok=True)
 
-    target_usernames = load_target_usernames()
+    target_usernames = usernames_from_seeds(seeds) if seeds else load_target_usernames()
     if not target_usernames:
-        print("✅ No hay cuentas con keep=True para scrapear.")
+        print("✅ No hay cuentas para scrapear.")
         return
 
     n_negligible, pending = 0, []

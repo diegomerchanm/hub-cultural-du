@@ -11,7 +11,11 @@ from dash import dcc, html, Input, Output, State
 import dash_cytoscape as cyto
 import plotly.graph_objects as go
 
-from dash_common import C, DATA, REL_COLORS, FONT_SERIF, FONT_SANS, FONT_MONO, fmt_num, category_meta, card_style
+from dash_common import (
+    C, DATA, REL_COLORS, FONT_SERIF, FONT_SANS, FONT_MONO, fmt_num, category_meta,
+    card_style, pill_style, instagram_url, split_multivalue, classify_free_events,
+    FREE_EVENTS_BUCKETS,
+)
 
 cyto.load_extra_layouts()
 
@@ -306,6 +310,100 @@ def build_analysis_section():
     return html.Div([stat_cards, charts])
 
 
+# ---------------------------------------------------------------------------
+# Directorio de cuentas curadas manualmente — tipo de arte, tipo de
+# institución, acceso gratuito, identidad cultural y zona geográfica vienen
+# de cuentas_instagram_completo_v4.xlsx vía load_manual_account_categorization.py
+# (no del pipeline automático). Si ese script todavía no corrió,
+# DATA["curated_accounts"] queda vacío y esta sección simplemente no aparece.
+# ---------------------------------------------------------------------------
+_FREE_EVENTS_COLOR = {
+    "Sí": "#4a8c6f22", "Parcial": "#c49a2c22", "No": C["panel_bg"],
+    "No aplica / sin datos": C["panel_bg"],
+}
+
+
+def build_directory_filters():
+    art_options = sorted({tok for row in DATA["curated_accounts"] for tok in split_multivalue(row.get("artType"))})
+    inst_options = sorted({tok for row in DATA["curated_accounts"] for tok in split_multivalue(row.get("institutionType"))})
+
+    def filter_block(label, dropdown_id, options, placeholder):
+        return html.Div([
+            html.Label(label, style={
+                "fontFamily": FONT_MONO, "fontSize": "11px", "color": C["sub"],
+                "display": "block", "marginBottom": "4px",
+            }),
+            dcc.Dropdown(
+                id=dropdown_id, options=[{"label": v, "value": v} for v in options],
+                multi=True, placeholder=placeholder,
+                style={"fontFamily": FONT_SANS, "fontSize": "13px"},
+            ),
+        ], style={"flex": "1", "minWidth": "220px"})
+
+    return html.Div([
+        filter_block("Tipo de arte", "dir-filter-art", art_options, "Todos"),
+        filter_block("Tipo de institución", "dir-filter-inst", inst_options, "Todas"),
+        filter_block("Eventos gratis", "dir-filter-free", FREE_EVENTS_BUCKETS, "Todas"),
+    ], style={"display": "flex", "gap": "16px", "flexWrap": "wrap", "marginBottom": "18px"})
+
+
+def build_directory_card(row):
+    art_tokens = split_multivalue(row.get("artType"))
+    inst_tokens = split_multivalue(row.get("institutionType"))
+    free_bucket = classify_free_events(row.get("hasFreeEvents"))
+    free_color = _FREE_EVENTS_COLOR.get(free_bucket, C["panel_bg"])
+
+    pills = (
+        [html.Span(t, style=pill_style()) for t in art_tokens]
+        + [html.Span(t, style=pill_style(C["panel_bg"])) for t in inst_tokens]
+        + [html.Span(free_bucket, style=pill_style(free_color))]
+    )
+
+    username = row.get("username") or ""
+    subtitle = " · ".join(filter(None, [row.get("geoZone"), row.get("culturalIdentity")]))
+
+    return html.Div([
+        html.Div([
+            html.A(f"@{username}", href=instagram_url(username), target="_blank", style={
+                "fontFamily": FONT_SERIF, "fontSize": "15px", "fontWeight": "600",
+                "color": C["blue"], "textDecoration": "none",
+            }),
+            html.Span(f"{fmt_num(row.get('followers'))} seguidores", style={
+                "fontFamily": FONT_MONO, "fontSize": "11px", "color": C["sub"], "marginLeft": "10px",
+            }),
+        ], style={"marginBottom": "8px", "display": "flex", "alignItems": "baseline", "flexWrap": "wrap"}),
+        html.Div(pills, style={"display": "flex", "flexWrap": "wrap"}),
+        html.Div(subtitle, style={
+            "fontFamily": FONT_SANS, "fontSize": "11px", "color": C["sub"], "marginTop": "6px",
+        }) if subtitle else None,
+    ], style=card_style(padding="14px 16px"))
+
+
+def build_directory_section():
+    curated = DATA["curated_accounts"]
+    if not curated:
+        return html.Div()
+    return html.Div([
+        html.H2("Directorio de cuentas", style={
+            "fontFamily": FONT_SERIF, "fontSize": "22px", "color": C["text"], "margin": "0 0 6px 0",
+        }),
+        html.P(
+            f"{len(curated)} cuentas categorizadas a mano — filtra por tipo de arte, "
+            "tipo de institución o acceso gratuito a eventos.",
+            style={"fontFamily": FONT_SANS, "fontSize": "13px", "color": C["sub"], "margin": "0 0 16px 0"},
+        ),
+        build_directory_filters(),
+        html.Div(
+            id="directory-results",
+            children=[build_directory_card(r) for r in curated],
+            style={
+                "display": "grid", "gridTemplateColumns": "repeat(auto-fit, minmax(280px, 1fr))",
+                "gap": "12px",
+            },
+        ),
+    ], style={"marginTop": "36px"})
+
+
 layout = html.Div([
     dcc.Store(id="active-filter", data=None),
     html.H1("Red y análisis", style={
@@ -318,6 +416,7 @@ layout = html.Div([
     build_insights_section(),
     build_network_panel(),
     build_analysis_section(),
+    build_directory_section(),
 ])
 
 
@@ -369,3 +468,28 @@ def filter_graph(n_clicks_list, current_filter, chip_ids):
             })
 
     return stylesheet, new_filter
+
+
+@dash.callback(
+    Output("directory-results", "children"),
+    Input("dir-filter-art", "value"),
+    Input("dir-filter-inst", "value"),
+    Input("dir-filter-free", "value"),
+)
+def filter_directory(art_sel, inst_sel, free_sel):
+    rows = DATA["curated_accounts"]
+
+    if art_sel:
+        rows = [r for r in rows if set(split_multivalue(r.get("artType"))) & set(art_sel)]
+    if inst_sel:
+        rows = [r for r in rows if set(split_multivalue(r.get("institutionType"))) & set(inst_sel)]
+    if free_sel:
+        rows = [r for r in rows if classify_free_events(r.get("hasFreeEvents")) in free_sel]
+
+    if not rows:
+        return [html.Div("No hay cuentas que calcen con estos filtros.", style={
+            "fontFamily": FONT_SANS, "fontSize": "13px", "color": C["sub"],
+            "gridColumn": "1 / -1",
+        })]
+
+    return [build_directory_card(r) for r in rows]

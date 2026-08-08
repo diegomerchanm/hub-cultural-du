@@ -97,6 +97,42 @@ def fmt_num(n):
     return f"{int(n):,}".replace(",", " ")
 
 
+# ---------------------------------------------------------------------------
+# Helpers para el directorio de cuentas curadas manualmente (columnas B-M del
+# Excel de categorización -> propiedades de :Account vía
+# load_manual_account_categorization.py). Esos campos quedaron como texto
+# libre (a veces multi-valor separado por comas) en vez de vocabulario
+# controlado estricto, así que los filtros del dashboard normalizan aquí en
+# vez de asumir que el dato ya viene limpio.
+# ---------------------------------------------------------------------------
+FREE_EVENTS_BUCKETS = ["Sí", "Parcial", "No", "No aplica / sin datos"]
+
+
+def classify_free_events(raw):
+    if not raw:
+        return "No aplica / sin datos"
+    low = raw.strip().lower()
+    if low.startswith("no aplica") or low.startswith("no confirmado"):
+        return "No aplica / sin datos"
+    if low.startswith("parcial"):
+        return "Parcial"
+    if low.startswith("sí") or low.startswith("si "):
+        return "Sí"
+    if low.startswith("no"):
+        return "No"
+    return "No aplica / sin datos"
+
+
+def split_multivalue(raw):
+    """'Música, Teatro, Danza' -> ['Música', 'Teatro', 'Danza']. Usado
+    para los filtros de tipo de arte / tipo de institución, que en el Excel
+    curado quedaron como texto libre separado por comas en vez de
+    vocabulario controlado estricto."""
+    if not raw:
+        return []
+    return [t.strip() for t in raw.split(",") if t.strip()]
+
+
 def card_style(**extra):
     base = {
         "background": C["card"],
@@ -188,6 +224,7 @@ def fetch_data():
         "top_hashtags": [],
         "top_central_accounts": [],
         "top_bridge_accounts": [],
+        "curated_accounts": [],
         "insights": compute_event_insights([]),
         "stats": {"accounts": 0, "posts": 0, "events": 0, "hashtags": 0, "upcoming_clean": 0},
     }
@@ -278,6 +315,28 @@ def fetch_data():
             except Exception:
                 top_bridge_accounts = []
 
+            # Categorización manual curada (load_manual_account_categorization.py).
+            # Propia try/except: si el script todavía no corrió, estas propiedades
+            # no existen y la sección de directorio simplemente no aparece, sin
+            # tumbar el resto del dashboard.
+            try:
+                curated_accounts = [dict(r) for r in _run(s, """
+                    MATCH (a:Account)
+                    WHERE a.manualDataCuratedAt IS NOT NULL
+                    RETURN a.username AS username,
+                           a.artType AS artType,
+                           a.institutionType AS institutionType,
+                           a.hasFreeEvents AS hasFreeEvents,
+                           a.priceRange AS priceRange,
+                           a.culturalIdentity AS culturalIdentity,
+                           a.geoZone AS geoZone,
+                           a.manualFollowersCount AS followers,
+                           a.eventFrequency AS eventFrequency
+                    ORDER BY a.manualFollowersCount DESC
+                """)]
+            except Exception:
+                curated_accounts = []
+
             stats = {
                 "accounts":  _run(s, "MATCH (a:Account) RETURN count(a) AS n")[0]["n"],
                 "posts":     _run(s, "MATCH (p:Post) RETURN count(p) AS n")[0]["n"],
@@ -302,6 +361,7 @@ def fetch_data():
                 "top_hashtags": [dict(r) for r in top_hashtags],
                 "top_central_accounts": top_central_accounts,
                 "top_bridge_accounts": top_bridge_accounts,
+                "curated_accounts": curated_accounts,
                 "insights": compute_event_insights(events_list),
                 "stats": stats,
             }
