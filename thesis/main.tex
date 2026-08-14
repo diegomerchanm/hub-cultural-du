@@ -1,0 +1,707 @@
+% ============================================================================
+% Hub Cultural — Master's Thesis (Mémoire de Master)
+% Outline / skeleton — LaTeX, standard academic report structure
+% Language: English. Generated as a starting skeleton; content notes are
+% marked with \todo{...} and should be replaced with real prose chapter by
+% chapter. Numbers/facts already known from the project are inserted as
+% placeholders to anchor the writing — verify each before final submission.
+% ============================================================================
+
+\documentclass[12pt, a4paper]{report}
+
+% ── Packages ────────────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{natbib}          % swap for biblatex if your university requires it
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{setspace}
+\onehalfspacing
+
+% Lightweight TODO marker (deliberately not using the todonotes package —
+% avoids a tikz/pgf version dependency that may not match every LaTeX
+% install). Remove or search-replace \todo{...} once each section is
+% actually written.
+\newcommand{\todo}[1]{\par\noindent\textcolor{red}{\textbf{[TODO:}} #1
+  \textcolor{red}{\textbf{]}}\par\vspace{0.3em}}
+
+\lstset{basicstyle=\ttfamily\small, breaklines=true, frame=single}
+
+\title{
+    % Working title — scope is deliberately broad: cultural relevance, not
+    % national origin, is the inclusion criterion (see \S1.1 and \S6.2).
+    \textbf{Hub Cultural: Mapping Cultural Event Networks in France \\
+    through Instagram Graph Mining and Network Analysis} \\
+    \vspace{0.5cm}
+    \large From a Diaspora Network to a General Cultural Discovery Platform
+}
+\author{Diego Merchán}
+\date{2026}
+
+% ============================================================================
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\todo{150--250 words. Draft last, once Results/Discussion are stable.
+Should state: (1) the problem — culturally-relevant activity in the Paris
+region (with priority given to photography, cinema, literature, theatre,
+and local community events) is not systematically documented or
+discoverable, and this project originated from, but is no longer limited
+to, the specific case of the Latin American diaspora; (2) the method — a
+pipeline that scrapes Instagram, builds a Neo4j graph, applies network
+analysis (PageRank, betweenness, Leiden community detection) and an
+LLM/NLP event-extraction pipeline, combined with human curation as the
+trust signal, plus a research-operations discipline (decision log, run
+log, dry-run-first design) treated as methodology in its own right; (3)
+headline findings — network size and structure, the bridge role of
+commercial/institutional accounts, event landscape, and a transparent
+account of data-quality limits; (4) the practical artifact — a public,
+bilingual event-discovery website; (5) contribution — methodological
+(human curation vs.\ automated scoring; a cultural-relevance criterion
+replacing a nationality-based one) and empirical (first mapped network of
+this kind for this cultural ecosystem in France).}
+\end{abstract}
+
+\tableofcontents
+
+% ============================================================================
+\chapter{Introduction}
+% ============================================================================
+
+\section{Context and Motivation}
+
+Hub Cultural began as an attempt to make visible something that is well
+known anecdotally but poorly documented empirically: the cultural life
+that Latin American, and in particular Colombian, communities sustain in
+the Paris region through small associations, independent venues, cultural
+attachés, and a dense but scattered presence on Instagram. The author's
+own Colombian background supplied both the initial motivation and the
+first seed account for data collection — the Colombian consulate in
+Paris (\texttt{@consuladocolparis}) — from which the network was grown
+outward through automatic relationship discovery.
+
+As the project progressed, the boundary that had organized it from the
+start — \emph{is this account or event part of the Latin American
+diaspora?} — proved both practically brittle and conceptually narrower
+than what the data, and the underlying research interest, actually
+supported. Many of the best-connected cultural accounts discovered
+through the network turned out to be French institutions, mixed-nationality
+collectives, or venues with no diaspora affiliation at all, but which were
+unmistakably part of the same cultural ecosystem the project set out to
+map — programming photography exhibitions, independent cinema, literary
+events, and theatre alongside explicitly Colombian or Latin American
+programming. The project's scope therefore evolved in two steps: first
+from Colombia-specific to Latin-American-diaspora-wide, and subsequently
+from a nationality-based criterion to a purely cultural one. The operative
+question became not \emph{who is behind this account} but \emph{is this
+culturally relevant}, with explicit priority — inherited from the
+project's original four thematic agendas (\texttt{docs/objetivos.md}) —
+given to photography, cinema, literature, and theatre, alongside a fifth,
+less formally bounded category: events organized by and for local
+communities, regardless of national or cultural origin.
+
+This evolution is treated in this thesis not as scope creep to be
+apologized for, but as a methodological finding in its own right
+(\S\ref{sec:scope-evolution}): a nationality-based inclusion criterion
+turned out to be both harder to operationalize consistently and less
+faithful to how cultural networks actually cohere in practice, where
+diaspora and host-society cultural production overlap and reinforce each
+other rather than remaining cleanly separable.
+
+\section{Problem Statement and Research Question}
+
+The cultural activity produced by, and adjacent to, migrant and diaspora
+communities in a host country is rarely centralized: it lives across
+dozens of Instagram accounts, is announced inconsistently, and is legible
+mainly to whoever already follows the right accounts. This is true of
+Latin American cultural life in the Paris region specifically, but — as
+this project's own data eventually made clear — it is not a problem
+unique to any one national community; it is a structural feature of how
+small-scale cultural production circulates on social media generally.
+
+This thesis asks: \emph{How is culturally-relevant activity — with
+priority given to photography, cinema, literature, theatre, and local
+community cultural life — organized as a network of accounts and events
+in the Paris region, and can that structure be systematically mapped,
+analyzed, and made discoverable using publicly available Instagram
+data?}
+
+This breaks into three sub-questions:
+\begin{enumerate}
+    \item \textbf{Structural.} Who are the connective actors in this
+    network — which accounts function as hubs or bridges between
+    otherwise separate cultural circles, and does this differ between
+    commercial/institutional accounts and individual or grassroots ones?
+    \item \textbf{Thematic.} How is cultural activity distributed across
+    the project's priority domains (photography, cinema, literature,
+    theatre, community events), and how well does an automated pipeline
+    classify it into these domains compared to human judgment?
+    \item \textbf{Practical.} Can the resulting graph be turned into a
+    public-facing tool that helps the community it describes actually
+    discover and attend these events — and what does building that tool
+    reveal about the reliability of the underlying data?
+\end{enumerate}
+
+\section{Objectives}
+
+The project's objectives, as originally framed (\texttt{docs/objetivos.md})
+and updated here to reflect the current, cultural-relevance-based scope:
+
+\begin{enumerate}
+    \item Build and maintain four thematic monitoring agendas —
+    \emph{literature}, \emph{photography}, \emph{cinema}, and
+    \emph{theatre} — tracking the organizations that play an active role
+    in each, complemented by a fifth, less formally bounded priority:
+    cultural events organized by and for local communities.
+    \item Consolidate a pipeline that extracts events from the accounts
+    under these agendas, primarily from Instagram and, prospectively,
+    from websites and other social networks.
+    \item Map the network of actors within each thematic agenda and
+    categorize them — by type of organization, geographic zone, cultural
+    identity where relevant, and structural role in the network.
+    \item Evaluate the participation opportunities these networks open
+    up, using a deliberately human, non-technical success criterion: on
+    this dimension, the project succeeds when it leads to actually
+    meeting someone through it.
+\end{enumerate}
+
+\section{Scope and Contributions}
+
+\textbf{Scope.} Geographically the project centers on Île-de-France,
+though a meaningful share of curated accounts and events originate from,
+or are organized by, institutions physically located outside France — a
+scope boundary discussed explicitly in \S\ref{sec:limitations} rather
+than silently discarded. Instagram is the sole data source, a deliberate
+boundary rather than an oversight: it is the platform where this cultural
+activity is, in practice, announced. Only public accounts are in scope.
+Inclusion is governed by cultural relevance rather than national origin,
+with the four thematic pillars and the community-events category acting
+as explicit priorities rather than hard filters.
+
+\textbf{Contributions.} This thesis makes three kinds of contribution:
+\begin{itemize}
+    \item \textit{Methodological} — a working pipeline combining network
+    analysis, multilingual NLP event extraction, and human curation as
+    the operative trust signal, arrived at through an evidenced pivot
+    away from fully automated account scoring
+    (\S\ref{sec:methodology-curation}); and a research-operations
+    practice — a running decision log, a run log, and a dry-run-first
+    discipline applied to every script — treated here as part of the
+    methodology rather than incidental bookkeeping
+    (\S\ref{sec:research-ops}).
+    \item \textit{Empirical} — a systematic mapping of this cultural
+    network's structure: node and edge counts, community structure, and
+    the role of bridging actors, alongside a transparent account of
+    where the underlying data is, and is not, reliable (geocoding
+    confidence, date-extraction accuracy, categorization accuracy).
+    \item \textit{Applied} — a public-facing, bilingual event-discovery
+    website that turns the graph into something a member of the
+    community it describes can actually use, not only an analytical
+    artifact for the researcher.
+\end{itemize}
+
+\section{Thesis Structure}
+
+Chapter~2 situates the project within diaspora and migration studies,
+social network analysis, computational social science, and NLP-based
+event extraction. Chapter~3 details the methodology, including the two
+methodological pivots this thesis treats as contributions in their own
+right: human curation as the trust signal, and a research-operations
+discipline of decision logging, run logging, and dry-run-first
+iteration. Chapter~4 describes the resulting system, from data
+collection through the public discovery website. Chapter~5 reports
+results: network structure, thematic and geographic distribution, and a
+transparent accounting of data quality. Chapter~6 discusses what these
+results mean, including a dedicated reflection on the project's
+evolution from a nationality-based to a cultural-relevance-based scope.
+Chapter~7 concludes, states limitations, and outlines future work.
+
+
+% ============================================================================
+\chapter{Literature Review / Theoretical Framework}
+% ============================================================================
+
+\section{Diaspora Studies and Cultural Networks}
+\todo{Situate within diaspora/migration studies: how migrant
+communities organize culturally, the role of associations and informal
+networks, prior work on Latin American diasporas in Europe specifically
+if available. Framing note: this remains one relevant thread — the
+project's motivating case and a meaningful share of its curated content
+— but since the operative inclusion criterion is now cultural relevance
+rather than national origin (\S\ref{sec:scope-evolution}), pair this with
+literature on cultural-sector/creative-industry network mapping more
+generally, so the theoretical framing matches the project's actual scope
+and not only its origin story.}
+
+\section{Social Network Analysis in Migration Contexts}
+\todo{Prior applications of SNA to migrant/diaspora networks;
+concepts to define here for later use: centrality (degree, betweenness,
+PageRank), community detection, structural holes / bridging, E-I index.}
+
+\section{Computational Social Science and Social Media as Data}
+\todo{Justify Instagram as a data source; discuss known biases
+(who is/isn't represented on Instagram, algorithmic visibility, platform
+ToS and ethical use of public data).}
+
+\section{Graph Databases and Network Science Methods}
+\todo{Neo4j / property graph model; why a graph database over a
+relational one for this problem; brief technical grounding for PageRank,
+betweenness centrality, Leiden algorithm, k-core decomposition,
+participation coefficient — cite original papers.}
+
+\section{NLP for Event Extraction and Classification}
+\todo{Ground the 3-layer detection design: sentence embeddings
+for candidate filtering, NLI zero-shot classification, LLM-based
+extraction/classification/gating. Cite relevant NLP literature (semantic
+similarity, zero-shot NLI, LLM information extraction) and note the
+multilingual requirement (ES/FR/EN) as a specific design constraint.}
+
+\section{Positioning}
+\todo{One paragraph: how this thesis differs from prior diaspora
+network studies (data-driven, automated + human-curated hybrid, produces
+a live public tool, not just an analysis) and from prior event-extraction
+NLP work (domain-specific gating logic, human-curation-as-trust-signal
+pivot).}
+
+
+% ============================================================================
+\chapter{Methodology}
+\label{ch:methodology}
+% ============================================================================
+
+\section{Research Design Overview}
+\todo{High-level pipeline diagram description (7 phases):
+extraction $\to$ ingestion $\to$ network analysis $\to$ manual
+categorization $\to$ event enrichment $\to$ geo enrichment $\to$
+cleanup. Figure: reproduce/adapt the pipeline diagram from
+\texttt{docs/data\_flow.md}.}
+
+\section{Research Operations: Decision Logging, Run Tracking, and Iterative Safety}
+\label{sec:research-ops}
+
+Independently of the technical pipeline itself, this project maintained
+three interlocking practices for managing the research process, treated
+here as a methodological contribution rather than incidental project
+management. Together they make the pipeline's evolution auditable after
+the fact — which is not free in a setting where the object of study is a
+continuously growing graph, reprocessed repeatedly by successive versions
+of the extraction logic.
+
+\textbf{A real-time decision log.} Every non-trivial design choice was
+recorded, at the moment it was made, in a sequentially numbered decision
+log (\texttt{docs/decisions.md}, entries DD-001 through DD-044 and
+counting) rather than reconstructed retrospectively for this thesis. Each
+entry states the alternatives considered, the evidence that motivated the
+final choice, and, where applicable, validation results. Three entries
+illustrate the range of what this captured: DD-041 documents a
+geo-conflict guardrail added to the event-deduplication resolver after a
+production dry-run surfaced a specific failure mode — two structurally
+similar events merged despite being in different cities — validated
+against a 14-case test suite before being applied to 68 pending merges;
+DD-042 documents the addition of a per-event, LLM-generated tag field
+designed specifically to avoid a parsing bug present in an earlier,
+account-level free-text field; DD-043 and DD-044 document the design of
+the Neo4j-to-static-JSON export and the resulting public website,
+including an explicit accounting of which ranking components could be
+precomputed server-side versus which needed to remain client-side.
+Maintaining this log in real time, rather than writing it up after the
+fact, is itself a methodological choice: it captures the reasoning
+available \emph{at the time} of each decision, including alternatives
+that were considered and rejected — something retrospective documentation
+systematically loses.
+
+\textbf{A run log.} Separately, every substantive execution of the
+pipeline against live data — not every script invocation, but every run
+whose output was retained or acted upon — was logged with its date,
+parameters, and a summary of results (\texttt{docs/runs\_log.md}). This
+served two purposes beyond record-keeping: it made it possible to
+distinguish a genuine change in the underlying data (new accounts or
+events discovered) from a change in pipeline logic when comparing two
+exports, and it created a paper trail for decisions that depended on a
+specific run's output rather than on memory — for instance, the decision
+not to add a venue-specificity guardrail to the event resolver was made
+with explicit reference to a logged run's results.
+
+\textbf{Dry-run-first, diagnose-first design.} Every script that writes
+to the live Neo4j graph was built with a \texttt{--dry-run} or
+\texttt{--diagnose} mode as a first-class feature, not an afterthought:
+\texttt{cleanup\_legacy\_accounts.py} runs its deletion logic inside a
+single transaction and issues a \texttt{ROLLBACK} under
+\texttt{--dry-run}, so a preview's reported counts are exact rather than
+estimated; \texttt{load\_manual\_account\_categorization.py} and the
+event-extraction and event-resolution scripts all follow the same
+pattern. Combined with the idempotent design of the extraction and
+ingestion scripts — re-running them is always safe, since already-
+processed accounts and posts are skipped or merged rather than
+duplicated — this made it possible to iterate on pipeline logic against
+a live, shared, non-trivially-sized research database without the usual
+risk of an irreversible mistake, a constraint that shaped several of the
+decisions recorded in the log above.
+
+Together, these three practices form a coherent research-operations
+discipline: decisions are recorded when made, runs are recorded when
+executed, and changes to the live data are always previewable before
+being committed. For a thesis built on a continuously evolving dataset
+rather than a fixed one, this discipline is what makes it possible to
+state, for any given result in Chapter~\ref{ch:results}, exactly which
+version of the pipeline and which run produced it.
+
+\section{Data Collection}
+\todo{Apify actors used (instagram-profile-scraper,
+instagram-post-scraper); seed selection strategy — originally
+\texttt{@consuladocolparis} as single seed, BFS-style expansion via
+\texttt{RELATED\_TO} suggestions, later curated seed files
+(\texttt{config/seeds\_*.json}); cost control mechanism
+(\texttt{.apify\_cost\_log.json}); incremental/idempotent design
+(\texttt{extract\_profiles.py} only scrapes accounts not yet seen).}
+
+\section{Data Model}
+\todo{Full Neo4j schema: node labels (\texttt{:Account},
+\texttt{:Post}, \texttt{:Hashtag}, \texttt{:Location}, \texttt{:Track},
+\texttt{:Comment}, \texttt{:IgtvVideo}, \texttt{:Event}, \texttt{:City},
+\texttt{:Country}, \texttt{:Arrondissement}) and relationship types
+(\texttt{PUBLISHED}, \texttt{HAS\_HASHTAG}, \texttt{MENTIONS},
+\texttt{TAGS\_USER}, \texttt{COAUTHORED\_BY}, \texttt{MENTIONS\_EVENT},
+\texttt{ORGANIZED}, \texttt{PARTICIPATED\_IN}, \texttt{LOCATED\_IN},
+etc.). Include an entity-relationship diagram (Appendix~\ref{app:schema}).}
+
+\section{Network Analysis Methods}
+\todo{Multiplex network design: social layer (MENTIONS/
+TAGS\_USER/COAUTHORED\_BY, author$\to$post$\to$target projection)
+separate from the algorithmic layer (\texttt{RELATED\_TO}, \texttt{Algo}
+suffix). Metrics computed: exact PageRank, exact betweenness, Leiden
+community detection at three resolutions ($\gamma = 0.5, 1.0, 1.5$,
+seed 42), weakly connected components, k-core, participation
+coefficient, E-I index by actor type. Note the pivot from Neo4j GDS
+(blocked — standard AuraDB lacks the plugin, corporate firewall also
+blocks port 7687) to a local igraph/leidenalg implementation
+(\texttt{3\_analyze\_network.py}) as a methodological adaptation worth
+documenting, not hiding.}
+
+\section{Event Detection Pipeline}
+\todo{Describe the 3-layer architecture as it exists today
+(post the 2026-08 rewrite that removed the old embeddings-based
+multi-label typification layer after a 100-post human-vs-pipeline
+evaluation — cite \texttt{data\_processed/eval\_100\_report.md}):
+\begin{enumerate}
+    \item Layer 1 — cosine similarity against $\sim$100 reference
+    phrases (\texttt{paraphrase-multilingual-MiniLM-L12-v2}) as a
+    candidate filter.
+    \item Layer 2 — binary NLI classification
+    (\texttt{MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli}),
+    hypothesis picked in the caption's detected language.
+    \item Layer 3 — LLM (Ollama/Groq/Cerebras) performs event typing
+    (16-label taxonomy), price-range extraction, and critically
+    \emph{gates} event creation based on
+    \texttt{is\_public\_invitation}/\texttt{is\_upcoming}.
+\end{enumerate}
+Report the false-positive reduction this gating produced, per the
+100-post eval.}
+
+\section{Human Curation as the Trust Signal}
+\label{sec:methodology-curation}
+\todo{This is a genuine methodological pivot worth a dedicated
+section: the original automated account-scoring classifier
+(\texttt{old/1\_harvest\_account\_classifier.py}) selected accounts
+where well under 10\% turned out to be culturally valuable on manual
+review. \texttt{manualDataCuratedAt} (set only by
+\texttt{load\_manual\_account\_categorization.py}) replaced the
+scoring-based selection as the operative "worth keeping" signal.
+Discuss this as a finding in itself: automated relevance scoring
+under-performed simple human judgment for this domain, and why (cite
+whatever intuition emerged — commercial/political accounts scoring
+artificially high, genuinely small cultural accounts scoring low on
+network centrality despite being sociologically important).}
+
+\section{Geospatial Enrichment}
+\todo{Nominatim geocoding, rate-limited (1.1s/req); hierarchy
+\texttt{Location}$\to$\texttt{Arrondissement}$\to$\texttt{City}$\to$
+\texttt{Country}; three-tier confidence strategy (exact / city-combined
+/ city-hint-only) and — \textbf{report honestly} — the empirical
+finding that low-confidence geocodes need explicit exclusion rather
+than fallback display, since a fallback to a default city hint can
+silently produce plausible-looking but wrong coordinates (found during
+dashboard validation, \S\ref{sec:limitations}).}
+
+\section{Ranking / Relevance Scoring}
+\label{sec:ranking}
+\todo{Document the discovery-website ranking formula as a
+methodological artifact in its own right:
+$\text{Relevance} = 100 \cdot (0.30Q + 0.22A + 0.18B + 0.20T + 0.10C)
+\cdot \text{penalty}$, where $Q$ is extraction quality/confidence,
+$A$ is network centrality (percentile-blended PageRank/betweenness/
+followers/participation), $B$ is social resonance (hotness/post
+count), $T$ is temporal proximity, $C$ is session-based personalization
+with no login. Note the explicit removal of a nationality/
+"Colombian-ness" bonus once the project's scope broadened — a
+methodological choice worth justifying (avoiding a nationality bias
+baked into a supposedly neutral relevance score).}
+
+\section{Ethical Considerations}
+\todo{Public-data-only scope; Instagram ToS; no scraping of
+private accounts; anonymization/aggregation choices for anyone
+appearing in captions/comments who is not an organizational account;
+data retention and the decision to eventually delete non-curated
+accounts (\texttt{cleanup\_legacy\_accounts.py}).}
+
+\section{Limitations of Method}
+\label{sec:limitations}
+\todo{Be concrete and honest — this section should draw on
+real bugs found during the dashboard validation, not hypothetical
+caveats: (1) geocoding fallback producing false-precision coordinates
+when a location could not be reliably resolved; (2) LLM date
+extraction misreading year/date from ambiguous captions (e.g.\ a
+caption stating only a month, defaulting to the wrong year); (3)
+Instagram-only sourcing missing organizations that primarily use other
+channels; (4) accounts outside the intended geographic scope
+(e.g.\ France-branded institutions physically located in Colombia)
+occasionally entering the graph via automatic relationship discovery
+before being caught by curation.}
+
+
+% ============================================================================
+\chapter{System Implementation: The Hub Cultural Platform}
+% ============================================================================
+
+\section{Pipeline Architecture Overview}
+\todo{Reproduce the phase diagram; emphasize idempotency and
+incrementality as design principles running through every script.}
+
+\section{Extraction and Ingestion}
+\todo{\texttt{1\_harvest\_ig\_profiles.py} /
+\texttt{1\_harvest\_ig\_posts.py} / \texttt{extract\_profiles.py} $\to$
+\texttt{2\_build\_graph.py}. Provenance tracking
+(\texttt{firstSeenAt}/\texttt{lastUpdatedAt}).}
+
+\section{Network Analysis Engine}
+\todo{\texttt{3\_analyze\_network.py} internals; why it runs
+entirely offline from exported CSVs (portability, reproducibility
+benefit worth noting for a thesis — the analysis can be re-run without
+live database access).}
+
+\section{The Discovery Website}
+\todo{Describe the client-facing artifact built from
+\texttt{5\_export\_dashboard\_data.py} $\to$ static site (\texttt{site/}):
+dynamic category menu (a deliberate choice — no fixed editorial
+category list, so the menu reflects whatever the upstream human
+curation actually prioritizes), bilingual ES/FR interface, no-login
+session personalization via \texttt{localStorage}, similarity search
+via embeddings. Frame this as the thesis's applied contribution:
+turning the graph into something a member of the community could
+actually use, not just an analytical artifact for the researcher.}
+
+\section{Decision Log as Methodological Transparency}
+\todo{Note the project's practice of a running, dated decision
+log (\texttt{docs/decisions.md}, DD-001 through DD-044+) as a form of
+methodological transparency — cite it as supporting material and
+summarize its most consequential entries (the curation pivot, the
+GDS$\to$igraph pivot, the event-pipeline rewrite, the geocoding
+confidence gating fix).}
+
+
+% ============================================================================
+\chapter{Results}
+\label{ch:results}
+% ============================================================================
+
+\section{Network Structure}
+\todo{Report current numbers precisely — re-pull from the
+latest \texttt{data\_processed/*.csv} before writing, do not reuse V1
+numbers unchanged (V1 reference point: $\sim$7{,}200 nodes seeded from
+a single account, 61 communities via Leiden, high modularity). State
+current account/event/location counts as of the most recent run
+(cf.\ latest export: 170 events, 200 accounts, at time of dashboard
+validation — confirm this is post-cleanup and reflects the broadened
+non-Colombia-only scope before citing).}
+
+\section{Bridge Actors and Community Structure}
+\todo{The V1 sociological finding — commercial/institutional
+accounts show high E-I index (structural bridges) while individual
+accounts cluster locally — needs re-validation against the current
+graph (broadened scope, curation changes since V1). Report whether it
+still holds.}
+
+\section{Thematic and Event Landscape}
+\todo{Distribution of events by category (musical, visual,
+institutional, festival, academic, etc.); how this compares to the
+four originally-targeted thematic agendas (literature, photography,
+cinema, theatre); note the empirical finding that
+\texttt{gastronomía}/institutional content over-represents relative to
+the curated thematic priorities, and how the dashboard's category
+menu and curation approach responded to that.}
+
+\section{Geographic Distribution}
+\todo{Coverage: total events vs.\ events with a resolvable
+\texttt{Location} node vs.\ events with real lat/lon (report the
+actual, current, post-fix percentage — do not reuse the pre-fix
+85.5\% figure without re-checking after the geocoding-confidence
+exclusion fix described in \S\ref{sec:limitations}).}
+
+\section{Data Quality Findings}
+\todo{Treat this as a genuine result, not just a limitations
+footnote: quantify how often the geocoding fallback produced
+false-precision coordinates before the fix, how often LLM date
+extraction required manual correction, what fraction of institutional-
+category events were miscategorized on manual sample review (cf.\ the
+20-event institutional sample: $\sim$35\% either miscategorized or
+pipeline-gate leaks). This kind of transparent error analysis is
+strong thesis material.}
+
+
+% ============================================================================
+\chapter{Discussion}
+\label{ch:discussion}
+% ============================================================================
+
+\section{Interpreting Network Structure}
+\todo{What does the bridge-actor pattern (if it holds) say
+sociologically about how this diaspora organizes culturally —
+mediated through a small number of institutional hubs rather than a
+dense peer network?}
+
+\section{From a Diaspora Network to a Cultural-Relevance Network}
+\label{sec:scope-evolution}
+
+The project's scope changed twice. It began as a network of Colombian
+diaspora accounts, seeded from a single institutional account, the
+Colombian consulate in Paris. As the network grew through automatic
+relationship discovery (\texttt{RELATED\_TO}), it broadened to Latin
+American diaspora accounts more generally. Both of these were still
+nationality-based criteria: an account or event qualified because of
+\emph{who} was behind it.
+
+The second, more consequential change replaced that criterion with a
+purely cultural one: an account or event qualifies if it is culturally
+relevant, with explicit priority given to photography, cinema,
+literature, theatre, and locally-organized community events, regardless
+of the nationality or cultural origin of the organizers behind it. This
+is a stricter methodological change than it might first appear, because
+it also required removing a nationality bonus that had previously been
+present in the discovery website's relevance-ranking formula
+(\S\ref{sec:ranking}) — an explicit multiplicative bonus applied to
+events tagged with a Colombian cultural identity. Retaining that bonus
+after the scope change would have produced a ranking signal that was
+formally neutral (it ranks \emph{cultural} events) while materially
+still favoring one nationality over every other one present in the same
+graph; removing it was necessary for the ranking formula to be honest
+about what it actually measures.
+
+\todo{Once network composition is re-pulled for Chapter~\ref{ch:results},
+quantify here: what share of curated accounts/events are Colombian,
+other Latin American, French, or other, before vs.\ after the scope
+change; and revisit whether the four thematic pillars (literature,
+photography, cinema, theatre) still describe the bulk of curated content
+or whether the fifth, community-events category has grown large enough
+to warrant its own treatment in the results and in the discovery
+website's category menu.}
+
+What this change gained, beyond ranking-formula honesty, is a criterion
+that is easier to defend and to operationalize consistently:
+\emph{is this cultural, and does it fall within one of these priority
+domains} is a judgment that can be applied uniformly to any account the
+discovery process surfaces. \emph{Is this part of the Latin American
+diaspora}, by contrast, required an ad hoc call for every borderline
+case — a French venue that regularly hosts Colombian artists, a Latin
+American cultural institute whose visitors are mostly French — that the
+pipeline had no principled way to resolve consistently. What it cost is
+some of the project's original sociological specificity: the initial
+research question was, in part, about how \emph{one} diaspora organizes
+culturally in a host country, and that question is necessarily diluted
+once the object of study is cultural activity in general. This thesis
+handles that trade-off by keeping the diaspora-specific reading as one
+lens applied to a subset of the network (wherever \texttt{culturalIdentity}
+data supports it), rather than as the network's defining boundary.
+
+\section{On Data Quality and the Limits of Automation}
+\todo{Tie together \S\ref{sec:methodology-curation} and
+\S\ref{sec:limitations}: this project's most consistent lesson is that
+fully automated signals (account-relevance scoring, geocoding
+fallbacks, LLM date extraction) degrade silently and look confident
+even when wrong, while human curation — despite being unscalable — was
+the more reliable trust signal throughout. Discuss what this implies
+for similar future projects.}
+
+\section{Practical Implications: The Website as Intervention}
+\todo{Beyond analysis, the discovery website is itself a
+sociological intervention — it could actually change how the diaspora
+finds/attends events. Discuss this as a design-research contribution,
+distinct from the analytical contribution.}
+
+\section{Methodological Reflections}
+\todo{What would be done differently starting over — e.g.\
+building the geocoding-confidence gate and human curation trust signal
+in from day one rather than arriving at them through iteration.}
+
+
+% ============================================================================
+\chapter{Conclusion}
+\label{ch:conclusion}
+% ============================================================================
+
+\section{Summary of Contributions}
+\todo{Restate the three contributions from \S1.4 concretely
+against what was actually delivered.}
+
+\section{Answering the Research Question}
+\todo{Direct answer, one paragraph.}
+
+\section{Limitations}
+\todo{Consolidate — do not just repeat \S\ref{sec:limitations}
+verbatim; frame as boundaries on how far the findings generalize.}
+
+\section{Future Work}
+\todo{From the project's own V2 planning notes: a new NLP
+account classifier with explicit geography/cultural-relevance
+dimensions and anti-embeddings to penalize commercial/political
+content; expanded seed set from Latin American consulates in Paris;
+revised harvest cycle prioritizing cheap profile scraping before
+expensive post scraping; remaining dashboard work (clickable
+arrondissement/commune map, dedicated Explorer/Map/Organizer-profile
+pages, per-event bilingual content generated at extraction time,
+generic category image set).}
+
+\section{Closing Reflection}
+\todo{Personal note tying back to \S1.3's fourth objective —
+whether/how the project succeeded by its own most human metric
+(meeting someone through it), separate from the technical metrics.}
+
+
+% ============================================================================
+\appendix
+% ============================================================================
+
+\chapter{Graph Schema Reference}
+\label{app:schema}
+\todo{Full node/relationship table, adapted from
+\texttt{docs/data\_flow.md} and \texttt{CLAUDE.md}.}
+
+\chapter{Selected Decision Log Entries}
+\todo{Reproduce/summarize the most thesis-relevant entries
+from \texttt{docs/decisions.md} (curation pivot, GDS$\to$igraph pivot,
+event-pipeline rewrite \& 100-post eval, geocoding confidence gate).}
+
+\chapter{Discovery Website — Screenshots}
+\todo{Home screen, filter bar, event detail panel — capture
+once the site is stable post-fixes (see current punch list: upcoming-
+filter bug, geocoding exclusion, account-scope cleanup).}
+
+\chapter{Repository Structure}
+\todo{Reproduce the script naming convention and phase
+breakdown from \texttt{CLAUDE.md}'s Commands section as a reference
+table.}
+
+% ============================================================================
+% \bibliographystyle{apalike}   % or whatever citation style your program requires
+% \bibliography{references}
+% ============================================================================
+
+\end{document}
