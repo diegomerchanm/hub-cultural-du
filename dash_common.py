@@ -247,7 +247,7 @@ def fetch_data():
                        e.eventDate AS eventDate, e.locationName AS locationName,
                        e.cityName AS cityName, e.exactAddress AS exactAddress,
                        e.hotnessScore AS hotnessScore, e.description AS description,
-                       e.isFree AS isFree, e.sourcePostUrl AS sourcePostUrl,
+                       e.priceRange AS priceRange, e.sourcePostUrl AS sourcePostUrl,
                        e.sourceAuthor AS sourceAuthor
                 ORDER BY e.eventDate ASC, e.hotnessScore DESC
                 LIMIT 100

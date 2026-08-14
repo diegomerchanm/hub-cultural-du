@@ -542,5 +542,285 @@ metodología sistemática en el mémoire que una regla declarativa.
 
 ---
 
-*Última actualización: 2026-07-15*
-*Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos.*
+## DD-033 — Failover automático Groq↔Cerebras con tope de espera por rate-limit
+
+**Fecha:** 2026-08-11
+**Nota:** el código de `4_enrich_events_extract.py` referencia este número
+("ver DD-033 update 2/3/7") desde antes de esta entrada — el diseño del
+failover ya existía en el pipeline, pero nunca había quedado documentado
+acá. Esta entrada describe el sistema tal como está hoy, más el cambio
+puntual de hoy (tope de espera).
+**Decisión:** `llm_enrich_event()` intenta primero el proveedor de
+`LLM_PROVIDER` y, si agota sus reintentos internos sin devolver
+`is_public_invitation`/`is_upcoming` utilizables, marca ese proveedor como
+agotado (`_provider_failed_this_run`) y no vuelve a intentarlo por el resto
+de la corrida — usa el otro proveedor cloud (Groq↔Cerebras) directamente.
+Cambio de hoy: nueva constante `MAX_RATE_LIMIT_WAIT_S = 300`. Si un 429
+pide esperar (`Retry-After`) más de 5 minutos, ya no se espera ni se
+reintenta dentro de ese proveedor — se corta el intento ahí mismo y se
+cambia de proveedor de inmediato.
+**Residual que motivó el cambio de hoy:** en corridas de validación
+(`eval_100_v2.csv`, `eval_101_200.csv`) se observaron esperas de ~513s en
+un 429 de Groq. Como `_provider_failed_this_run` es una variable de
+proceso (no persiste entre invocaciones), cada corrida nueva del script
+ese mismo día repetía el ciclo completo de 3 intentos esperando el
+`Retry-After` entero antes de recién ahí cambiar a Cerebras — hasta ~25
+min perdidos por corrida si el tope diario de Groq (no el de por-minuto)
+ya estaba agotado.
+**Validación real del failover (no solo del caso 429):** en la corrida de
+`eval_251_300.csv` (2026-08-11), Groq falló por errores de conectividad
+real (`ReadTimeout`, `ConnectionError` — DNS/red, no 429) en vez de
+rate-limit. El mecanismo existente ya cubría ese caso correctamente:
+3 intentos cortos (~1.5s entre sí, sin el tope de 5 min porque no era un
+429 con `Retry-After` largo) y cambio a Cerebras en menos de 90s. Sirve
+como confirmación de que el diseño ya era robusto a caídas de red, no
+solo a cupos agotados.
+**Alternativa considerada:** cachear el estado de "proveedor agotado" en
+disco entre invocaciones (ej. `.llm_provider_state.json`) para que
+corridas posteriores el mismo día no vuelvan a intentar el proveedor caído
+desde cero.
+**Por qué se descartó (por ahora):** añade un archivo de estado más que
+mantener y sincronizar; el tope de espera ya resuelve el costo más alto
+(esperas largas) sin ese overhead. Revisar si correr el script muchas
+veces por día se vuelve un patrón habitual.
+
+---
+
+## DD-034 — Evitar falsa precisión de fecha en `extract_dates()`
+
+**Fecha:** 2026-08-11
+**Decisión:** en `extract_dates()`, el resultado del fallback
+`dateparser.search_dates()` (búsqueda de fecha sobre el texto completo,
+no solo sobre los fragmentos de `_DATE_RE`) solo se acepta si el
+fragmento de texto que matcheó trae un dígito de día o un nombre de día
+de la semana explícito (nueva función `_has_day_signal()`). Si el texto
+solo menciona un mes o año suelto (p. ej. "este marzo"), se descarta el
+resultado — el evento queda sin fecha en vez de con una fecha inventada.
+**Razón:** `dateparser` corre con `PREFER_DAY_OF_MONTH: "first"`, que
+rellena un día 1 arbitrario cuando el texto no especifica día. La ruta
+regex-primero (`_DATE_RE`) ya exige dígito o nombre de día en sus 4
+patrones, así que nunca fabricaba nada — el problema estaba solo en el
+fallback de texto completo, que no tenía esa restricción.
+**Residual que motivó el cambio:** la comparación de la clasificación
+independiente de Claude contra el pipeline sobre el batch 2 (posts
+101-200, `eval_101_200_comparacion.csv`) encontró 4 de 13 desacuerdos
+donde el script le asignó un día calendario específico a un post que solo
+mencionaba el mes (p. ej. `tamalesenparis`: "este marzo" → `2026-03-01`).
+**Alternativa considerada:** guardar un campo de precisión de fecha
+(`date_precision`: día/mes/año) en vez de descartar la fecha imprecisa.
+**Por qué se descartó (por ahora):** requiere tocar el esquema de
+`:Event`, el dedup por ventana de fechas (`dates_close`), el clamping de
+1095 días y el dashboard — más trabajo del que se justifica ahora mismo.
+Se prioriza no contaminar el dato con falsa certeza sobre preservar una
+precisión aproximada. Revisar si en el futuro vale la pena recuperar esa
+señal ("se sabe el mes, no el día").
+
+---
+
+## DD-035 — Exposición en curso con fecha de cierre explícita cuenta como SI en el criterio de clasificación manual
+
+**Fecha:** 2026-08-12
+**Contexto:** el criterio de clasificación independiente de Claude (usado
+para medir la pipeline, no código de producción) exige como mínimo una
+señal de fecha relativa o explícita en el caption para marcar un post
+como evento real (ver criterio establecido en batches 1-2, sin número de
+decisión propio hasta ahora). Durante el batch 3 (posts 351-400)
+aparecieron 3 casos de exposiciones anunciadas con fórmula "jusqu'au
+[fecha]" (hasta el [fecha]) — el texto es mayormente un recap en pasado
+de la inauguración, pero incluye una fecha de cierre explícita y una
+invitación implícita a visitar mientras la exposición sigue abierta.
+**Decisión:** tratar "en curso hasta fecha X" como señal de fecha válida
+→ SI, aunque el resto del post esté narrado en pasado. Aplica solo a
+exposiciones/muestras con fecha de cierre explícita, no a posts que solo
+mencionan que algo "sigue disponible" sin fecha.
+**Razón:** la fecha de cierre es información accionable para un lector
+que quiera asistir — a diferencia de un recap puro donde el evento ya
+terminó sin ninguna ventana de acción futura. Es coherente con el
+espíritu del criterio (¿puede alguien que lea este post todavía ir?) más
+que con su letra literal (que fue pensada para eventos de un solo día).
+**Tensión sin resolver:** el pipeline (`4_enrich_events_extract.py`)
+rechazó los 3 casos — no está claro si el gate de Capa 3 debería
+aprender a distinguir "exposición en curso" de "recap puro", o si esta es
+una categoría que Claude está sobre-incluyendo respecto al criterio
+original. Ver RUN-018 para el detalle de los 3 casos. Pendiente de
+revisión cuando se llegue a los 500 posts y se analice el patrón agregado
+de desacuerdos antes de decidir si ajustar el prompt/gate de Capa 3 o
+revertir el criterio de Claude a "solo fecha puntual, no rango en curso".
+**Alternativa considerada:** excluir estos casos del criterio SI (quedan
+como NO por defecto, igual que el script).
+**Por qué no se descartó de una vez:** cambiar el criterio retroactivo
+sobre datos ya etiquetados (296 posts previos) sin haber visto si el
+patrón es frecuente o marginal en el resto de la muestra sería prematuro
+— se documenta la tensión y se decide con los 500 posts completos.
+
+---
+
+## DD-036 — Retuning de la pipeline a partir del análisis agregado de 495 posts (Capa 1 + gate de fecha + prompt)
+
+**Fecha:** 2026-08-12
+**Contexto:** con los 495 posts de `claude_labels.json` completos (batches 1-3, ver RUN-015 a RUN-019), se hizo un análisis agregado comparando `script_decision` vs `claude_decision` sobre las 5 columnas de diagnóstico (`layer1`, `layer2`, `is_public_invitation`, `is_upcoming`, `raw_date`). Precision 0.824, recall 0.858 sobre el total. Tres hallazgos concretos motivaron cambios de código; uno se descartó explícitamente.
+
+**Cambio 1 — 18 frases de referencia en registro institucional/formal agregadas a `EVENT_REFERENCES`.**
+Las 100 frases originales están casi todas en tono de invitación coloquial-comunitaria ("Te invitamos...", "Únete a nosotros..."). Los 3 falsos negativos de Capa 1 en la muestra (`iheal_creda` 0.336, `culturespaces` 0.367, `institutocervantesparis` 0.445 — a 0.005 del umbral) comparten registro sobrio/institucional (mesa redonda, coloquio, comunicado de prensa) ausente del espacio de referencia. Se agregó una sección nueva ES/FR/EN en ese registro. El cache de embeddings (`ref_embeddings.npz`) se invalida solo por hash de contenido — no requiere borrado manual.
+**Impacto esperado:** bajo en volumen (recupera como máximo 3-8 posts de 495 — ver DD-035bis abajo sobre por qué no se tocó el umbral 0.45), pero dirigido: esos posts pertenecen justo al tipo de cuenta institucional que el proyecto prioriza (`manualDataCuratedAt`).
+
+**Cambio 2 — gate determinístico `has_text_date` en `should_create`.**
+14 de 22 falsos positivos (201-500) compartían un patrón: Capa 3 acepta el post como evento sin que el caption contenga ninguna fecha ancorable en el texto — el LLM razona `clean_date` "por contexto" en vez de exigir evidencia textual (listados de temporada con Pass 104infini, apertura de venta sin fecha del evento, rutas de food truck). Se agregó `has_text_date` — resultado de `extract_dates()` (ya blindado contra falsa precisión por DD-034) capturado **antes** de que Capa 3 pueda sobreescribir `event_date` con su propio `clean_date`. `should_create` ahora exige `is_event AND (not llm_ran_ok OR (is_public_invitation AND is_upcoming)) AND has_text_date`.
+**Validación (sin re-correr el script):** se extrajeron las funciones `extract_dates`/`_has_day_signal`/`_DATE_RE` de forma aislada (sin cargar sentence-transformers/torch, que no están en este sandbox) y se corrieron sobre los 27 falsos positivos reales de la muestra completa (1-500, no solo 201-500). El nuevo gate habría bloqueado **15 de 27 (55.6%)**. Los 12 restantes se dividen en: casos de admisión/inscripción con fecha real en el texto (resueltos por el cambio 3, no por este gate) y un hallazgo lateral no planeado — ver nota de dígitos estilizados abajo.
+**Decisión explícita tomada con Diego:** no se agregó excepción para eventos del mismo día ("hoy a las 16h") — el script corre como máximo cada 2 días, así que para cuando se procesara, un evento de "hoy" ya sería irrelevante. Esto deja sin resolver 4 de los 17 falsos negativos de la muestra (`ruedadecumbia.paris`, `theatredelaville_paris`, `cinema.lemelies.montreuil`, `alianzafrancesamanizalesoficia`) — aceptado a propósito, no es un olvido.
+
+**Cambio 3 — instrucción negativa en el prompt de Capa 3 sobre admisión/inscripción.**
+5 de los 22 falsos positivos eran cursos de idiomas con estructura fecha+hora+lugar idéntica a un evento real, concentrados en el clúster nuevo de sedes de Alianza Francesa colombianas (Pereira, Cali, Manizales) que entró al corpus en el batch 401-500. Se agregó una línea explícita al prompt: inscripciones a cursos, inicio de clases, matrículas, tests de nivel y convocatorias de candidaturas NO cuentan como `is_public_invitation`. Este cambio no se pudo validar sin correr el LLM real (no hay acceso a Groq/Cerebras desde este sandbox) — queda pendiente de confirmar en la próxima corrida real.
+
+**Descartado — recall de Capa 1 vía bajar el umbral 0.45.**
+Análisis de distribución completo (495/495 posts con `layer1`, ver gráfico de la sesión): solo 8/210 eventos reales (3.8%) caen bajo 0.45, y de los 105 posts que Capa 1 descarta, 97 (92.4%) son correctamente no-eventos. Bajar el umbral a 0.35 solo recuperaría 7 eventos reales adicionales a cambio de meter 47 no-eventos más a Capa 2/3 (razón señal/ruido 1:6.7). Se descartó por bajo retorno frente al riesgo de agravar el problema de precisión ya identificado como dominante.
+
+**Hallazgo lateral no planeado — dígitos Unicode estilizados rompen la extracción de fecha.**
+Al validar el gate `has_text_date` sobre `104paris` (post `3925185624513914500`, "15 spectacles de danse..."), se descubrió que el caption usa dígitos Unicode matemáticos en negrita (`𝟏𝟓`, `𝟏𝟎𝟒`, U+1D7EC-1D7F5) en vez de dígitos ASCII — Python los reconoce como `\d` (categoría Unicode Nd), así que `_DATE_RE`/`dateparser` los procesan igual que texto normal, lo que puede producir matches espurios ("15" de "15 spectacles" leído como posible día) en vez de fallar limpiamente. No se corrigió en esta sesión — es un problema distinto al gate de fecha (afecta la *precisión* de lo que `extract_dates()` encuentra, no si encuentra algo) y su alcance real en el corpus completo no se midió. Queda como candidato a una futura DD si se confirma que es frecuente (normalizar vía `unicodedata.normalize` antes de aplicar los regex sería el fix natural).
+
+**Estado:** cambios 1, 2 y 3 escritos y compilados (`py_compile` OK) en `4_enrich_events_extract.py`, no comiteados a git todavía (patrón del proyecto: commit solo cuando Diego lo pide explícitamente). Pendiente de una corrida real (`--dry-run`) sobre posts nuevos para confirmar el impacto fuera de la simulación offline.
+
+---
+
+## DD-036 (continuación) — has_text_date movido antes de la llamada a Capa 3, y por qué NO se separó Capa 3 en dos llamadas
+
+**Fecha:** 2026-08-12
+**Contexto:** Diego propuso dividir Capa 3 en dos llamadas al LLM — una liviana de solo gate (`is_public_invitation`/`is_upcoming`) y otra de extracción completa (descripción, título, precio, etc.) solo para los que pasan el gate — con la idea de ahorrar tokens filtrando fuerte primero.
+**Análisis:** sobre los 425 candidatos que llegan a Capa 3 en la muestra de 495 posts, 204 (48%) terminan siendo `EVENTO` real — es decir, casi la mitad de las veces sí hace falta la extracción completa. Separar en dos llamadas implica pagar el overhead del prompt+caption dos veces para ese 48%, mientras que el ahorro real (no pedir campos de extracción a los rechazados) es más chico que ese overhead duplicado. Con una estimación de tokens (~650 input + ~150 output por llamada actual), el punto de equilibrio para que separar valga la pena es que menos de ~25% de los candidatos terminen siendo eventos reales — muy por debajo del 48% real. **Se descartó la idea de separar Capa 3 en dos llamadas.**
+**Alternativa implementada — mover el gate `has_text_date` (ya agregado en DD-036 original) de *después* de la llamada LLM a *antes*:** el gate es determinístico e independiente del LLM, así que si ya se sabe que `should_create` va a ser `False` por falta de fecha en el texto, no tiene sentido gastar la llamada. Se cambió `if is_event:` por `if is_event and has_text_date:` como condición para llamar a `llm_enrich_event()`. Verificado sobre los 425 candidatos reales: **173 (40.7%) no tienen fecha en el texto y ahora no llaman al LLM en absoluto**, sin cambiar ninguna decisión final (esos 173 ya iban a terminar en "no evento" de todas formas, por el propio gate `has_text_date` en `should_create`).
+**Cambios de código:** nuevo contador `skipped_no_text_date`, nueva etiqueta de diagnóstico `"no evento (sin fecha en texto, LLM omitido)"` (distinta de `"no evento (rechazado por LLM)"`, para no confundir "el LLM dijo que no" con "nunca se le preguntó"), y nueva línea en el resumen final (`💰 Llamadas a Capa 3`) que reporta cuántas llamadas reales se hicieron vs. cuántas se habrían hecho sin el gate previo.
+**Estado:** compilado y verificado (`py_compile` OK). Pendiente de confirmar el ahorro real de tokens/costo en una corrida en vivo (esta sesión no tiene acceso a Groq/Cerebras ni a Neo4j para correrlo).
+
+---
+
+## DD-037 — Dos bugs de extracción de fecha confirmados en la corrida real de 150 posts (RUN-020)
+
+**Fecha:** 2026-08-12
+**Contexto:** primera corrida `--dry-run` real (no simulación offline) de los cambios de DD-036, sobre 150 posts de las 43 cuentas curadas de la última tanda scrapeada. Comparación ciega Claude-vs-script: 96.7% de acuerdo (145/150), precisión 97.3% (36/37 sobre los EVENTO aceptados), recall ~90% (36/40 sobre los eventos reales según mi clasificación). Mejor que cualquier batch anterior (83-92%) — la validación en vivo confirma que DD-036 funcionó. De los 5 desacuerdos reales, 4 tienen causa de código identificada con precisión de línea.
+
+**Bug 1 (falso positivo) — notación de temporada "26/27" leída como fecha DD/MM.**
+`_DATE_RE` (línea 970) matchea `\d{1,2}[/\-]\d{1,2}` sin distinguir "temporada 26/27" de una fecha real "26/07". Post de ejemplo: `@theatrechatelet`, caption "La saison 26/27 est là ✨... Lien en bio", sin ninguna fecha real en el texto. El regex capturó `26/27`, `dateparser` lo resolvió a `2027-04-26`, y el post pasó el gate `has_text_date` como si tuviera fecha real → se creó un :Event fantasma (`cat=nulo`, sin descripción concreta). Patrón esperable en cualquier cuenta de teatro/ópera que use notación de temporada.
+
+**Bug 2 (falsos negativos, 3 casos) — `extract_dates()` trunca a los primeros 600 caracteres, en primario (línea 1020, `text[:600]`) y en el fallback (línea 1035, mismo límite).** En captions largos (flyers multi-línea con line-up, horarios y hashtags — comunes en este corpus) la fecha real cae fuera de esa ventana y el post se descarta como "sin fecha en texto" sin llegar siquiera a Capa 3:
+- `@pointephemere` — cartelera de conciertos de verano con fechas explícitas (30.06, 01.07, 07.07…) *dentro* de los primeros 600 caracteres, pero en formato `DD.MM` con punto — `_DATE_RE` solo reconoce `/` o `-` como separador, no `.`. Bug independiente del truncamiento, mismo post.
+- `@academiamaritzaarizala` — taller de canto con fecha "23 juillet" explícita, pero cae en la posición 743 del caption, fuera de la ventana de 600 caracteres.
+- `@saveurs_mexique` — "hasta este viernes 5 de junio" queda cortado literalmente a la mitad por el límite de 600 (el string se corta en "...5 de j", perdiendo "unio"), caso límite que ilustra el problema del corte duro en vez de un corte por límite de palabra/oración.
+
+**Caso adicional sin causa de código clara — posible inconsistencia del LLM.** `@mestizos.folklorecolombien` publicó dos posts casi idénticos sobre el mismo evento («La Colombie, un pays qui danse», 6 de marzo, con fecha/precio/lugar explícitos en ambos). Uno fue aceptado como EVENTO; el otro, con estructura de invitación igual de clara, fue rechazado por Capa 3. No se pudo diagnosticar con evidencia de código — variabilidad del LLM entre llamadas similares, no un patrón sistemático confirmado en este batch. Se deja como observación a vigilar en próximas corridas, sin acción de código por ahora.
+
+**Fix implementado (2026-08-12, mismo día):**
+1. Ventana de `extract_dates()` ampliada de 600 a 2000 caracteres, tanto en el loop principal (`_DATE_RE.finditer`) como en el fallback (`search_dates`) — antes cada uno truncaba el texto por separado con el mismo límite de 600.
+2. `.` agregado como separador válido en `_DATE_RE` (`\d{1,2}[/\-.]\d{1,2}(?:[/\-.]\d{2,4})?`). Para evitar que dateparser confunda un snippet con punto (`"01.07"`) con una hora (`01:07`) en vez de una fecha, el snippet se normaliza reemplazando `.` por `/` antes de pasarlo a `dateparser.parse()` — verificado empíricamente que sin esta normalización dateparser sí devuelve una hora en vez de una fecha para algunos casos.
+3. Nuevo `_NUMERIC_DM_RE` valida que, para snippets puramente numéricos (`D[/-.]M(?:[/-.]Y)?`), el componente de "mes" sea ≤12 antes de dejarlo pasar a dateparser. Si es >12 (como en "26/27", donde dateparser trataba "27" como año de 2 dígitos y rellenaba el mes con el mes del post), el match se descarta. **Este guardrail tuvo que aplicarse dos veces** — una vez en el loop principal sobre los matches de `_DATE_RE`, y otra vez sobre el resultado de `search_dates()` en el fallback, porque `search_dates()` encuentra fechas por su cuenta (no pasa por `_DATE_RE`) y sin el segundo guardrail seguía coloándose la misma fecha inventada por esa vía — encontrado al validar el fix contra el caso real de `@theatrechatelet` (primer intento del fix falló ahí, corregido antes de dar el fix por bueno).
+
+**Validación:** 7 casos de prueba aislados (los 4 posts reales que fallaron en RUN-020 + 3 casos que ya funcionaban bien antes, para descartar regresión) — los 7 pasan. `py_compile` OK.
+
+**Estado:** implementado, verificado, no comiteado a git todavía (patrón del proyecto). Queda pendiente confirmar el impacto en una corrida de producción real.
+
+---
+
+## DD-038 — createdAt de :Event guardado como string en vez de datetime nativo, y --diag-csv ignorado en corridas reales
+
+**Fecha:** 2026-08-12
+**Contexto:** primera corrida de producción real (sin `--dry-run`) sobre las 43 cuentas curadas — 26 eventos creados, 4 enriquecidos, corrida terminó limpia (100%, resumen final impreso). Al intentar auditarla con una query Cypher (`WHERE e.createdAt >= datetime() - duration('PT2H')`), Neo4j Browser devolvió "No changes, no records" pese a que los eventos sí existían.
+
+**Bug 1 — `e.createdAt` se guardaba como string, no como `datetime` nativo.** El candidato armaba `"createdAt": datetime.now(timezone.utc).isoformat()` (Python, string ISO) y `upsert_event()` lo escribía tal cual con `e.createdAt = $createdAt` (línea 1185). Cypher no coacciona automáticamente string↔datetime en comparaciones: `WHERE e.createdAt >= datetime() - duration(...)` se evalúa `null` fila por fila, sin error, sin resultados — la corrida quedó sin ningún rastro auditable pese a haber funcionado bien. Contraste directo con `2_build_graph.py`, que en los 12 nodos donde setea `firstSeenAt` usa siempre `datetime()` nativo de Cypher (server-side), nunca un string generado en Python — `4_enrich_events_extract.py` era la única excepción a ese patrón en todo el proyecto.
+**Fix:** `e.createdAt = datetime()` (nativo, server-side), igual que `firstSeenAt`. Se eliminó el campo `createdAt` del diccionario `candidate` en Python (ya no se usa en ningún otro lado — no alimentaba el CSV de diagnóstico ni la caché de dedup, solo el write a Neo4j) y de la lista de parámetros de `upsert_event`.
+**Nota para los 30 eventos ya creados con el bug:** quedaron con `createdAt` como string — para auditarlos, usar `toString(e.createdAt) STARTS WITH "<fecha>"` en vez de comparación de `datetime`, que funciona sea cual sea el tipo almacenado (string u objeto temporal). De acá en adelante todo evento nuevo va a tener `createdAt` nativo consistente.
+
+**Bug 2 — `--diag-csv` requería `--dry-run` para exportar, sin ningún aviso si se pasaba sin él.** Línea 1716 (antes): `if dry_run and diag_csv:`. En la corrida de producción real se pasó `--diag-csv data_processed/eval_produccion_ultima_tanda.csv` esperando el mismo comparativo que se hizo con el dry-run de 150 posts — el archivo nunca se creó, sin ningún mensaje de error o advertencia que lo señalara. `diag_all`/`diag_cands` (las listas que alimentan el CSV) se llenan de forma incondicional en el loop principal, sin ningún gate de `dry_run` — no había ninguna razón real para que el export dependiera de ese flag.
+**Fix:** `if diag_csv:` — exporta siempre que se pase el flag, sea dry-run o corrida real. Sin costo ni riesgo adicional (los datos ya estaban disponibles en memoria en ambos modos).
+
+**Por qué importa:** sin este fix, cualquier corrida de producción futura queda sin comparativo posible después del hecho — ni CSV, ni consulta Cypher confiable por fecha. Ambos bugs comparten la misma raíz: falta de paridad entre el modo dry-run (bien instrumentado, pensado para auditoría) y el modo real (pensado solo para escribir, sin pensar en poder revisar después). Este fix cierra esa brecha para que cualquier corrida — real o de prueba — quede siempre auditable.
+
+**Estado:** implementado, compilado (`py_compile` OK), no comiteado a git todavía (patrón del proyecto). Sin validar todavía en una corrida real posterior al fix — la próxima corrida de producción debería confirmar que el CSV se exporta y que `e.createdAt` queda como tipo `datetime` nativo (verificable con `RETURN apoc.meta.type(e.createdAt)` si hay APOC, o simplemente confirmando que `e.createdAt >= datetime() - duration('PT1H')` sí devuelve filas).
+
+---
+
+## DD-039 — Dos bugs más encontrados al auditar los 90 eventos escritos en producción, con fix aplicado
+
+**Fecha:** 2026-08-12
+**Contexto:** con el fix de DD-038 (`toString(e.createdAt) STARTS WITH ...`) ya se pudo traer los eventos escritos en las corridas de producción de hoy (90 en total, sumando las 3 corridas — la de 50 posts, la que cortó con `SessionExpired` en el post 232, y la final). Revisión manual encontró dos patrones de falso positivo, distintos entre sí y de todo lo visto en DD-037. Se confirmó primero que `4_enrich_events_resolve.py` (Fase 4-C, deduplicación) no resuelve ninguno de los dos — solo fusiona duplicados por ubicación+fecha+similitud de embedding, sin tocar `category`/`type` ni revalidar `eventDate`.
+
+**Bug A — `should_create` no filtraba `category="nulo"`.** 3 eventos reales (`evt_50f63ba74790` deporte/high-diving, `evt_0f4298aa9df7` reapertura de café, `evt_5646210a4124` feria comercial) fueron tipificados por la propia Capa 3 con una etiqueta de `_LABEL_META` que mapea a `category="nulo"` — es decir, el LLM dijo explícitamente "esto no es un evento cultural real" — y aun así se crearon como `:Event`, porque `should_create` (línea ~1551) nunca miraba `category`, solo `is_public_invitation`/`is_upcoming`/`has_text_date`. `penalty` sí caía a 0.0 vía `_PEN_MAP` (por eso los 3 tenían `eventScore=0.0` — la señal estaba ahí, solo que nada la usaba para bloquear la creación).
+**Fix:** se agregó `and category not in NULL_CATS` a `should_create`. Nueva etiqueta de diagnóstico `"no evento (categoría nula, DD-039)"`, distinta de `"rechazado por LLM"` (que significa que las banderas de invitación vinieron en `False` — acá pueden venir en `True` y aun así bloquearse por categoría). `category="sin_clasificar"` (el LLM no tipificó, distinto de tipificar explícitamente como no-cultural) NO bloquea — verificado en pruebas aisladas (6/6 casos).
+
+**Bug B — el clamp de fecha (`EVENT_DATE_CLAMP_DAYS=1095`) no atajó 3 fechas absurdamente lejanas.** `evt_84ac6431ef67` (Latino Graff) quedó con `eventDate=2036-08-05` — el texto dice "10 años de Latino Graff" (aniversario, no fecha). `evt_f7218e3f0ed0` (Institut du monde arabe) quedó con `2052-08-04` — el texto dice "menores de 26 años" (edad). `evt_2212c8cb309b` (concierto flamenco) quedó con `2090-07-01` — el texto dice "dura 90 minutos" (duración). El resumen de consola de la corrida reportó `Fechas clampeadas: 0`, cuando debería haber sido ≥3. Causa confirmada en código (línea 1513, antes del fix): el `try/except (ValueError, TypeError): pass` envolvía TANTO el parseo de `ed` (la fecha del LLM) COMO el de `pd` (el timestamp del post) — si cualquiera de los dos fallaba al parsear, la excepción abortaba todo el bloque sin aplicar el clamp, dejando pasar la fecha del LLM sin ninguna validación. No se pudo confirmar con certeza total cuál de los dos (`ed` o `pd`) fue el que falló en estos 3 casos específicos (sin acceso al `post["timestamp"]` original de cada uno), pero el fix cierra el hueco para ambos casos por igual.
+**Fix:** se separó el try/except en dos partes independientes. Si `ed` (la fecha del LLM) no parsea como ISO válido en absoluto, se descarta directo (`event_date = None`, cuenta como clampeado) — no hay ninguna razón para confiar en algo que ni siquiera es una fecha. Si `pd` (el timestamp del post) falla al parsear, se usa `STUDY_CUTOFF` como ancla de respaldo en vez de abortar todo el chequeo — así el clamp sigue aplicando aunque falte el ancla real. Verificado con 8 casos aislados (incluidos 2 eventos legítimos de 2027 con más de 1095 días de anticipación, para confirmar que el fix no los clampea de más).
+
+**Estado:** ambos fixes implementados, compilados (`py_compile` OK), verificados en aislamiento (6/6 y 8/8 casos), no comiteados a git todavía. Los 6 eventos ya escritos en Neo4j con estos bugs (3 de cada patrón) quedan pendientes de borrado manual — ver query en el mensaje a Diego. Sin validar todavía en una corrida real posterior al fix.
+
+---
+
+## DD-040 — Rediseño de 4_enrich_events_resolve.py: embeddings globales en vez de agrupar por locationName
+
+**Fecha:** 2026-08-12 (continúa al 2026-08-13)
+**Contexto:** al revisar los 90 eventos de la corrida de producción, se identificaron dos pares de duplicados obvios que el resolver (sin correr todavía esta sesión) no iba a poder fusionar: "Los Tucanes de Tijuana en concierto en París" (`pac_colibri`, 2026-07-07) con `locationName` escrito distinto entre los dos posts ("La Palmeraie, 20 Rue..." vs "20 Rue..."), y "L'Astrologue ou les Faux Présages" (`sorbonne_lettres_culture`, 25-28 junio) donde uno de los dos posts no tiene `locationName` en absoluto.
+**Diagnóstico:** el algoritmo anterior agrupaba por `locationName` normalizado (lowercase + unidecode) y solo comparaba pares DENTRO del mismo grupo — dos eventos con el mismo venue escrito distinto caen en grupos de string distintos y nunca se comparan; un evento sin `locationName` cae en el grupo `""` y nunca se compara contra uno que sí lo tiene. La fecha y la similitud de embedding nunca tenían oportunidad de opinar en estos casos, porque el filtro de ubicación los descartaba antes.
+**Decisión (debatida con Diego):** invertir el orden — comparar TODO par de eventos por similitud de embedding primero (matriz de coseno vectorizada con numpy sobre los ~700 eventos del grafo, ~250k pares, trivial en tiempo), y usar fecha como confirmación obligatoria en vez de filtro primario. Se descartó tratar `locationName` como embedding (Diego señaló correctamente que un embedding de texto captura similitud léxica, no lógica geográfica real — "5 Rue de Rivoli" y "7 Rue de Rivoli" no necesariamente embeben cerca, mientras que dos teatros distintos que comparten palabras como "Théâtre de/du" sí podrían mostrar similitud alta sin ser el mismo lugar). `locationName` pasa a ser dato informativo en los logs, no un filtro.
+**Nuevo criterio:**
+  - Si ambas fechas existen: deben estar dentro de `±date_window` días (3 por defecto, sin excepción, igual que antes) Y similitud ≥ `threshold` (0.75, sin cambios).
+  - Si falta alguna fecha: similitud ≥ `threshold_no_date` (nuevo, default 0.85) — más exigente, compensa la falta de corroboración por fecha.
+  - Se auditó la riqueza real de `locationName` en los 90 eventos de la corrida: ~20% con dirección completa, ~55% solo nombre de venue sin dirección, ~10% solo ciudad/país (un caso literalmente `locationName="Europa"`), ~15% vacío — confirma que el string de ubicación es demasiado inconsistente para usarlo como filtro confiable.
+**Nueva instrumentación de calibración (dry-run):** además de la muestra existente de pares con fecha+ubicación ok pero similitud insuficiente, se agregó una segunda muestra simétrica — pares con similitud ≥ `threshold` pero fecha fuera de la ventana de `date_window` días. Motivo: varios eventos del corpus son rangos largos (MIRA Art Fair 12-15 nov, Gaîté l'été 30 jun-2 ago, ManiFeste Academy 12 días) — si dos posts sobre el mismo evento anclan a extremos distintos del rango, 3 días podría quedarse corto. En vez de ensanchar la ventana a ciegas, esta muestra da evidencia real para decidir si hace falta.
+**Cambios de código:** removidos `normalize_loc()`, `cosine_sim()` (reemplazado por matriz vectorizada), `LOCATION_GROUP_MAX_FOR_EVIDENCE`, y los imports que quedaron sin uso (`defaultdict`, `unidecode`, `scipy.spatial.distance.cosine`) — agregado `numpy`. `main()` expone el nuevo `--threshold-no-date`.
+**Validación:** 6 casos aislados con vectores sintéticos (similitud coseno controlada, sin depender de sentence-transformers en este sandbox) — replican exactamente los dos pares reales (Tucanes, Astrologue: ahora sí fusionan), un caso de fechas lejanas con alta similitud (correctamente rechazado pese al mismo teatro), y el umbral compensatorio sin fecha en ambas direcciones (rechaza similitud débil, acepta similitud casi idéntica). `py_compile` OK, sin referencias residuales a las funciones removidas.
+**Estado:** implementado, compilado, verificado en aislamiento con datos sintéticos — sin validar todavía contra los ~700 eventos reales en Neo4j (pendiente `--dry-run` de Diego). No comiteado a git todavía.
+
+---
+
+## DD-041 — Guardrail de conflicto geográfico + títulos en el log de fusión
+
+**Fecha:** 2026-08-13
+**Contexto:** primer `--dry-run` real del rediseño DD-040 sobre los 664 eventos del grafo. Confirmó lo esperado (el par de L'Astrologue, antes bloqueado por falta de `locationName` en un lado, se fusionó correctamente) pero también expuso un problema nuevo: sin el filtro de ubicación, aparecieron fusiones geográficamente contradictorias — `'París'/'Colombia'` (sim=0.770), `'Ecuador'/'Paris'` (sim=0.754), `'París'/'Madrid'` (sim=0.771), `'Portugal'/'@osullivans_bastille'` (sim=0.753). Un evento (`evt_10f3fc744b97`) absorbió 4 posts de fiestas/encuentros de la diáspora en ubicaciones distintas — posts genéricos de comunidad comparten vocabulario aunque describan eventos distintos en lugares distintos. El `threshold=0.75` estaba, en la práctica, calibrado contando con que el filtro de ubicación ya eliminaba estos casos.
+**Fix — `geo_conflict()`:** gazetteer chico (no exhaustivo, no es un geocoder real) de ~35 nombres de país (ES/FR/EN) y ~20 ciudades/barrios frecuentes en el corpus, mapeados a código de país, tomados directamente de los casos reales que aparecieron en la corrida. Extrae los países mencionados en cada `locationName` vía match de palabra completa (normalizando separadores no alfabéticos — `@`, `_`, etc. — a espacios, para que "bastille" se reconozca dentro de "@osullivans_bastille"). Bloquea la fusión solo si AMBOS lados mencionan un país reconocido Y no se solapan en absoluto — jerarquía país↔ciudad incluida (Francia+Paris no es conflicto), y evidencia insuficiente en cualquiera de los dos lados nunca bloquea (permisivo por diseño, para no reintroducir el problema original de exigir match exacto). Nueva muestra de calibración (`🌍 MUESTRA — bloqueados por conflicto geográfico`) para revisar si el gazetteer está bloqueando algo que en realidad sí era el mismo evento.
+**Fix secundario:** la línea `[dry-run] MERGE` no incluía títulos, solo ubicación y fecha — imposible auditar visualmente si una fusión tenía sentido sin ellos. Se agregaron (los datos ya estaban disponibles vía `load_all_events()`, que ya seleccionaba `e.title`).
+**Validación:** 14 casos aislados con el gazetteer real (sin depender de Neo4j) — 13 correctos, 1 con expectativa de prueba equivocada de mi parte (no un bug: "Embajada de Costa Rica en Francia" reconoce ambos países, y contra una ubicación sin ningún país reconocido el diseño permisivo correctamente no bloquea). `py_compile` OK.
+**Estado:** implementado, compilado, verificado en aislamiento. Pendiente confirmar en una corrida `--dry-run` real que el guardrail bloquea los 4 casos concretos que lo motivaron sin bloquear las fusiones legítimas ya confirmadas (L'Astrologue, direcciones idénticas con distinto formato). No comiteado a git todavía.
+
+## DD-042 — `eventArtTags`: tema artístico por evento, generado por el LLM (Capa 3)
+
+**Fecha:** 2026-08-13
+**Contexto:** surgió mientras se diseñaba el menú del rediseño del dashboard (`docs/dashboard_redesign_proposal.md`, sección 6). Se probó usar `Account.artType` (curación manual, heredado en `Event.artType`) como eje principal del menú — dio pie a un hallazgo: `artType` describe la cuenta, no el evento. Cuentas-sede omnívoras (La Villette, Gaîté Lyrique) traen `artType="Música, Danza, Circo, Teatro, Artes visuales"` pegados, y ese string se hereda igual en TODOS sus eventos sin importar si un evento puntual es en realidad un concierto o una proyección de cine. Muestra real: de 25 eventos con `artType` conteniendo "Artes visuales", solo 10 (40%) tenían `category='visual'` — el resto eran música/cine/danza mal etiquetados por herencia de cuenta. Además, ni `artType` ni `category` cubren temas reales del proyecto como Literatura o Circo (no existen en `_LABEL_META`, los 16 tipos fijos del extractor).
+**Decisión:** `Account.artType`/`Event.artType` (heredado) se mantienen sin cambios — siguen siendo útiles como señal de qué hace una cuenta en general. Se agrega un campo NUEVO y distinto, `Event.eventArtTags`, generado por el LLM de Capa 3 **por evento puntual** (no heredado de la cuenta): lista de 1-3 tags cortos describiendo la disciplina/medio artístico específico de ESE evento — más rico/granular que `type` (16 opciones fijas), pero más controlado que el `artType` de cuenta.
+**Fix del problema de parseo (aprendido de `artType`):** en vez de texto libre con comas (que se rompe cuando hay descripciones entre paréntesis — el bug que motivó esta decisión), `art_tags` es un array JSON real desde que sale del LLM, y `_clean_art_tags()` valida cada tag: descarta cualquiera con paréntesis, comas internas, o más de 40 caracteres, y topea a 3 tags. Vocabulario sugerido en el prompt (Música, Danza, Teatro, Circo, Literatura, Cine, Fotografía, Artes visuales, Moda, Gastronomía, Arquitectura, Cómic) pero el LLM puede proponer uno nuevo corto si ninguno aplica — rico pero clasificable, como pidió Diego.
+**Cambios en `4_enrich_events_extract.py`:**
+- `_llm_schema_hint()`: agregado `"art_tags"` al JSON pedido al LLM, con instrucciones explícitas contra paréntesis/comas internas.
+- `_LLM_DEFAULTS["art_tags"] = []` (antes no existía).
+- Nueva función `_clean_art_tags()`: valida/normaliza la respuesta del LLM.
+- `_extract_llm_fields()`: usa `_clean_art_tags()` sobre `data.get("art_tags")`.
+- Loop principal: nueva variable `llm_art_tags`, poblada solo cuando Capa 3 corre (igual que `llm_title`, `llm_price_range`, etc.).
+- `record` (diagnóstico dry-run) y `diag_csv` `fieldnames`: incluyen `art_tags` para poder auditar la calidad de los tags antes de confiar en ellos.
+- `candidate["eventArtTags"]` y `upsert_event()`: nuevo `e.eventArtTags = $eventArtTags` en el `SET` de creación del nodo — **solo se escribe al CREAR el evento**, igual que el resto de campos de Capa 3 (no se sobreescribe al enriquecer/fusionar).
+**Validación:** `py_compile` OK. `_clean_art_tags()` probado en aislado, 11/11 casos (tags válidos, `None`, string en vez de lista, paréntesis+coma, coma suelta dentro del tag, tope de 3, string vacío tras strip, elemento no-string mezclado, tag demasiado largo).
+**Alcance — importante:** este campo es **prospectivo únicamente**. Los 664 eventos ya existentes en Neo4j NO tienen `eventArtTags` (se crearon antes de este cambio) y no se van a backfillear automáticamente — eso requeriría volver a llamar a Capa 3 sobre cada uno (costo de tokens, no trivial). Si en algún momento se quiere ese backfill, es una tarea aparte, explícita, no implícita en este fix.
+**Pendiente:** correr `--dry-run` sobre una muestra nueva y revisar la columna `art_tags` del CSV de diagnóstico antes de confiar en esto para producción — no se ha validado contra output real del LLM todavía, solo la función de limpieza en aislado.
+
+---
+
+## DD-043 — `5_export_dashboard_data.py`: exportación estática para el sitio nuevo, sitio estático sin backend
+
+**Fecha:** 2026-08-13
+**Contexto:** decidido reemplazar el dashboard Dash por un sitio de descubrimiento (`docs/dashboard_redesign_proposal.md`). Sin acceso de red a Neo4j Aura desde el entorno donde se construye el sitio, y dataset chico (664 eventos, ~1-2MB en JSON) — un sitio 100% estático (JSON + HTML/CSS/JS, sin servidor, sin Neo4j en producción) es la opción más simple y barata (ver comparación de hosting: GitHub Pages vs Cloudflare Pages vs Netlify vs Vercel, GitHub Pages elegido para arrancar).
+**Qué hace el script:** trae eventos válidos + geocodificados (mismo criterio que la sección 6.3 de la propuesta: `isPublicInvitation`/`isUpcoming`=true, fecha real, `:LOCATED_AT` con `lat`/`lon`) y cuentas curadas/con métricas de grafo, en dos queries. Calcula sobre el dataset completo los sub-scores de ranking que necesitan contexto de percentil — `qScore` (calidad de detección), `aScore` (autoridad de la fuente vía PageRank/betweenness/followers/participación), `bScore` (resonancia social) — y un `penaltyMultiplier` (político ×0.55, confianza baja ×0.80, gratis ×1.05). **A propósito NO calcula** el componente T (proximidad temporal, depende de "hoy") ni C (contexto de sesión, depende del navegador de cada visitante) — esos se computan en el cliente en cada visita, calcularlos acá los dejaría fechados a la última exportación. También calcula similitud coseno vectorizada (mismo patrón que `4_enrich_events_resolve.py`) y guarda los 5 vecinos más cercanos por evento como `similarEventIds` — el embedding de 384 floats se descarta después de usarse, nunca viaja al JSON final (ver nota de la propuesta sobre no exponer embeddings al cliente).
+**No escribe nada en Neo4j** — solo lectura, se puede correr las veces que haga falta para refrescar `site/data.json` después de cada corrida de extracción/resolver.
+**Validación:** `py_compile` OK. `pctl_rank()` (percentiles con empates y valores `None`), `is_free()` (8/8 casos: "Gratis", "Entrada libre", "Accès libre", "Free entry" vs precios reales) y el pipeline completo de `compute_similar_events()`/`compute_ranking_subscores()` probados en aislado con datos sintéticos — confirmado que político+confianza baja compone penalizaciones (0.55×0.80), que gratis da el bonus (×1.05), y que un evento sin embedding no rompe nada (`similarEventIds=[]`).
+**Pendiente:** correr contra Neo4j real (Diego, sin acceso desde este entorno) y confirmar tamaño real del JSON y que las cuentas se linkeen bien por `sourceAuthor`/`username`.
+
+---
+
+## DD-044 — `site/`: sitio estático (HTML/CSS/JS vanilla), sin build step, menú 100% dinámico
+
+**Fecha:** 2026-08-14
+**Contexto:** implementación real del rediseño (`docs/dashboard_redesign_proposal.md`) sobre `5_export_dashboard_data.py` (DD-043). Hosting elegido: Cloudflare Pages (bandwidth ilimitado, deploy directo desde el repo de GitHub ya existente).
+**Qué es:** `site/index.html` + `site/style.css` + `site/app.js` + `site/i18n.js` (ES/FR) — vanilla JS, sin framework ni build step, para que el deploy sea literalmente "conectar el repo" sin configurar nada. Lee `site/data.json` (mismo archivo que escribe el export). Reusa la paleta de colores/tipografías del dashboard Dash viejo (`dash_common.py`) para continuidad visual.
+**Menú 100% dinámico (decisión 2026-08-14):** sin lista fija de familias — el eje "QUÉ" se arma en cada carga a partir de la unión de `category` (mapeado a label legible) y `eventArtTags` (DD-042) presentes en los datos, con conteo real, ordenado por volumen. La curación de fondo (qué cuentas se scrapean) es lo que le da forma al menú, no una regla editorial en el código — así lo pidió Diego, dado que la curación de cuentas ya prioriza lo que le interesa.
+**Ranking en dos tiempos:** `qScore`/`aScore`/`bScore`/`penaltyMultiplier` llegan precalculados del export (necesitan contexto de todo el dataset — percentiles). `T` (proximidad temporal) y `C` (contexto de sesión, `localStorage` sin login, ver propuesta sección 3.5) se calculan en el navegador en cada visita, porque dependen de "hoy" y de las preferencias de esa persona — precalcularlos en el export los dejaría fechados a la última exportación.
+**Validación:** intenté correr un smoke test con jsdom (headless) pero el entorno de sandbox donde construyo el sitio tiene el mount de `hub-cultural-du/` sincronizado con la máquina real de Diego, y operaciones de filesystem pesadas (miles de archivos de `node_modules`) colgaban indefinidamente — no es un problema del sitio, es fricción del entorno de desarrollo. Pivoté a extraer y probar en aislado, con Node puro (sin DOM), toda la lógica pura de `app.js` (`eventThemes`, `whenBucket`/`computeT`, `applyFilters`, `computeC`, `relevance`, `diversify`) contra 6 eventos sintéticos con fechas relativas a hoy reales — confirmado: filtro geográfico, filtro de tema dinámico (incluido "Literatura", que viene de `eventArtTags` y no existe en `category`), filtro de gratis, exclusión correcta de eventos pasados, ranking con orden esperado, y `computeC` reaccionando bien a preferencias de sesión simuladas. Complementado con verificación cruzada de que cada `getElementById` de `app.js` tiene su `id` en `index.html`, y que cada `data-i18n` del HTML tiene su clave en `i18n.js`. **No probado:** renderizado real en un navegador (DOM real, CSS real) — recomendado que Diego lo abra localmente antes de conectar Cloudflare.
+**Nota de limpieza:** al intentar el smoke test con jsdom se instaló un `node_modules` (1834 archivos) dentro de `site/` por accidente — el `rm -rf` normal falló con "Operation not permitted" en el mount sincronizado; se resolvió pidiendo permiso vía `allow_cowork_file_delete` y ya está limpio. Mencionado acá por transparencia, no por ser una decisión de arquitectura.
+**Pendiente:** Diego corre `python 5_export_dashboard_data.py` (escribe directo a `site/data.json`, pisando el archivo sintético de prueba), abre `site/index.html` local para revisar visualmente, y luego conecta el repo a Cloudflare Pages.
+
+---
+
+*Última actualización: 2026-08-14*
+*Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos, resolución de DD-035 (exposiciones en curso), normalización de dígitos Unicode estilizados si se confirma que es frecuente, validación de los fixes DD-038/DD-039 y de los rediseños DD-040/DD-041 en corridas reales — en particular si la muestra de "fecha fuera de ventana" (DD-040) sugiere ensanchar date_window, y si la muestra de "conflicto geográfico" (DD-041) revela falsos positivos del gazetteer. También pendiente: limpieza de basura preexistente en eventos legacy detectada de paso (fecha `1492-11-01`, emoji como `locationName`, texto no-geográfico como `locationName`) — no es parte de esta tarea, pero quedó documentada para una futura pasada de limpieza. Validación en vivo de DD-042 (`eventArtTags`) contra output real del LLM, y decisión sobre si vale la pena un backfill de los 664 eventos existentes. Validación en vivo de DD-043/DD-044 contra Neo4j real y en un navegador real. Pantallas Explorar/Mapa/Perfil de organizador (DD-044 solo cubre Home) — pendientes de construir.*

@@ -318,5 +318,215 @@ commits 9180ad4 (bbox lat/lon, DD-031) y fe65863 (AF_SATELLITE, DD-032)
 
 ---
 
-*Última actualización: 2026-07-15*
-*Próximo run: RUN-015 — 3_analyze_network.py sobre grafo V2 expandido (bloqueado por conectividad)*
+## RUN-015 — 2026-08-11 — Revalidación posts 1-100 tras rediseño de 3 capas (DD del rediseño de eventos)
+**Scripts:** 4_enrich_events_extract.py --dry-run --max-posts 100 --diag-csv eval_100_v2.csv
+**Input:** los mismos 100 posts de la evaluación original (eval_100.csv),
+re-procesados con el pipeline ya rediseñado (gating por Capa 3, sin Capa
+2b, tipificación por LLM) — LLM_PROVIDER=cerebras
+**Output:**
+- 12 descartados Capa 1, 88 candidatos Capa 2, 40 rechazados por LLM,
+  46 eventos detectados
+- Comparación contra la clasificación independiente de Claude
+  (claude_labels.json, mismos post_id): **92/100 de acuerdo** (vs. 58%
+  antes del rediseño, vs. 86% proyectado por simulación)
+- Bug encontrado y corregido en la corrida siguiente (RUN-016): `math
+  domain error` en `compute_hotness()` por `likesCount=-1` (cuentas con
+  conteo de likes oculto en Instagram)
+**Resultado:** rediseño validado end-to-end sobre datos reales, mejora
+confirmada por encima de lo simulado
+**Lecciones:**
+- Los 8 desacuerdos restantes se explican por: descartes de Capa 1 (2),
+  rechazos del gate de Capa 3 en casos límite (3), y 1 caso inverso
+  (LLM aceptó un post informativo/institucional como evento público)
+
+---
+
+## RUN-016 — 2026-08-11 — Clasificación batch 2 (posts 101-200) + fix de compute_hotness
+**Scripts:** 4_enrich_events_extract.py --dry-run --skip 100 --max-posts 100 --diag-csv eval_101_200.csv
+**Input:** 100 posts nuevos (nunca antes clasificados por Claude ni usados
+para ajustar el pipeline) — LLM_PROVIDER=cerebras
+**Incidente:** primer intento crasheó con `ValueError: math domain error`
+en `compute_hotness()` — `math.log1p(-1)` sobre `likesCount=-1` (Instagram
+permite ocultar el conteo de likes). Corregido clampeando likes/comments a
+`max(0, x)` antes del log1p; recompilado y re-ejecutado sin problema.
+**Output:**
+- 16 descartados Capa 1, 84 candidatos Capa 2, 46 rechazados por LLM,
+  36 eventos detectados
+- Clasificación independiente de Claude: 41 SI / 59 NO
+- Comparación contra el script: **87/100 de acuerdo** — más bajo que el
+  92% de RUN-015 porque estos posts nunca se usaron para ajustar nada
+  (medida más honesta de generalización)
+- `claude_labels.json` re-indexado de índice (0-99) a `post_id` y
+  fusionado con el batch 2 (197 entradas únicas — 3 posts co-publicados
+  por dos cuentas comparten `post_id` entre los primeros 100)
+**Resultado:** confirma que la pipeline generaliza razonablemente bien a
+datos nunca vistos, con patrones de error identificables
+**Lecciones:**
+- 3/13 desacuerdos: Capa 1 sigue descartando anuncios de tono sobrio
+- 6/13: gate de Capa 3 rechaza versiones "cortas" de un evento ya
+  anunciado en otro post más detallado de la misma cuenta
+- 4/13 (hallazgo nuevo): el script le asigna fecha exacta a posts que
+  solo mencionaban un mes suelto ("este marzo") — root cause identificado
+  en `dateparser` + `PREFER_DAY_OF_MONTH='first'`, no en el LLM → fix en
+  DD-034
+
+---
+
+## RUN-017 — 2026-08-11 — Batch 3 parcial (posts 201-300), corriendo en lotes de 50 por conectividad inestable
+**Scripts:** 4_enrich_events_extract.py --dry-run --skip {200,250} --max-posts 50 --diag-csv eval_{201_250,251_300}.csv
+**Input:** 100 posts nuevos (201-300), continuando el muestreo hacia los
+500 acordados para la eventual revisión de embeddings de Capa 1
+**Output:**
+- eval_201_250.csv: 4 descartados Capa 1, 46 candidatos Capa 2, 27
+  rechazados por LLM, 19 eventos detectados
+- eval_251_300.csv: 4 descartados Capa 1, 46 candidatos Capa 2, 20
+  rechazados por LLM, 26 eventos detectados
+- En eval_251_300.csv, Groq fue el proveedor inicial y falló por
+  conectividad real (`ReadTimeout`/`ConnectionError`, no 429) — el
+  failover a Cerebras funcionó correctamente en <90s (ver DD-033)
+**Resultado:** datos crudos listos; clasificación independiente de Claude
+y comparación contra el script — completada en RUN-018 (ver abajo)
+**Lecciones:** correr en lotes de 50 (en vez de 100 o 300) resultó
+razonable dado el internet inestable del usuario — cada lote pierde como
+máximo ~10-12 min si el proceso se cae, contra ~70 min de una corrida
+única de 300
+
+**Comparación (completada tras la interrupción del sandbox):**
+- eval_201_250.csv: **45/49 de acuerdo (91.8%)**
+- eval_251_300.csv: **43/50 de acuerdo (86.0%)**
+- `claude_labels.json`: 197 → 296 entradas únicas (99 nuevas, 1 duplicado
+  de post_id co-publicado colapsado)
+
+---
+
+## RUN-018 — 2026-08-12 — Batch 3 continuación (posts 301-400), en lotes de 50
+**Scripts:** 4_enrich_events_extract.py --dry-run --skip {300,350} --max-posts 50 --diag-csv eval_{301_350,351_400}.csv
+**Input:** 100 posts nuevos (301-400), corridos por Diego localmente
+mientras el sandbox de Claude estaba caído; clasificación independiente
+hecha por Claude leyendo los CSV directamente (sin bash) para las primeras
+filas, y con pandas una vez el sandbox volvió.
+**Output:**
+- `claude_labels.json`: 296 → 396 entradas únicas (100 nuevas, sin
+  colisiones de post_id esta vez)
+- Comparación contra el script:
+  - eval_301_350.csv + eval_351_400.csv combinados: **88/100 de acuerdo
+    (88.0%)**
+- Clasificación independiente de Claude en este batch: 38 SI / 62 NO
+**Resultado:** cuarto batch de 100 clasificado y fusionado; van 396 posts
+únicos con etiqueta independiente de Claude acumulados hacia los 500
+acordados
+**Lecciones — patrones de desacuerdo (12/100):**
+- 2/12: Capa 1 sigue descartando posts con fecha/hora explícita cuando el
+  tono es sobrio/institucional (mesa redonda académica, coloquio) — mismo
+  patrón que RUN-016
+- 2/12: Capa 3 rechaza eventos con solo marcador de fecha relativo
+  ("aujourd'hui... à 16h", "ce week-end") sin fecha calendario explícita
+  — patrón nuevo, posible sesgo del LLM hacia fechas absolutas
+- 1/12: Capa 3 acepta apertura de inscripciones a curso de idiomas como
+  evento (falso positivo — es admisión/inscripción, no evento cultural
+  con asistencia, ver criterio ya establecido en RUN-016/DD-034)
+- 4/12: Capa 3 acepta posts sin ninguna fecha explícita en el texto
+  (listados de repertorio con "Pass 104infini", apertura de venta de
+  entradas sin fecha del evento, promoción de partido sin fecha) —
+  sugiere que el LLM a veces infiere una fecha plausible del contexto
+  (temporada, calendario del Mundial) en vez de exigir que el texto la
+  contenga
+- 3/12: desacuerdo metodológico, no error del script — Claude clasificó
+  como SI exposiciones "en curso hasta el [fecha]" con fecha de cierre
+  explícita, aunque el texto sea mayormente un recap en pasado de la
+  inauguración; el script las rechazó. Pendiente decidir si esta
+  extensión del criterio (evento continuo con fecha de cierre cuenta como
+  SI) debe formalizarse o revertirse — ver nota en el criterio de
+  clasificación
+
+---
+
+## RUN-019 — 2026-08-12 — Batch 3 final (posts 401-500), cierre de la muestra de 500
+
+**Scripts:** 4_enrich_events_extract.py --dry-run --skip 400 --max-posts 100 --diag-csv eval_401_500.csv
+**Input:** 100 posts nuevos (401-500, un solo archivo esta vez en vez de 2×50 —
+la conectividad ya no era un problema), corridos por Diego. 99 post_id
+únicos (1 duplicado co-publicado). Este tramo introdujo por primera vez
+cuentas de un clúster nuevo: sedes de Alianza Francesa en Colombia
+(Pereira, Cali, Manizales), `aecidcolombia`, `ueencolombia`, `culturespaces`,
+`elcafelatino`, `mep.paris`, `miraartfair`, `ircam_paris`, `pac_colibri`.
+**Output:**
+- `claude_labels.json`: 396 → 495 entradas únicas (99 nuevas)
+- Comparación contra el script: **83/99 de acuerdo (83.8%)** — el más bajo
+  de los 4 batches de 100 (92%, 87%, 88%, 83.8%)
+- Clasificación independiente de Claude en este batch: 40 SI / 59 NO
+- **Total acumulado: 495 posts únicos clasificados independientemente por
+  Claude — la muestra de 500 acordada para retunear Capa 1 queda
+  esencialmente completa** (495 en vez de 500 exactos por los post_id
+  co-publicados que colapsan en cada batch, mismo patrón que en 1+2)
+**Resultado:** batch 3 completo (201-500). Cuarto y último tramo de 100
+clasificado y fusionado.
+**Lecciones — la caída de acuerdo (88%→83.8%) se explica por un clúster de
+cuentas nuevo, no por regresión de la pipeline:**
+- 6/16 desacuerdos: Capa 3 acepta como evento contenido que es en realidad
+  promoción de curso/admisión o promoción genérica de temporada sin fecha
+  puntual — concentrado casi todo en las sedes de Alianza Francesa
+  colombianas (Pereira x2, Manizales x1) y en `culturespaces`/`tamalesenparis`
+  (x3). Mismo patrón que DD-034/RUN-018 pero mucho más frecuente en este
+  clúster — las Alianzas Francesas publican con una estructura de post
+  (fecha + horario + lugar) casi idéntica a un evento cultural real, aunque
+  el contenido sea "inicio de clases" o "test de nivel gratis"
+- 3/16: Capa 3 sigue rechazando marcadores de fecha relativos ("dans une
+  semaine", "cet après-midi", "c'est aujourd'hui") — mismo patrón ya
+  detectado en RUN-018, confirma que es sistemático y no un caso aislado
+- 1/16: script acepta un listado de repertorio (Pass 104infini) sin fecha
+  — mismo patrón recurrente de 104paris ya visto en RUN-018
+- 1/16: Capa 3 rechaza una transmisión de partido del Mundial con fecha y
+  hora explícitas (Alianza Francesa de Manizales) — falso negativo aislado
+- 4/16 (3 casos + 1 nuevo): variantes del debate metodológico de DD-035
+  (exposición/temporada "en curso" o "que reanuda" con fecha explícita,
+  aunque el post sea mayormente recap o promocional) — cierre de festival
+  de Annecy con fecha de ceremonia explícita, reanudación de temporada de
+  la Maison de la Poésie el 4 de septiembre, reanudación de ciclo de cine
+  en la Cinemateca — todos casos límite de la misma naturaleza, refuerza
+  que vale la pena resolver DD-035 antes de usar este dataset para
+  retunear Capa 1
+**Siguiente paso:** con los 495 posts completos, hacer un análisis
+agregado de los ~50-55 desacuerdos totales de los 4 batches antes de tocar
+Capa 1 — en particular decidir DD-035 primero, porque ese patrón por sí
+solo explica un puñado de "falsos negativos" del script que en realidad
+son ambigüedad de criterio, no error de modelo.
+
+---
+
+---
+
+## RUN-020 — Primera corrida real (--dry-run) de los cambios DD-036, 150 posts de la última tanda
+
+**Fecha:** 2026-08-12
+**Alcance:** `python 4_enrich_events_extract.py --dry-run --accounts <43 cuentas curadas de la última tanda scrapeada> --max-posts 150 --diag-csv data_processed/eval_ultima_tanda_150.csv`. Primera vez que DD-036 corre contra datos reales en vez de una simulación offline.
+**Resultado agregado del script:** 150 posts procesados, 29 descartados en Capa 1, 1 descartado en Capa 2, 58 sin fecha en texto (LLM omitido — gate DD-036), 25 rechazados por Capa 3, 37 EVENTO. Llamadas reales a Capa 3: 62 de 120 que se habrían hecho sin el gate previo (**48.3% de ahorro**, mejor que el 40.7% estimado offline).
+**Comparación ciega Claude-vs-script (los 150, no solo los EVENTO):** 96.7% de acuerdo (145/150) — el mejor resultado de toda la sesión, por encima del rango 83-92% de los batches 1-3. Precisión 97.3% (36/37), recall ~90% (36/40).
+**Desacuerdos (5, ver DD-037 para el detalle):**
+- 1 falso positivo con causa de código confirmada: notación de temporada "26/27" leída como fecha DD/MM (`@theatrechatelet`)
+- 3 falsos negativos con causa de código confirmada: ventana de 600 caracteres en `extract_dates()` deja fuera fechas que caen más adelante en captions largos, más un problema de separador (`.` no reconocido) — `@pointephemere`, `@academiamaritzaarizala`, `@saveurs_mexique`
+- 1 caso sin causa de código clara: dos posts casi idénticos de `@mestizos.folklorecolombien` sobre el mismo evento, uno aceptado y otro rechazado por Capa 3 — variabilidad del LLM, a vigilar, no un patrón confirmado
+- 1 caso aceptado como acuerdo operativo, no como error: `@oneculture.fr` anunciando un evento del mismo día ("Aujourd'hui 11h-22h") fue rechazado por el LLM — consistente con la decisión explícita de Diego de no tratar eventos del mismo día como relevantes dado el cadence del script
+**Confirmaciones positivas de DD-036 en vivo:** la instrucción de exclusión de inscripciones/admisiones (cambio 3) funcionó — los cursos DELE e intensivos del Instituto Cervantes, rechazados correctamente por primera vez con el prompt actualizado. El caso de exposición en curso con fecha de cierre explícita (DD-035, provisional) se aplicó de forma consistente en 2-3 posts (Maison du Mexique, MEP).
+**Siguiente paso:** decidir si vale la pena aplicar el fix de DD-037 (ventana de fecha + separador con punto) antes de la corrida de producción real sobre las 43 cuentas, o correr la producción tal cual y aceptar el ~3% de falsos negativos conocido.
+
+---
+
+---
+
+## RUN-021 — Producción de extracción (43 cuentas, DD-037 aplicado) + primer --dry-run real del resolver rediseñado (DD-040/DD-041)
+
+**Fecha:** 2026-08-13
+**Extracción (producción, sin --dry-run):** 304 posts procesados sobre las 43 cuentas curadas, `--max-posts 0`. 30 eventos creados. 48.3% de ahorro de llamadas a Capa 3 confirmado en producción (coincide con RUN-020). Un crash de conexión (`SessionExpired`/`SSLEOFError`) a mitad de corrida, resuelto re-ejecutando (idempotente vía `eventExtracted`); auditoría posterior de los eventos escritos detectó y corrigió los bugs de DD-038 y DD-039 (6 eventos defectuosos identificados por ID y borrados por Diego).
+**Resolver — `4_enrich_events_resolve.py --dry-run` (primera corrida sobre datos reales, algoritmo DD-040/DD-041):** 664 eventos, 220,116 pares evaluados (~20s con la matriz de similitud vectorizada).
+- 68 pares duplicados encontrados → 189 relaciones redirigidas (cadenas transitivas: A→B→C consolidan a un canónico).
+- 12,375 descartados por similitud insuficiente; 165,018 descartados por fecha fuera de ventana ±3d; **6 descartados por conflicto geográfico (DD-041)**.
+- **DD-041 confirmado en vivo:** los 4 casos concretos que motivaron el guardrail ya no aparecen como fusión — `Portugal`/`@osullivans_bastille` (el caso original), `París`/`Madrid`, `Envigado`/`Francia`, `Ecuador`/`Paris` — todos ahora en la muestra de bloqueados en vez de en la de fusiones.
+- **Límite nuevo observado, no cubierto por DD-041:** `evt_10f3fc744b97` sigue absorbiendo 3 posts sobre distintas fiestas de visualización del partido Colombia-Portugal en bares distintos de París (`@osullivans_bastille`, sin location explícita, `Nix Nox – 6 Port de la Gare 75013`) — mismo día, texto genérico similar, misma ciudad, por lo que el guardrail geográfico (que compara países) no aplica. Es un problema distinto al que resolvió DD-041: ahí el conflicto era entre países, acá es entre venues específicos dentro de la misma ciudad. No implementado — pendiente de decisión de Diego (ver runs_log).
+- Título en el log de fusión (fix DD-041 secundario) funcionando correctamente en todas las líneas.
+**Decisión de Diego sobre el límite residual (venues distintos, mismo partido):** no vale la pena un guardrail adicional — un evento de partido de la selección Colombia es un evento nacional masivo sin valor sociológico diferencial por venue específico, así que da igual que `evt_10f3fc744b97` absorba las 3 fiestas de visualización en bares distintos. Se aplica el resolver tal cual (68 fusiones). Tarea #11 cerrada.
+
+---
+
+*Última actualización: 2026-08-13*
+*Próximo run: `python 4_enrich_events_resolve.py` (sin --dry-run) para aplicar las 68 fusiones. Luego: edición del dashboard (Diego especifica el alcance) y estructura de la tesis en LaTeX.*

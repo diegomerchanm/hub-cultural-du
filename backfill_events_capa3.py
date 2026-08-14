@@ -136,7 +136,7 @@ def main(
                 print(f"\n  [{eid}] @{author}  penalty={llm_penalty}  "
                       f"score {row['eventScore']} -> {new_score}")
                 print(f"    invitación={is_public_invitation}  próximo={is_upcoming}  "
-                      f"fecha={clean_date or '-'}  gratis={llm_out.get('is_free')}")
+                      f"fecha={clean_date or '-'}  precio={llm_out.get('price_range') or '-'}")
                 print(f"    título: {llm_out.get('title') or '(sin título del LLM)'}")
                 print(f"    ciudad: {llm_city or '-'}  dirección: {llm_exact_address or '-'}")
                 continue
@@ -147,7 +147,7 @@ def main(
                     e.description        = $description,
                     e.isPublicInvitation = $isPublicInvitation,
                     e.isUpcoming         = $isUpcoming,
-                    e.isFree             = $isFree,
+                    e.priceRange         = $priceRange,
                     e.llmReasoning       = $llmReasoning,
                     e.sourcePostUrl      = $sourcePostUrl,
                     e.sourcePostDate     = $sourcePostDate,
@@ -160,7 +160,7 @@ def main(
                  description=llm_out.get("clean_description") or "",
                  isPublicInvitation=is_public_invitation,
                  isUpcoming=is_upcoming,
-                 isFree=llm_out.get("is_free"),
+                 priceRange=llm_out.get("price_range"),
                  llmReasoning=llm_out.get("reasoning") or "",
                  sourcePostUrl=row["url"],
                  sourcePostDate=timestamp,

@@ -150,17 +150,22 @@ def build_event_card(event):
     description = event.get("description") or ""
     author = event.get("sourceAuthor")
     url = event.get("sourcePostUrl")
-    is_free = event.get("isFree")
+    price_range = (event.get("priceRange") or "").strip()
 
     badges = [html.Span([html.I(className=f"ti {meta['icon']}", style={"marginRight": "4px"}), meta["label"]],
                          style={
                              "fontSize": "11px", "padding": "3px 10px", "borderRadius": "20px",
                              "background": meta["color"] + "22", "color": C["text"], "fontWeight": "500",
                          })]
-    if is_free is True:
-        badges.append(html.Span("Gratis", style={
+    if price_range:
+        # "Gratis"/"Entrada libre" (o cualquier variante) se resalta en verde
+        # como antes hacía el booleano isFree; cualquier otro texto de precio
+        # (ej. "30€ individual / 50€ grupo") se muestra tal cual llegó de Capa 3.
+        is_free_text = price_range.lower() in ("gratis", "entrada libre", "free", "libre")
+        badges.append(html.Span(price_range, style={
             "fontSize": "11px", "padding": "3px 10px", "borderRadius": "20px",
-            "background": "#4a8c6f22", "color": C["text"], "marginLeft": "6px",
+            "background": "#4a8c6f22" if is_free_text else meta["color"] + "22",
+            "color": C["text"], "marginLeft": "6px",
         }))
 
     footer_children = []

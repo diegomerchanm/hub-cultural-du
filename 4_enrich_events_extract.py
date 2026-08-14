@@ -1,22 +1,25 @@
 """
 Fase 4-B — Extracción de eventos culturales desde Post.caption.
 
-Arquitectura de 4 capas:
+Arquitectura de 3 capas (la vieja Capa 2b de tipificación por embeddings se
+eliminó en 2026-08 — ver eval de 100 posts en data_processed/eval_100_report.md:
+el LLM de Capa 3 tipifica mejor y sin el sesgo de las referencias/hipótesis
+NLI, así que se le sumó ese trabajo a la llamada que ya se hacía):
+
   Capa 1 — sentence-transformers (paraphrase-multilingual-MiniLM-L12-v2)
-            Similitud coseno MÁXIMA contra 100 frases de referencia (no promedio).
+            Similitud coseno MÁXIMA contra ~100 frases de referencia (no promedio).
             Filtra candidatos por max_sim >= layer1_threshold.
 
   Capa 2a — Detección binaria (multilingual-MiniLMv2-L6-mnli-xnli, ligero)
              NLI batcheado con una sola hipótesis → P(entailment).
              ¿Es un evento con fecha/lugar? Descarta definitivamente si no.
+             La hipótesis se elige en el idioma detectado del caption
+             (DET_HYPOTHESES es/en/fr) — antes estaba fija en español y
+             penalizaba captions en otros idiomas más por el desajuste de
+             idioma que por el contenido (confirmado en la eval de 100).
              NOTA: se usa el MiniLMv2 multilingüe y NO cross-encoder/
              nli-deberta-v3-small porque este último es monolingüe inglés
              (SNLI/MNLI) y fallaría con captions es/fr.
-
-  Capa 2b — Tipificación multi-label (multilingual-MiniLMv2, batcheado)
-             Solo corre sobre los que pasaron 2a (fracción pequeña).
-             Asigna tipo de evento con 12 labels culturales.
-             --high-quality activa mDeBERTa-v3 (más lento, mejor precisión).
 
   Capa 3 — LLM: Ollama local (modelo configurable vía OLLAMA_MODEL, default
             qwen2.5:7b) por defecto, Groq disponible vía LLM_PROVIDER=groq
@@ -26,14 +29,26 @@ Arquitectura de 4 capas:
             sobre los que pasaron 2a (~30-50/corrida en pruebas, corpus
             completo en corridas reales — Ollama no tiene tope diario de
             tokens como el free tier de Groq/Cerebras). Limpia fecha/ubicación
-            (spaCy/dateparser tienen bugs confirmados), redacta
-            clean_description, y detecta noticias institucionales sin
-            invitación real al público mediante is_public_invitation/is_upcoming.
+            (spaCy/dateparser tienen bugs confirmados), TIPIFICA el evento
+            (campo "type", misma taxonomía de 16 labels que antes tenía
+            Capa 2b), da price_range, redacta clean_description, y detecta
+            noticias institucionales sin invitación real al público mediante
+            is_public_invitation/is_upcoming — estos dos ya no solo penalizan
+            el score: si el LLM corrió y dice que NO es invitación pública
+            futura, el nodo :Event NO SE CREA (antes se creaba igual con
+            score bajo — ver eval de 100: eso explicaba 29/35 de los falsos
+            positivos). `reasoning` solo se pide en --dry-run (fase de
+            prueba); en producción no tiene consumidor y cuesta tokens.
 
-Optimizaciones CPU: batch inference en 2a/2b, truncado a 256 tokens,
+Dedup por post_id antes de llamar Capa 3: cuando el mismo post está
+co-publicado por varias cuentas, la query de carga trae una fila por cada
+(Account,Post) — sin dedup, Capa 3 se llamaría dos veces por el mismo texto
+exacto (confirmado: 3 pares duplicados en la eval de 100 posts).
+
+Optimizaciones CPU: batch inference en 2a, truncado a 256 tokens,
 torch multi-thread, cache de embeddings de referencia en ref_embeddings.npz.
 
-Score final = (layer2_score × 0.6 + hotness_norm × 0.4) × political_penalty × llm_penalty
+Score final = (layer2_score × 0.6 + hotness_norm × 0.4) × category_penalty × llm_penalty
   llm_penalty = 1.0 si is_public_invitation AND is_upcoming
               = 0.15 (LLM_REJECT_PENALTY)  si el LLM responde y NO es invitación futura
               = 0.5  (LLM_UNKNOWN_PENALTY) si el LLM falla (Ollama no disponible,
@@ -42,6 +57,7 @@ Score final = (layer2_score × 0.6 + hotness_norm × 0.4) × political_penalty �
 Idempotente: marca cada post procesado con eventExtracted=true.
 """
 
+import csv
 import hashlib
 import json
 import math
@@ -235,6 +251,31 @@ EVENT_REFERENCES = [
     "Jornada de atención consular extraordinaria este mes",
     "Le consulat colombien organise une journée spéciale ce mois",
     "Special consular service day at the Colombian embassy",
+    # ── INSTITUCIONAL FORMAL / ACADÉMICO SOBRIO (DD-036) ─────────────────────
+    # Registro de comunicado de prensa/institucional, sin llamado directo a
+    # "únete/ven" — el resto de las secciones arriba está mayoritariamente en
+    # tono de invitación coloquial-comunitaria. Se agrega este bloque porque
+    # 3 falsos negativos de Capa 1 (eval 201-500) fueron precisamente posts en
+    # este registro (mesa redonda académica, coloquio institucional) con score
+    # justo debajo o rozando el umbral 0.45 — ver runs_log_es.md RUN-018/019.
+    "El instituto acoge la celebración de un coloquio el próximo martes",
+    "Tendrá lugar una mesa redonda dedicada a la memoria histórica este jueves",
+    "La institución organiza una conferencia académica el 20 de julio",
+    "Se llevará a cabo un encuentro de investigadores el próximo miércoles",
+    "El centro cultural acoge una jornada de estudio este viernes",
+    "La embajada organiza una ceremonia conmemorativa el próximo lunes",
+    "L'institut accueille un colloque consacré à ce sujet mardi prochain",
+    "Une table ronde aura lieu jeudi à l'auditorium",
+    "Le centre de recherche propose une journée d'étude le 20 juillet",
+    "L'ambassade organise une cérémonie commémorative lundi prochain",
+    "Une conférence académique se tiendra au sein de l'institut ce mercredi",
+    "Le centre de recherche et ses partenaires proposent une table ronde inédite",
+    "The institute hosts an academic colloquium next Tuesday",
+    "A round table discussion will take place this Thursday at the auditorium",
+    "The research center holds a study day on July 20th",
+    "The embassy organizes a commemorative ceremony next Monday",
+    "A panel of researchers will convene this Wednesday afternoon",
+    "The cultural institute presents a formal lecture series this month",
 ]
 
 # ── 3. Taxonomía Capa 2 ───────────────────────────────────────────────────────
@@ -277,9 +318,6 @@ EVENT_DATE_CLAMP_DAYS = 1095
 # Capa 2a — detección binaria: modelo NLI multilingüe LIGERO (6 capas).
 # ⚠️ No sustituir por cross-encoder/nli-deberta-v3-small: es inglés-only.
 DET_MODEL       = "MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli"
-# Capa 2b — tipificación: modelo base multilingüe (mejor calidad).
-TYPE_MODEL      = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
-ZS_MODEL        = TYPE_MODEL   # compat: nombre usado en logs
 ST_MODEL        = "paraphrase-multilingual-MiniLM-L12-v2"
 MAX_NLI_TOKENS  = 256          # truncado de captions para NLI (velocidad CPU)
 REF_CACHE_PATH  = "ref_embeddings.npz"
@@ -289,10 +327,6 @@ STUDY_CUTOFF    = datetime(2026, 7, 1, tzinfo=timezone.utc)
 _NLP: dict      = {}
 _ST_MODEL       = None   # sentence-transformer compartido entre capas
 
-# Capa 2a: la detección binaria ya no usa labels de pipeline ZS —
-# ver DET_HYPOTHESIS + detect_events_batch() (una hipótesis, batcheado).
-# Labels para Capa 2b (tipificación) — excluye nulo
-EVENT_LABELS_CULTURAL = [lbl for lbl, cat, _ in _LABEL_META if cat not in NULL_CATS]
 
 # ── 4. Helpers — modelos ──────────────────────────────────────────────────────
 def get_nlp(lang: str):
@@ -316,7 +350,19 @@ def get_st_model():
 
 
 # ── 4b. Capa 2a — detector NLI binario batcheado ─────────────────────────────
-DET_HYPOTHESIS = "Esta publicación anuncia un evento cultural con fecha o lugar."
+# Antes esta hipótesis estaba fija en español, sin importar el idioma del
+# caption. Confirmado en la eval de 100 posts (2026-08): captions en inglés
+# ("Mark your calendars — next event is this Sunday at 7PM!") sacaban scores
+# casi cero (0.002-0.05) contra una hipótesis en español, mientras que un
+# post en español con contenido equivalente pasaba fácil — el desajuste de
+# IDIOMA entre premisa y hipótesis pesaba tanto o más que el contenido.
+# Ahora se elige la hipótesis en el idioma detectado del caption (mismo
+# detect_text_lang() que ya se usaba para NER más abajo).
+DET_HYPOTHESES = {
+    "es": "Esta publicación anuncia un evento cultural con fecha o lugar.",
+    "en": "This post announces a cultural event with a date or place.",
+    "fr": "Cette publication annonce un événement culturel avec une date ou un lieu.",
+}
 
 _DET = None  # (tokenizer, model) cargados una sola vez
 
@@ -335,25 +381,30 @@ def get_detector():
     return _DET
 
 
-def detect_events_batch(captions: list[str], batch_size: int = 32) -> list[float]:
+def detect_events_batch(captions: list[str], langs: list[str], batch_size: int = 32) -> list[float]:
     """P(evento) por caption, procesando en lotes.
 
     Una sola hipótesis por caption (en lugar de 2 labels del pipeline ZS)
     → mitad de forward-passes. Score = P(entailment) normalizado contra
     P(contradiction), igual que hace el pipeline zero-shot por label.
+
+    `langs` (paralelo a `captions`) elige la hipótesis en el idioma de cada
+    caption — ver nota en DET_HYPOTHESES sobre por qué esto importa.
     """
     import torch
     tok, mdl = get_detector()
     ent_idx = mdl.config.label2id.get("entailment", 0)
     con_idx = mdl.config.label2id.get("contradiction", 2)
+    hyps = [DET_HYPOTHESES.get(l, DET_HYPOTHESES["es"]) for l in langs]
 
     scores: list[float] = []
     with torch.inference_mode():
         for i in range(0, len(captions), batch_size):
-            chunk  = captions[i: i + batch_size]
+            chunk      = captions[i: i + batch_size]
+            hyp_chunk  = hyps[i: i + batch_size]
             inputs = tok(
                 chunk,
-                [DET_HYPOTHESIS] * len(chunk),
+                hyp_chunk,
                 truncation=True,
                 max_length=MAX_NLI_TOKENS,
                 padding=True,
@@ -471,24 +522,42 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").strip().lower()
 OLLAMA_ENDPOINT = "http://localhost:11434/api/chat"
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "qwen2.5:7b").strip()
 
-_LLM_SCHEMA_HINT = """Responde ÚNICAMENTE con un objeto JSON (sin texto adicional) con estas claves exactas:
-{
+# "type" reemplaza la tipificación que antes hacía Capa 2b (zero-shot NLI
+# multi-label sobre EVENT_LABELS_CULTURAL) — se elimina esa capa completa
+# (menos sesgo de embeddings, un modelo menos que mantener) y el LLM elige
+# directamente sobre la misma taxonomía de 16 labels (ver _LABEL_META),
+# incluidas las opciones "nulo" para poder seguir detectando no-eventos.
+_EVENT_TYPE_OPTIONS = "; ".join(f'"{lbl}"' for lbl in EVENT_LABELS)
+
+
+def _llm_schema_hint(include_reasoning: bool) -> str:
+    """`include_reasoning` solo debe ser True en --dry-run (fase de prueba) —
+    en producción el campo no tiene consumidor downstream (ver DD, sección
+    eficiencia de cuota LLM) y cuesta tokens de salida en cada llamada."""
+    reasoning_line = (
+        '\n  "reasoning": string             // breve justificación (solo se pide en --dry-run)'
+        if include_reasoning else ""
+    )
+    return f"""Responde ÚNICAMENTE con un objeto JSON (sin texto adicional) con estas claves exactas:
+{{
   "is_public_invitation": bool,   // invita al público/diáspora a asistir; no es noticia, comunicado, recap o aviso administrativo
   "is_upcoming": bool,            // describe algo futuro respecto a la fecha de publicación, no algo que ya ocurrió
+  "type": string,                  // EXACTAMENTE uno de estos valores, copiado tal cual (incluye las opciones "nulo" si no es un evento real): {_EVENT_TYPE_OPTIONS}
   "city": string o null,           // ciudad donde ocurre el EVENTO — solo si el caption la menciona o es inequívoca por contexto; NUNCA la ciudad de la cuenta/institución que publica si el caption no la confirma
   "exact_address": string o null,  // dirección o venue específico (calle, número, nombre del lugar) SOLO si aparece textualmente en el caption; si no hay dirección exacta, null — no repitas aquí solo el nombre de la ciudad
   "clean_date": string "YYYY-MM-DD" o null,  // fecha real del evento, razonada por contexto
   "clean_description": string,   // 1-2 oraciones sin emojis/hashtags/menciones, para dashboard
   "title": string,                // título editorial corto (6-10 palabras), sin emojis/hashtags, para mostrar como encabezado de la tarjeta del evento — no repitas la categoría, describe el evento concreto
-  "is_free": bool o null,          // true si el caption menciona explícitamente que es gratis/entrada libre, false si menciona un precio, null si el texto no lo aclara (no asumas)
-  "reasoning": string             // breve justificación
-}"""
+  "price_range": string o null,    // precio tal como aparece en el caption, ej. "Gratis", "Entrada libre", "30€ individual / 50€ grupo", "10€ sugerido" — usa una de esas frases tipo "Gratis"/"Entrada libre" si el caption dice explícitamente que no cuesta; null si el texto no menciona nada sobre precio, no asumas
+  "art_tags": array de strings     // 1-3 etiquetas cortas (máx 3 palabras cada una) que describan la disciplina/medio artístico de ESTE evento concreto — más granular que "type", pensado como filtro clickeable. Reusá temas conocidos si aplican: "Música", "Danza", "Teatro", "Circo", "Literatura", "Cine", "Fotografía", "Artes visuales", "Moda", "Gastronomía", "Arquitectura", "Cómic" — pero si ninguno describe bien el evento, proponé uno nuevo corto. NUNCA uses paréntesis ni frases largas ni explicaciones dentro de cada tag (nada de "Multidisciplinario (música, historia)") — cada tag es una palabra o frase corta suelta, sin comas dentro del tag. Si el evento no tiene ningún componente artístico claro (p.ej. trámite consular, comunicado), devolvé una lista vacía [].{reasoning_line}
+}}"""
+
 
 LLM_CAPTION_CHARS = 900   # suficiente para juzgar is_public_invitation/is_upcoming/
                            # city/exact_address sin el texto completo
 
 
-def _build_llm_prompt(caption: str, anchor_date: str) -> str:
+def _build_llm_prompt(caption: str, anchor_date: str, include_reasoning: bool = False) -> str:
     """Prompt/esquema compartido entre Groq y Ollama — el transporte cambia, esto no."""
     return (
         f"Esta publicación de Instagram fue hecha el {anchor_date or 'fecha desconocida'}.\n"
@@ -496,6 +565,10 @@ def _build_llm_prompt(caption: str, anchor_date: str) -> str:
         "Analiza si esta publicación es una invitación real y abierta a un evento cultural, "
         "o si en realidad es una noticia institucional, un comunicado, la visita de una "
         "personalidad, un aviso administrativo o el recap de algo que ya pasó.\n"
+        "Inscripciones a cursos regulares, inicio de clases, matrículas, tests de nivel "
+        "o convocatorias de candidaturas/concursos NO cuentan como is_public_invitation "
+        "aunque el post incluya fecha, hora y lugar — son trámites administrativos o "
+        "llamados a participar, no invitaciones a asistir a un evento cultural puntual.\n"
         "Para clean_date razona explícitamente si la fecha mencionada es pasada o futura "
         "según el contexto y la fecha de publicación — no asumas futuro por defecto. Si la "
         "publicación conmemora un aniversario, hito histórico o fecha pasada (ej. \"a 197 años "
@@ -503,9 +576,7 @@ def _build_llm_prompt(caption: str, anchor_date: str) -> str:
         "conmemoración/publicación actual (usa la fecha de publicación si no hay otra más "
         "específica).\n"
         "Para title, redacta un título editorial corto (6-10 palabras) que describa el evento "
-        "concreto, no la categoría genérica. Para is_free, responde true/false solo si el "
-        "texto menciona explícitamente precio o gratuidad — si no hay ninguna pista, "
-        "responde null, no asumas.\n"
+        "concreto, no la categoría genérica.\n"
         "Para city y exact_address: el nombre de la cuenta o institución que publica NO es "
         "evidencia suficiente de dónde ocurre el evento (ej. una cuenta llamada \"Alianza "
         "Francesa de Medellín\" no implica que el evento sea en Medellín si el caption no lo "
@@ -517,17 +588,17 @@ def _build_llm_prompt(caption: str, anchor_date: str) -> str:
         "hub es la diáspora colombiana/latinoamericana en Francia. Excepción: mantén sin "
         "traducir los nombres propios (lugares, instituciones, títulos de eventos) tal como "
         "aparecen en el caption.\n\n"
-        f"{_LLM_SCHEMA_HINT}"
+        f"{_llm_schema_hint(include_reasoning)}"
     )
 
 
 # ── 6b-i. Transporte Ollama (local, activo por defecto) ──────────────────────
-def _ollama_request(caption: str, anchor_date: str, label: str = "") -> Optional[dict]:
+def _ollama_request(caption: str, anchor_date: str, label: str = "", include_reasoning: bool = False) -> Optional[dict]:
     """Una llamada secuencial a Ollama local. Sin cuota que pacear — a diferencia
     de Groq, no hay throttling/backoff aquí, solo el tiempo de cómputo de la
     máquina. None si Ollama no está disponible o la respuesta falla/no parsea.
     """
-    prompt = _build_llm_prompt(caption, anchor_date)
+    prompt = _build_llm_prompt(caption, anchor_date, include_reasoning)
     try:
         resp = requests.post(
             OLLAMA_ENDPOINT,
@@ -566,6 +637,14 @@ GROQ_MAX_TPM             = 12000
 GROQ_TPM_SAFETY_MARGIN   = 11000  # margen bajo el límite real de 12000
 GROQ_MAX_ATTEMPTS        = 3
 GROQ_RESPONSE_TOKENS_EST = 150    # el JSON de salida es corto y de forma fija
+
+# Si un 429 pide esperar más que esto, no vale la pena reintentar: casi
+# seguro es el tope diario (no el de por-minuto), que no se recupera en
+# segundos. Se corta el intento ahí mismo y se deja que llm_enrich_event()
+# falle sobre el otro proveedor cloud de inmediato, en vez de agotar los 3
+# intentos internos esperando el Retry-After completo cada vez (~25min en
+# el peor caso, observado en producción).
+MAX_RATE_LIMIT_WAIT_S    = 300
 _last_groq_call_ts       = 0.0
 _groq_token_window: list = []     # [(timestamp, tokens_estimados), ...] últimos 60s
 
@@ -607,7 +686,7 @@ def _groq_tpm_wait(estimated_tokens: int) -> int:
         time.sleep(wait)
 
 
-def _groq_request(caption: str, anchor_date: str, label: str = "") -> Optional[dict]:
+def _groq_request(caption: str, anchor_date: str, label: str = "", include_reasoning: bool = False) -> Optional[dict]:
     """Llama a Groq con reintentos. None si falla tras agotar GROQ_MAX_ATTEMPTS.
 
     Loguea tipo de excepción/status en cada intento fallido para poder
@@ -619,7 +698,7 @@ def _groq_request(caption: str, anchor_date: str, label: str = "") -> Optional[d
     """
     if not GROQ_API_KEY:
         return None
-    prompt = _build_llm_prompt(caption, anchor_date)
+    prompt = _build_llm_prompt(caption, anchor_date, include_reasoning)
     est_tokens = _estimate_tokens(prompt) + GROQ_RESPONSE_TOKENS_EST
 
     for attempt in range(1, GROQ_MAX_ATTEMPTS + 1):
@@ -640,6 +719,11 @@ def _groq_request(caption: str, anchor_date: str, label: str = "") -> Optional[d
             )
             if resp.status_code == 429:
                 wait = float(resp.headers.get("Retry-After", 2 ** attempt))
+                if wait > MAX_RATE_LIMIT_WAIT_S:
+                    print(f"  🔀 Groq pide esperar {wait:.0f}s (>{MAX_RATE_LIMIT_WAIT_S}s) [{label}]"
+                          f" — probablemente tope diario, no por-minuto. No vale la pena esperar, "
+                          f"cambiando de proveedor ya.", flush=True)
+                    return None
                 print(f"  ⚠️  Groq 429 rate-limit [{label}] intento {attempt}/{GROQ_MAX_ATTEMPTS}"
                       f" (~{est_tokens} tok, ventana={used}) — esperando {wait:.1f}s", flush=True)
                 time.sleep(wait)
@@ -706,14 +790,14 @@ def _cerebras_tpm_wait(estimated_tokens: int) -> int:
         time.sleep(wait)
 
 
-def _cerebras_request(caption: str, anchor_date: str, label: str = "") -> Optional[dict]:
+def _cerebras_request(caption: str, anchor_date: str, label: str = "", include_reasoning: bool = False) -> Optional[dict]:
     """Llama a Cerebras con reintentos. None si falla tras agotar
     CEREBRAS_MAX_ATTEMPTS. Mismo patrón que _groq_request (endpoint
     OpenAI-compatible, mismo prompt/esquema) — ver DD-033 update 5.
     """
     if not CEREBRAS_API_KEY:
         return None
-    prompt = _build_llm_prompt(caption, anchor_date)
+    prompt = _build_llm_prompt(caption, anchor_date, include_reasoning)
     est_tokens = _estimate_tokens(prompt) + CEREBRAS_RESPONSE_TOKENS_EST
 
     for attempt in range(1, CEREBRAS_MAX_ATTEMPTS + 1):
@@ -734,6 +818,11 @@ def _cerebras_request(caption: str, anchor_date: str, label: str = "") -> Option
             )
             if resp.status_code == 429:
                 wait = float(resp.headers.get("Retry-After", 2 ** attempt))
+                if wait > MAX_RATE_LIMIT_WAIT_S:
+                    print(f"  🔀 Cerebras pide esperar {wait:.0f}s (>{MAX_RATE_LIMIT_WAIT_S}s) [{label}]"
+                          f" — probablemente tope diario, no por-minuto. No vale la pena esperar, "
+                          f"cambiando de proveedor ya.", flush=True)
+                    return None
                 print(f"  ⚠️  Cerebras 429 rate-limit [{label}] intento {attempt}/{CEREBRAS_MAX_ATTEMPTS}"
                       f" (~{est_tokens} tok, ventana={used}) — esperando {wait:.1f}s", flush=True)
                 time.sleep(wait)
@@ -753,14 +842,37 @@ def _cerebras_request(caption: str, anchor_date: str, label: str = "") -> Option
 _LLM_DEFAULTS = {
     "is_public_invitation": None,
     "is_upcoming":          None,
+    "type":                 None,
     "city":                 None,
     "exact_address":        None,
     "clean_date":           None,
     "clean_description":    None,
     "title":                None,
-    "is_free":              None,
+    "price_range":          None,
+    "art_tags":             [],
     "reasoning":            None,
 }
+
+
+def _clean_art_tags(raw) -> list[str]:
+    """Valida/normaliza art_tags del LLM: debe ser una lista de strings cortos
+    sin comas ni paréntesis (evita reproducir el problema de artType de cuenta
+    en Excel, donde texto libre con comas dentro de paréntesis rompía
+    cualquier split simple — ver docs/decisions_es.md DD-042). Cualquier tag
+    que no cumpla el formato esperado se descarta en vez de intentar
+    repararlo — mejor una lista más corta que un tag corrupto filtrando basura
+    al menú."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for tag in raw:
+        if not isinstance(tag, str):
+            continue
+        t = tag.strip()
+        if not t or "(" in t or ")" in t or "," in t or len(t) > 40:
+            continue
+        out.append(t)
+    return out[:3]
 
 
 def _extract_llm_fields(data: Optional[dict]) -> dict:
@@ -769,17 +881,19 @@ def _extract_llm_fields(data: Optional[dict]) -> dict:
     return {
         "is_public_invitation": data.get("is_public_invitation"),
         "is_upcoming":          data.get("is_upcoming"),
+        "type":                 data.get("type") or None,
         "city":                 data.get("city") or None,
         "exact_address":        data.get("exact_address") or None,
         "clean_date":           data.get("clean_date") or None,
         "clean_description":    data.get("clean_description") or None,
         "title":                data.get("title") or None,
-        "is_free":              data.get("is_free"),
+        "price_range":          data.get("price_range") or None,
+        "art_tags":             _clean_art_tags(data.get("art_tags")),
         "reasoning":            data.get("reasoning") or None,
     }
 
 
-def llm_enrich_event_ollama(caption: str, post_timestamp: str = "", label: str = "") -> dict:
+def llm_enrich_event_ollama(caption: str, post_timestamp: str = "", label: str = "", include_reasoning: bool = False) -> dict:
     """Capa 3 vía Ollama local (modelo configurable vía OLLAMA_MODEL, default
     qwen2.5:7b) — mismo prompt/esquema que la versión Groq (_build_llm_prompt),
     solo cambia el transporte. Sin cuota que pacear: llamada secuencial, ver
@@ -788,27 +902,27 @@ def llm_enrich_event_ollama(caption: str, post_timestamp: str = "", label: str =
     if not caption:
         return dict(_LLM_DEFAULTS)
     anchor_date = (post_timestamp or "")[:10]
-    return _extract_llm_fields(_ollama_request(caption, anchor_date, label=label))
+    return _extract_llm_fields(_ollama_request(caption, anchor_date, label=label, include_reasoning=include_reasoning))
 
 
-def llm_enrich_event_groq(caption: str, post_timestamp: str = "", label: str = "") -> dict:
+def llm_enrich_event_groq(caption: str, post_timestamp: str = "", label: str = "", include_reasoning: bool = False) -> dict:
     """Capa 3 vía Groq (llama-3.3-70b-versatile). Throttling RPM/TPM y
     reintentos en _groq_request — ver DD-033 (update 2).
     """
     if not caption:
         return dict(_LLM_DEFAULTS)
     anchor_date = (post_timestamp or "")[:10]
-    return _extract_llm_fields(_groq_request(caption, anchor_date, label=label))
+    return _extract_llm_fields(_groq_request(caption, anchor_date, label=label, include_reasoning=include_reasoning))
 
 
-def llm_enrich_event_cerebras(caption: str, post_timestamp: str = "", label: str = "") -> dict:
+def llm_enrich_event_cerebras(caption: str, post_timestamp: str = "", label: str = "", include_reasoning: bool = False) -> dict:
     """Capa 3 vía Cerebras (llama-3.3-70b, mismo modelo que Groq). Throttling
     RPM/TPM y reintentos en _cerebras_request — ver DD-033 (update 5).
     """
     if not caption:
         return dict(_LLM_DEFAULTS)
     anchor_date = (post_timestamp or "")[:10]
-    return _extract_llm_fields(_cerebras_request(caption, anchor_date, label=label))
+    return _extract_llm_fields(_cerebras_request(caption, anchor_date, label=label, include_reasoning=include_reasoning))
 
 
 # ── 6b-iv. Fallback automático entre proveedores cloud (DD-033 update 7) ────
@@ -834,11 +948,16 @@ def _llm_call_failed(result: dict) -> bool:
     return result.get("is_public_invitation") is None and result.get("is_upcoming") is None
 
 
-def llm_enrich_event(caption: str, post_timestamp: str = "", label: str = "") -> dict:
-    """Capa 3 — limpia fecha/ubicación, redacta descripción y detecta noticias
+def llm_enrich_event(caption: str, post_timestamp: str = "", label: str = "", include_reasoning: bool = False) -> dict:
+    """Capa 3 — limpia fecha/ubicación, redacta descripción, tipifica el
+    evento (reemplaza la vieja Capa 2b de embeddings) y detecta noticias
     institucionales sin invitación real al público. LLM_PROVIDER elige el
     transporte preferido: llm_enrich_event_ollama() (default), o uno de los
     dos proveedores cloud (llm_enrich_event_groq()/llm_enrich_event_cerebras()).
+
+    `include_reasoning`: solo True en --dry-run — en producción no se pide
+    ese campo (nadie lo consume río abajo, y cuesta tokens de salida en
+    cada llamada).
 
     Si LLM_PROVIDER es un proveedor cloud y falla (cupo agotado u otro error
     tras sus reintentos internos), se reintenta automáticamente con el otro
@@ -852,14 +971,14 @@ def llm_enrich_event(caption: str, post_timestamp: str = "", label: str = "") ->
     LLM_UNKNOWN_PENALTY (penalización intermedia) en ese caso, ver DD-033.
     """
     if LLM_PROVIDER not in _CLOUD_PROVIDERS:
-        return llm_enrich_event_ollama(caption, post_timestamp, label=label)
+        return llm_enrich_event_ollama(caption, post_timestamp, label=label, include_reasoning=include_reasoning)
 
     order = [LLM_PROVIDER] + [p for p in _CLOUD_PROVIDERS if p != LLM_PROVIDER]
     result = dict(_LLM_DEFAULTS)
     for provider in order:
         if provider in _provider_failed_this_run:
             continue
-        result = _CLOUD_PROVIDERS[provider](caption, post_timestamp, label=label)
+        result = _CLOUD_PROVIDERS[provider](caption, post_timestamp, label=label, include_reasoning=include_reasoning)
         if not _llm_call_failed(result):
             return result
         print(f"  🔀 {provider} agotado/fallando — cambiando de proveedor "
@@ -870,9 +989,12 @@ def llm_enrich_event(caption: str, post_timestamp: str = "", label: str = "") ->
 
 # ── 7. Helpers — fechas y scores ──────────────────────────────────────────────
 # Patrones de fecha para extracción previa antes de dateparser
+# DD-037: se agregó "." como separador válido (además de "/" y "-") — los
+# flyers de conciertos suelen listar fechas como "30.06 · Banda", que el
+# regex anterior no capturaba en absoluto.
 _DATE_RE = re.compile(
     r"""
-    \b\d{1,2}[/\-]\d{1,2}(?:[/\-]\d{2,4})?\b          # DD/MM o DD/MM/YYYY
+    \b\d{1,2}[/\-.]\d{1,2}(?:[/\-.]\d{2,4})?\b          # DD/MM, DD.MM o DD/MM/YYYY
     |\b\d{1,2}\s+de\s+[a-záéíóúüñ]+(?:\s+de\s+\d{4})?\b  # 15 de junio [de 2026]
     |\b\d{1,2}\s+[a-záéíóúüñ]{4,}(?:\s+\d{4})?\b         # 15 juin / 15 june 2026
     |\b(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo
@@ -883,6 +1005,30 @@ _DATE_RE = re.compile(
     """,
     re.IGNORECASE | re.VERBOSE,
 )
+
+# DD-037: detecta el patrón puramente numérico D[./-]M(?:[./-]Y)? para poder
+# validar el componente de "mes" antes de dejarlo pasar a dateparser. Sin este
+# guardrail, notaciones de temporada como "26/27" (teatro/ópera) se leen
+# como si "27" fuera un año de 2 dígitos y producen una fecha inventada
+# (ej. "26/27" → 2027-07-26, usando el mes del post como relleno).
+_NUMERIC_DM_RE = re.compile(r"^(\d{1,2})[/\-.](\d{1,2})(?:[/\-.](\d{2,4}))?$")
+
+
+_WEEKDAY_RE = re.compile(
+    r"\b(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo"
+    r"|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche"
+    r"|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+    re.IGNORECASE,
+)
+
+
+def _has_day_signal(snippet: str) -> bool:
+    """True si el snippet trae información de día real (dígito de día o
+    nombre de día de la semana) — no solo mes/año. dateparser con
+    PREFER_DAY_OF_MONTH='first' fabrica un día 1 arbitrario cuando el texto
+    solo dice algo como "este marzo"; sin esta verificación esa falsa
+    precisión se cuela en raw_date/eventDate como si fuera un dato real."""
+    return bool(re.search(r"\d", snippet)) or bool(_WEEKDAY_RE.search(snippet))
 
 
 def extract_dates(text: str, post_timestamp: str) -> Optional[str]:
@@ -902,21 +1048,59 @@ def extract_dates(text: str, post_timestamp: str) -> Optional[str]:
     }
     langs = ["es", "fr", "en"]
 
-    # Primero intenta sobre los fragmentos extraídos por regex (más preciso)
-    for match in _DATE_RE.finditer(text[:600]):
+    # DD-037: la ventana era de 600 caracteres — en captions largos (flyers
+    # multi-línea con line-up, horarios y hashtags, comunes en este corpus)
+    # la fecha real cae fuera de esa ventana y el post se descartaba como
+    # "sin fecha en texto" sin llegar siquiera a Capa 3. Se amplió a 2000
+    # (los captions de este corpus rara vez la superan).
+    window = text[:2000]
+
+    # Primero intenta sobre los fragmentos extraídos por regex (más preciso).
+    # _DATE_RE ya exige dígito o nombre de día en sus 4 patrones, así que
+    # cualquier match de acá trae señal de día real — no necesita el filtro.
+    for match in _DATE_RE.finditer(window):
         snippet = match.group(0).strip()
         if len(snippet) < 3:
             continue
+
+        # DD-037: si el snippet es puramente numérico (D/M o D/M/Y), valida
+        # que el segundo componente sea un mes plausible (1-12) antes de
+        # dejarlo pasar a dateparser. Sin este chequeo, notaciones de
+        # temporada tipo "26/27" se leen como día=26 + año=27 (2 dígitos) y
+        # producen una fecha inventada sin ninguna fecha real en el texto.
+        numeric_match = _NUMERIC_DM_RE.match(snippet)
+        if numeric_match:
+            month_component = int(numeric_match.group(2))
+            if month_component > 12:
+                continue
+            # Normaliza "." a "/" antes de dateparser: con punto como
+            # separador, dateparser puede confundir "01.07" con una hora
+            # (01:07) en vez de una fecha (1 de julio).
+            snippet = snippet.replace(".", "/")
+
         parsed = dateparser.parse(snippet, languages=langs, settings=settings)
         if parsed:
             return parsed.strftime("%Y-%m-%d")
 
-    # Fallback: busca fechas en el texto completo
+    # Fallback: busca fechas en el texto completo. A diferencia de _DATE_RE,
+    # dateparser.search_dates() puede matchear un mes o año sueltos (p.ej.
+    # "este marzo") y, con PREFER_DAY_OF_MONTH='first', inventarles un día 1
+    # que no está en el texto. Se descarta ese caso en vez de devolver una
+    # fecha con falsa precisión.
     try:
         from dateparser.search import search_dates
-        results = search_dates(text[:600], languages=langs, settings=settings)
+        results = search_dates(window, languages=langs, settings=settings)
         if results:
-            return results[0][1].strftime("%Y-%m-%d")
+            matched_text, parsed_dt = results[0]
+            # DD-037: mismo guardrail que en el loop principal — search_dates()
+            # encuentra "26/27" por su cuenta (no pasa por _DATE_RE ni por el
+            # chequeo de arriba), así que sin esto el fallback reintroduce el
+            # mismo bug de notación de temporada leída como fecha inventada.
+            numeric_match = _NUMERIC_DM_RE.match(matched_text.strip())
+            if numeric_match and int(numeric_match.group(2)) > 12:
+                pass
+            elif _has_day_signal(matched_text):
+                return parsed_dt.strftime("%Y-%m-%d")
     except Exception:
         pass
 
@@ -935,6 +1119,10 @@ def dates_close(d1: Optional[str], d2: Optional[str], window: int) -> bool:
 
 
 def compute_hotness(likes: int, comments: int, timestamp_str: str) -> float:
+    # Instagram permite ocultar el conteo de likes; algunos scrapes devuelven
+    # -1 en ese caso. log1p exige x > -1, así que negativos se tratan como 0.
+    likes    = max(0, likes or 0)
+    comments = max(0, comments or 0)
     try:
         ts       = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
         days_ago = max(0, (STUDY_CUTOFF - ts).days)   # anclado a fecha de corte fija
@@ -1018,21 +1206,28 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
                 e.layer1Score  = $layer1Score,
                 e.postCount    = 1,
                 e.embedding    = $embedding,
-                e.createdAt    = $createdAt,
+                e.createdAt    = datetime(),
                 e.description        = $description,
                 e.isPublicInvitation = $isPublicInvitation,
                 e.isUpcoming         = $isUpcoming,
-                e.isFree             = $isFree,
+                e.priceRange         = $priceRange,
+                e.eventArtTags       = $eventArtTags,
                 e.llmReasoning       = $llmReasoning,
                 e.sourcePostUrl      = $sourcePostUrl,
                 e.sourceAuthor       = $sourceAuthor,
-                e.sourcePostDate     = $sourcePostDate
+                e.sourcePostDate     = $sourcePostDate,
+                e.artType            = $artType,
+                e.institutionType    = $institutionType,
+                e.culturalIdentity   = $culturalIdentity,
+                e.geoZone            = $geoZone,
+                e.parentInstitution  = $parentInstitution
         """, **{k: event[k] for k in [
             "id", "title", "type", "category", "rawDate", "eventDate",
             "locationName", "cityName", "exactAddress", "hotnessScore", "eventScore", "confidence",
-            "layer1Score", "embedding", "createdAt",
-            "description", "isPublicInvitation", "isUpcoming", "isFree", "llmReasoning",
+            "layer1Score", "embedding",
+            "description", "isPublicInvitation", "isUpcoming", "priceRange", "eventArtTags", "llmReasoning",
             "sourcePostUrl", "sourceAuthor", "sourcePostDate",
+            "artType", "institutionType", "culturalIdentity", "geoZone", "parentInstitution",
         ]})
         if event.get("locationName"):
             session.run("""
@@ -1091,15 +1286,16 @@ def run_extraction(
     layer1_threshold: float = 0.45,
     layer2_threshold: float = 0.40,
     max_posts: int          = 50,
+    skip_posts: int         = 0,
     batch_size: int         = 32,
     date_window: int        = 3,
     sim_threshold: float    = 0.82,
     dry_run: bool           = False,
     accounts: list[str]     = None,
-    high_quality: bool      = False,
+    diag_csv: str           = None,
 ):
     t_start = time.time()
-    print("\n🎭 Fase 4-B — Extracción de Eventos (4 capas)")
+    print("\n🎭 Fase 4-B — Extracción de Eventos (3 capas)")
     print("=" * 60)
     if LLM_PROVIDER == "groq":
         capa3_status = f"Groq({GROQ_MODEL})" if GROQ_API_KEY else "Groq(GROQ_API_KEY ausente!)"
@@ -1115,6 +1311,15 @@ def run_extraction(
         print(f"  Filtro cuentas: {accounts}")
 
     # Cargar posts
+    # ORDER BY p.id: determinismo — sin esto, dos corridas MATCH...LIMIT sobre
+    # el mismo grafo sin escrituras de por medio típicamente devuelven el
+    # mismo set en la práctica, pero Cypher no lo garantiza. Importa sobre
+    # todo para --diag-csv: si vas a comparar esta salida contra una
+    # clasificación externa hecha aparte, necesitas la MISMA muestra.
+    # skip_posts (SKIP, antes de LIMIT) existe para poder pedir un lote
+    # NUEVO en --dry-run: como dry-run nunca marca eventExtracted, correr
+    # el mismo comando dos veces sin --skip devuelve siempre el mismo lote.
+    skip_clause  = f"SKIP {skip_posts}" if skip_posts > 0 else ""
     limit_clause = f"LIMIT {max_posts}" if max_posts > 0 else ""
     account_filter = "AND a.username IN $accounts" if accounts else ""
     with driver.session() as session:
@@ -1132,9 +1337,16 @@ def run_extraction(
                    p.hashtags      AS hashtags,
                    p.url           AS url,
                    a.username      AS author,
+                   a.artType             AS artType,
+                   a.institutionType     AS institutionType,
+                   a.culturalIdentity    AS culturalIdentity,
+                   a.geoZone             AS geoZone,
+                   a.parentInstitution   AS parentInstitution,
                    collect(DISTINCT [(p)-[:TAGS_USER]->(tu) | tu.username])[0] AS taggedUsers,
                    collect(DISTINCT [(p)-[:MENTIONS]->(m)   | m.username])[0]  AS mentions,
                    [(p)-[:TAGGED_AT]->(loc:Location) | loc.name][0]            AS taggedLocation
+            ORDER BY p.id
+            {skip_clause}
             {limit_clause}
         """, accounts=accounts or []).data()
 
@@ -1167,8 +1379,6 @@ def run_extraction(
     print(f"  ✅ Capa 1: {len(candidates_idx)} candidatos  "
           f"({rejected_l1} descartados, L1<{layer1_threshold})")
 
-    HYP_TMPL = "Esta publicación anuncia {}."
-
     with driver.session() as session:
         cache = load_events_cache(session)
 
@@ -1187,6 +1397,7 @@ def run_extraction(
     for i, post in enumerate(posts):
         if i not in cand_set:
             diag_all.append({
+                "post_id":     post.get("id", ""),
                 "caption":     post["caption"],
                 "author":      post.get("author", ""),
                 "layer1":      layer1_scores[i],
@@ -1209,52 +1420,38 @@ def run_extraction(
     cand_embs     = [all_embs[i] for i in candidates_idx]
     cand_l1       = [layer1_scores[i] for i in candidates_idx]
     cand_captions = [p["caption"][:1200] for p in cand_posts]  # el tokenizer trunca a MAX_NLI_TOKENS
+    cand_langs    = [detect_text_lang(c) for c in cand_captions]
 
     # ── Capa 2a — detección binaria BATCHEADA (modelo ligero) ────────────────
     print(f"\n  🟠 Capa 2a — detección binaria batcheada ({DET_MODEL})...")
     t0 = time.time()
-    det_scores     = detect_events_batch(cand_captions, batch_size=batch_size)
+    det_scores     = detect_events_batch(cand_captions, cand_langs, batch_size=batch_size)
     is_event_flags = [s >= layer2_threshold for s in det_scores]
     pos_idx        = [j for j, f in enumerate(is_event_flags) if f]
     print(f"  ✅ Capa 2a: {len(pos_idx)} positivos / {len(cand_posts)} candidatos"
           f"  ({time.time() - t0:.1f}s, batch={batch_size})")
 
-    # ── Capa 2b — tipificación multi-label SOLO sobre positivos ──────────────
-    type_map: dict = {}
-    if pos_idx:
-        type_model_name = TYPE_MODEL if high_quality else DET_MODEL
-        print(f"  🟣 Capa 2b — tipificación ({type_model_name}) sobre {len(pos_idx)} posts...")
-        t0 = time.time()
-        from transformers import pipeline as hf_pipeline
-        type_clf = hf_pipeline("zero-shot-classification", model=type_model_name, device=-1)
-        typ_list = type_clf(
-            [cand_captions[j] for j in pos_idx],
-            EVENT_LABELS_CULTURAL,
-            hypothesis_template=HYP_TMPL,
-            multi_label=True,
-            batch_size=8,          # 12 labels × B pares por forward
-            truncation=True,
-        )
-        if isinstance(typ_list, dict):
-            typ_list = [typ_list]
-        type_map = dict(zip(pos_idx, typ_list))
-        print(f"  ✅ Capa 2b lista  ({time.time() - t0:.1f}s)")
+    # NOTA: la vieja Capa 2b (tipificación multi-label vía zero-shot NLI,
+    # mDeBERTa/MiniLMv2 sobre EVENT_LABELS_CULTURAL) se eliminó. La
+    # tipificación ahora la hace el LLM de Capa 3 directamente (campo "type"
+    # en _LLM_SCHEMA_HINT, misma taxonomía de 16 labels) — un modelo menos
+    # que correr, y sin el sesgo de embeddings que ya vimos en Capa 1/2a.
+
+    # Dedup por post_id: cuando el mismo post está co-publicado por varias
+    # cuentas (RETURN de la query trae una fila por cada (Account,Post) —
+    # confirmado en la eval de 100: 3 pares duplicados), sin esto Capa 3 se
+    # llamaría dos veces por el mismo texto exacto. Cache por corrida.
+    llm_result_cache: dict = {}
 
     # ── Persistencia + NER (solo eventos, o todo en dry-run) ─────────────────
-    since_last_mark = 0
+    since_last_mark      = 0
+    skipped_llm_gate     = 0
+    skipped_no_text_date = 0  # DD-036 update: candidatos que ni siquiera llaman
+                               # a Capa 3 por falta de fecha real en el texto
     for j in tqdm(range(len(cand_posts)), desc="  Eventos"):
         post, emb, l1 = cand_posts[j], cand_embs[j], cand_l1[j]
         det_score = det_scores[j]
         is_event  = is_event_flags[j]
-
-        # Tipo desde Capa 2b
-        typ        = type_map.get(j)
-        top_label  = typ["labels"][0]  if typ else EVENT_LABELS_CULTURAL[0]
-        type_score = typ["scores"][0] if typ else det_score
-        top3       = list(zip(typ["labels"][:3], typ["scores"][:3])) if typ else []
-
-        category = _CAT_MAP.get(top_label, "nulo") if is_event else "nulo"
-        penalty  = _PEN_MAP.get(top_label, 0.0)    if is_event else 0.0
 
         # NER + fechas solo cuando hace falta (eventos, o todo en dry-run
         # para diagnóstico) — evita pasar spaCy/langdetect por cada candidato.
@@ -1267,12 +1464,23 @@ def run_extraction(
         # más abajo) — si Capa 3 no corre o no la da, queda null en vez de
         # adivinada. ner["locations"] ya no se usa para nada.
         loc_name = org_name = event_date = None
+        has_text_date = False
         if is_event or dry_run:
             lang       = detect_text_lang(post["caption"])
             ner        = extract_ner(post["caption"], lang)
             org_name   = ner["orgs"][0] if ner["orgs"] else None
             # FIX 2: fechas ancladas al timestamp del post, no a datetime.now()
             event_date = extract_dates(post["caption"], post.get("timestamp", "") or "")
+            # DD-036: señal de fecha REAL extraída del texto (regex/dateparser,
+            # ya blindado contra falsa precisión por DD-034 vía _has_day_signal).
+            # Se guarda ANTES de que Capa 3 pueda sobreescribir event_date con
+            # su propio clean_date "razonado por contexto" más abajo — sirve de
+            # gate independiente del LLM, ver should_create. El objetivo es
+            # cerrar el patrón dominante de falsos positivos (eval 201-500:
+            # ~14 de 22) donde Capa 3 acepta un post como evento sin que el
+            # texto contenga ninguna fecha ancorable (listados de temporada,
+            # apertura de venta sin fecha del evento, rutas itinerantes).
+            has_text_date = event_date is not None
 
         hotness     = compute_hotness(
             post.get("likes", 0) or 0,
@@ -1280,16 +1488,33 @@ def run_extraction(
             post.get("timestamp", "") or "",
         )
 
-        # Capa 3 — Groq, solo sobre candidatos que ya pasaron Capas 1+2 (is_event=True).
+        # Capa 3 — LLM, solo sobre candidatos que ya pasaron Capas 1+2 (is_event=True)
+        # Y que además tienen fecha real en el texto (has_text_date, DD-036
+        # update). Antes se llamaba al LLM primero y el gate de fecha se
+        # aplicaba después sobre el veredicto — pero el gate es determinístico
+        # e independiente de lo que diga el LLM, así que si ya sabemos que
+        # should_create va a ser False por falta de fecha, no tiene sentido
+        # gastar la llamada. Medido sobre los 425 candidatos de la muestra de
+        # 495 posts: 173 (40.7%) no tienen fecha en el texto — esas llamadas
+        # se ahorran sin cambiar ninguna decisión final (ver docs/decisions_es.md DD-036).
+        # Ahora también tipifica el evento (reemplaza Capa 2b) y da price_range.
         is_public_invitation = is_upcoming = clean_description = llm_reasoning = None
-        llm_title = llm_is_free = None
+        llm_title = llm_price_range = top_label = None
         llm_city = llm_exact_address = None
+        llm_art_tags = []
         llm_penalty = 1.0
-        if is_event:
-            llm_out = llm_enrich_event(
-                post["caption"], post.get("timestamp", "") or "",
-                label=f"@{post.get('author', '?')}/{post.get('id', '?')}",
-            )
+        if is_event and has_text_date:
+            pid = post.get("id")
+            if pid in llm_result_cache:
+                llm_out = llm_result_cache[pid]
+            else:
+                llm_out = llm_enrich_event(
+                    post["caption"], post.get("timestamp", "") or "",
+                    label=f"@{post.get('author', '?')}/{post.get('id', '?')}",
+                    include_reasoning=dry_run,
+                )
+                llm_result_cache[pid] = llm_out
+            top_label         = llm_out.get("type")
             llm_city          = llm_out.get("city")
             # Si el caption no menciona dirección explícita, caemos al geotag
             # propio de Instagram en el post (Post -[:TAGGED_AT]-> Location)
@@ -1303,32 +1528,109 @@ def run_extraction(
             loc_name = llm_exact_address or llm_city or None
             if llm_out.get("clean_date"):
                 event_date = llm_out["clean_date"]
+                # DD-039: el except de abajo tragaba CUALQUIER fallo de parseo
+                # sin clampear — si post["timestamp"] venía vacío/malformado,
+                # pd nunca se calculaba, la comparación de clamp nunca corría,
+                # y clean_date del LLM pasaba sin validar en absoluto. Así se
+                # colaron 3 eventos reales con fechas 2036/2052/2090 (ninguna
+                # con respaldo real en el texto — "10 años de aniversario",
+                # "menores de 26 años", "dura 90 minutos" mal interpretados).
+                # Ahora: si ed no parsea como ISO, se descarta directo (no es
+                # una fecha válida, punto). Si pd falla, se usa STUDY_CUTOFF
+                # como ancla de respaldo en vez de abortar el chequeo entero.
                 try:
                     ed = datetime.fromisoformat(event_date.replace("Z", "+00:00")).replace(tzinfo=None)
-                    pd = datetime.fromisoformat(
-                        (post.get("timestamp", "") or "").replace("Z", "+00:00")
-                    ).replace(tzinfo=None)
+                except (ValueError, TypeError, AttributeError):
+                    event_date = None
+                    dates_clamped += 1
+                else:
+                    try:
+                        pd = datetime.fromisoformat(
+                            (post.get("timestamp", "") or "").replace("Z", "+00:00")
+                        ).replace(tzinfo=None)
+                    except (ValueError, TypeError):
+                        pd = STUDY_CUTOFF.replace(tzinfo=None)
                     if abs((ed - pd).days) > EVENT_DATE_CLAMP_DAYS:
                         event_date = None
                         dates_clamped += 1
-                except (ValueError, TypeError):
-                    pass
             is_public_invitation = llm_out.get("is_public_invitation")
             is_upcoming          = llm_out.get("is_upcoming")
             clean_description    = llm_out.get("clean_description")
             llm_reasoning         = llm_out.get("reasoning")
             llm_title            = llm_out.get("title")
-            llm_is_free          = llm_out.get("is_free")
+            llm_price_range      = llm_out.get("price_range")
+            llm_art_tags         = llm_out.get("art_tags") or []
             if is_public_invitation is None or is_upcoming is None:
-                # Groq falló tras agotar reintentos — verdicto incierto, no
+                # LLM falló tras agotar reintentos — verdicto incierto, no
                 # confianza ciega (DD-033-update): penalización intermedia.
                 llm_penalty = LLM_UNKNOWN_PENALTY
             else:
                 llm_penalty = 1.0 if (is_public_invitation and is_upcoming) else LLM_REJECT_PENALTY
 
+        # category/penalty: top_label es None cuando is_event=False O cuando
+        # is_event=True pero Capa 3 no devolvió type (falló/sin cuota) — en
+        # ese segundo caso NO usamos penalty=0.0 (eso significaría "no es
+        # cultural", una afirmación que no hicimos), usamos 1.0 (neutral,
+        # "no sabemos" != "no es válido"). Cuando el LLM SÍ corrió y calificó
+        # el post como una de las categorías "nulo" de la taxonomía (ver
+        # _LABEL_META), ese 0.0 real se sigue respetando vía _PEN_MAP.
+        category = _CAT_MAP.get(top_label, "sin_clasificar") if top_label else "sin_clasificar"
+        penalty  = _PEN_MAP.get(top_label, 1.0)              if top_label else 1.0
+
+        # Gate de creación (antes solo bajaba el score, ahora también decide
+        # si se escribe el nodo — ver eval de 100 posts: 58% -> 86% de
+        # acuerdo con este cambio). Si Capa 3 corrió y dijo explícitamente
+        # que NO es invitación pública futura, no se crea el evento. Si Capa
+        # 3 falló del todo (sin veredicto), se mantiene el comportamiento
+        # viejo — crear igual, con LLM_UNKNOWN_PENALTY — por resiliencia.
+        # DD-036: además, exige has_text_date — el texto del caption tiene que
+        # traer una fecha real (regex/dateparser), no basta con que el LLM lo
+        # "sienta" como invitación pública. No se aplica excepción para
+        # eventos del mismo día (p.ej. "hoy a las 16h") a propósito: el script
+        # corre como máximo cada 2 días, así que un evento de hoy ya sería
+        # irrelevante para el momento en que se procese.
+        # DD-039: category en NULL_CATS ("nulo") significa que Capa 3 SÍ
+        # calificó el post con una etiqueta de la taxonomía, y esa etiqueta
+        # es explícitamente "esto no es un evento cultural real" (contenido
+        # personal, promoción comercial, etc. — ver _LABEL_META). Antes
+        # should_create ignoraba esto por completo: penalty caía a 0.0 y
+        # event_score quedaba en 0.0, pero el nodo :Event se creaba igual
+        # si is_public_invitation/is_upcoming venían en True — 3 casos
+        # reales en la corrida de producción (deporte, reapertura de café,
+        # feria comercial) confirman que esta contradicción SÍ ocurre, no
+        # es solo teórica. category="sin_clasificar" (top_label ausente,
+        # el LLM no pudo tipificar) NO cuenta como nulo — solo bloquea si
+        # el LLM tipificó explícitamente como no-cultural.
+        llm_ran_ok    = is_public_invitation is not None and is_upcoming is not None
+        should_create = (
+            is_event
+            and (not llm_ran_ok or (is_public_invitation and is_upcoming))
+            and has_text_date
+            and category not in NULL_CATS
+        )
+
         event_score = compute_event_score(det_score, hotness, penalty * llm_penalty) if is_event else 0.0
 
+        if is_event and not has_text_date:
+            # DD-036 update: nunca se llamó a Capa 3 — se sabe de antemano que
+            # should_create es False por falta de fecha real en el texto.
+            decision_label = "no evento (sin fecha en texto, LLM omitido)"
+        elif is_event and category in NULL_CATS:
+            # DD-039: Capa 3 SÍ corrió y tipificó el post como no-cultural
+            # (category="nulo") — distinto de "rechazado por LLM" (que
+            # significa que is_public_invitation/is_upcoming vinieron en
+            # False). Acá el LLM puede haber dicho is_public_invitation=True
+            # y aun así el post no califica, porque no es un evento cultural.
+            decision_label = "no evento (categoría nula, DD-039)"
+        elif is_event and llm_ran_ok and not should_create:
+            decision_label = "no evento (rechazado por LLM)"
+        elif is_event:
+            decision_label = "EVENTO" if should_create else "no evento"
+        else:
+            decision_label = "no evento"
+
         record = {
+            "post_id":     post.get("id", ""),
             "caption":     post["caption"],
             "author":      post.get("author", ""),
             "layer1":      l1,
@@ -1336,22 +1638,23 @@ def run_extraction(
             "hotness":     hotness,
             "event_score": event_score,
             "category":    category,
-            "decision":    "EVENTO" if is_event else "no evento",
+            "decision":    decision_label,
             "loc_name":    loc_name or "",
             "raw_date":    event_date or "",
-            "top3":        top3,          # tipos de Capa 2b
+            "top3":        [(top_label, 1.0)] if top_label else [],  # compat diagnóstico
             "is_public_invitation": is_public_invitation,
             "is_upcoming":          is_upcoming,
             "clean_description":    clean_description or "",
             "title":                llm_title or "",
-            "is_free":              llm_is_free,
+            "price_range":          llm_price_range or "",
             "city":                 llm_city or "",
             "exact_address":        llm_exact_address or "",
+            "art_tags":             ", ".join(llm_art_tags) if llm_art_tags else "",
         }
         diag_all.append(record)
         diag_cands.append(record)
 
-        if is_event:
+        if should_create:
             dry_counts[category] += 1
 
         if not is_event:
@@ -1360,21 +1663,34 @@ def run_extraction(
             since_last_mark += 1
             continue
 
+        if is_event and not has_text_date:
+            skipped_no_text_date += 1
+            processed_ids.append(post["id"])
+            since_last_mark += 1
+            continue
+
+        if is_event and not should_create:
+            skipped_llm_gate += 1
+            processed_ids.append(post["id"])
+            since_last_mark += 1
+            continue
+
         if dry_run:
             processed_ids.append(post["id"])
             continue
 
-        emb_text  = f"{post['caption'][:200]} {top_label} {event_date or ''} {loc_name or ''}"
+        type_for_id = top_label or "evento cultural"
+        emb_text  = f"{post['caption'][:200]} {type_for_id} {event_date or ''} {loc_name or ''}"
         event_emb = st_model.encode([emb_text], normalize_embeddings=True, show_progress_bar=False)[0].tolist()
         # FIX make_event_id usa event_date ISO, no raw_date
-        event_id  = make_event_id(top_label, event_date or "", loc_name or "")
+        event_id  = make_event_id(type_for_id, event_date or "", loc_name or "")
 
         candidate = {
             "id":           event_id,
-            # Título editorial del LLM si existe; si no (Groq falló o el
-            # post no llegó a Capa 3), cae al nombre de categoría como antes.
-            "title":        llm_title or top_label.title(),
-            "type":         top_label,
+            # Título editorial del LLM si existe; si no (LLM falló y aun así
+            # se creó por resiliencia) cae a un genérico.
+            "title":        llm_title or type_for_id.title(),
+            "type":         type_for_id,
             "category":     category,
             "rawDate":      event_date or "",
             "eventDate":    event_date or "",
@@ -1387,18 +1703,42 @@ def run_extraction(
             "layer1Score":  round(l1, 4),
             "embedding":    event_emb,
             "organizerOrg": org_name,
-            "createdAt":    datetime.now(timezone.utc).isoformat(),
-            # Capa 3 (Groq) — description/flags/reasoning; source* solo se
+            # DD-038: createdAt ya no se genera acá — se pasó a datetime()
+            # nativo de Cypher en upsert_event (server-side), igual que
+            # firstSeenAt en 2_build_graph.py. Antes se guardaba como string
+            # ISO (datetime.now().isoformat()), lo que rompía en silencio
+            # cualquier comparación temporal nativa en Cypher (WHERE
+            # e.createdAt >= datetime() - duration(...) evalúa a null contra
+            # un string, sin error, sin filas — así se perdió el rastro de
+            # esta misma corrida al intentar auditarla).
+            # Capa 3 (LLM) — description/flags/reasoning; source* solo se
             # fijan al crear el evento, nunca se sobreescriben al fusionar
             # (representan la publicación ORIGINAL, ver DD-033).
             "description":        clean_description or "",
             "isPublicInvitation":  is_public_invitation,
             "isUpcoming":          is_upcoming,
-            "isFree":              llm_is_free,
+            "priceRange":          llm_price_range,
+            # DD-042: eventArtTags es NUEVO y distinto de artType (abajo) —
+            # artType es heredado de la :Account curada a mano (un solo string
+            # libre, describe qué hace la cuenta en general, ej. una cuenta de
+            # sede multiuso trae "Música, Danza, Circo, Teatro, Artes visuales"
+            # pegados). eventArtTags lo genera el LLM por EVENTO puntual, es
+            # una lista corta (máx 3) de tags sin comas/paréntesis dentro de
+            # cada uno — pensado como filtro de menú confiable, sin el
+            # problema de parseo que tiene el artType de cuenta.
+            "eventArtTags":        llm_art_tags,
             "llmReasoning":        llm_reasoning or "",
             "sourcePostUrl":       post.get("url"),
             "sourceAuthor":        post.get("author"),
             "sourcePostDate":      post.get("timestamp"),
+            # Heredados de :Account (curación manual) — sin costo LLM, se
+            # copian tal cual al crear el evento. Solo existen si la cuenta
+            # pasó por load_manual_account_categorization.py.
+            "artType":            post.get("artType"),
+            "institutionType":    post.get("institutionType"),
+            "culturalIdentity":   post.get("culturalIdentity"),
+            "geoZone":            post.get("geoZone"),
+            "parentInstitution":  post.get("parentInstitution"),
         }
 
         existing_id = find_similar_event(candidate, cache, sim_threshold, date_window)
@@ -1438,6 +1778,34 @@ def run_extraction(
             SET p.eventExtracted = true
         """, {"ids": processed_ids})
 
+    # ── Export CSV de diagnóstico (--diag-csv) ───────────────────────────────
+    # Los prints de consola de abajo solo muestran ejemplos (top-5 falsos
+    # negativos, 10 al azar) — para comparar sistemáticamente estas
+    # decisiones contra una clasificación externa (p.ej. hecha por un LLM
+    # aparte sobre el mismo lote) hace falta el listado COMPLETO en forma
+    # estructurada. diag_all incluye tanto los descartados en Capa 1 como
+    # los candidatos que llegaron a Capa 2/3.
+    # DD-038: antes exigía dry_run — en una corrida real, --diag-csv se
+    # ignoraba en silencio (sin error, sin aviso) y no quedaba ningún
+    # rastro auditable de qué se rechazó y por qué. diag_all/diag_cands se
+    # llenan igual en modo real (no dependen de dry_run en ningún punto de
+    # arriba), así que exportar acá no tiene ningún costo ni riesgo nuevo.
+    if diag_csv:
+        fieldnames = [
+            "post_id", "author", "decision", "category", "layer1", "layer2",
+            "event_score", "hotness", "loc_name", "raw_date", "top3",
+            "is_public_invitation", "is_upcoming", "clean_description",
+            "title", "price_range", "city", "exact_address", "art_tags", "caption",
+        ]
+        with open(diag_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for r in diag_all:
+                row = dict(r)
+                row["top3"] = "; ".join(f"{lbl}:{sc:.3f}" for lbl, sc in row.get("top3", []))
+                writer.writerow(row)
+        print(f"\n  💾 Diagnóstico completo exportado a {diag_csv} ({len(diag_all)} posts)")
+
     # ── Resumen ───────────────────────────────────────────────────────────────
     detected = [r for r in diag_cands if r["decision"] == "EVENTO"]
     print(f"\n{'═'*60}")
@@ -1446,6 +1814,9 @@ def run_extraction(
     print(f"  🔵 Descartados Capa 1  : {skipped_l1}  (L1<{layer1_threshold})")
     print(f"  🟠 Candidatos Capa 2   : {len(cand_posts)}")
     print(f"  ⏭️  Descartados Capa 2  : {skipped_l2}")
+    print(f"  📅 Sin fecha en texto  : {skipped_no_text_date}  (LLM omitido del todo, DD-036 — ahorro directo de tokens)")
+    print(f"  🚫 Rechazados por LLM  : {skipped_llm_gate}  (Capa 3 dijo que no es invitación pública futura)")
+    print(f"  💰 Llamadas a Capa 3   : {skipped_llm_gate + len(detected)}  (vs. {skipped_llm_gate + skipped_no_text_date + len(detected)} sin el gate previo)")
     print(f"  🗓️  Fechas clampeadas   : {dates_clamped}  (>{EVENT_DATE_CLAMP_DAYS}d del post)")
     print(f"  🎭 Eventos detectados  : {len(detected)}")
     if not dry_run:
@@ -1560,6 +1931,10 @@ def main(
         50, "--max-posts",
         help="Límite de posts a procesar. 0 = todos. Default 50 para testing rápido.",
     ),
+    skip_posts: int = typer.Option(
+        0, "--skip",
+        help="Salta los primeros N posts pendientes antes de aplicar --max-posts — útil en --dry-run para pedir un lote NUEVO (dry-run nunca marca eventExtracted, así que sin --skip siempre se repite el mismo lote).",
+    ),
     batch_size: int = typer.Option(
         32, "--batch-size",
         help="Tamaño de lote para la inferencia NLI de Capa 2a.",
@@ -1572,28 +1947,30 @@ def main(
         None, "--accounts",
         help="Cuentas a procesar separadas por coma, e.g. dichaparis,ivan_argote. Sin filtro = todas.",
     ),
-    high_quality: bool = typer.Option(
-        False, "--high-quality",
-        help="Usar mDeBERTa-v3-base en Capa 2b. Más preciso, más lento. Por defecto se usa MiniLMv2-L6.",
+    diag_csv: Optional[str] = typer.Option(
+        None, "--diag-csv",
+        help="Solo con --dry-run: exporta el diagnóstico completo (todos los posts, no solo ejemplos) a este CSV.",
     ),
 ):
     """
-    Fase 4-B: extracción de eventos en 4 capas.
+    Fase 4-B: extracción de eventos en 3 capas.
 
     Capa 1: sentence-transformers filtra candidatos por similitud coseno
-    máxima contra 100 frases de referencia (--threshold).
+    máxima contra ~100 frases de referencia (--threshold).
 
-    Capa 2a: NLI multilingüe ligero batcheado — detección binaria (--layer2-threshold).
-    Capa 2b: MiniLMv2-L6 multi-label — tipificación solo sobre positivos.
-             Usar --high-quality para activar mDeBERTa-v3-base (más lento).
+    Capa 2a: NLI multilingüe ligero batcheado — detección binaria
+             (--layer2-threshold), hipótesis en el idioma del caption.
     Capa 3:  Ollama local (modelo configurable vía OLLAMA_MODEL, default
              qwen2.5:7b) por defecto — o Groq si LLM_PROVIDER=groq
              (vía GROQ_API_KEY en .env), o Cerebras si LLM_PROVIDER=cerebras
-             (vía CEREBRAS_API_KEY en .env). Limpia fecha/ubicación, redacta
-             descripción y filtra noticias institucionales sin invitación
-             real. Solo corre sobre los positivos de 2a.
+             (vía CEREBRAS_API_KEY en .env). Limpia fecha/ubicación, TIPIFICA
+             el evento (reemplaza la vieja Capa 2b de embeddings), da
+             price_range, redacta descripción y filtra noticias
+             institucionales sin invitación real — si el LLM corrió y dice
+             que no es invitación pública futura, el evento no se crea.
+             Solo corre sobre los positivos de 2a.
 
-    eventScore = (layer2_score × 0.6 + hotness_norm × 0.4) × political_penalty × llm_penalty
+    eventScore = (layer2_score × 0.6 + hotness_norm × 0.4) × category_penalty × llm_penalty
     """
     driver.verify_connectivity()
     print("✅ Conexión Neo4j OK\n")
@@ -1604,12 +1981,13 @@ def main(
         layer1_threshold=threshold,
         layer2_threshold=layer2_threshold,
         max_posts=max_posts,
+        skip_posts=skip_posts,
         batch_size=batch_size,
         date_window=date_window,
         sim_threshold=sim_threshold,
         dry_run=dry_run,
         accounts=accounts_list,
-        high_quality=high_quality,
+        diag_csv=diag_csv,
     )
 
     driver.close()

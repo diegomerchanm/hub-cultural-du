@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hub Cultural — Descubre eventos culturales latinoamericanos en Francia</title>
+<meta name="description" content="Eventos culturales de la diáspora latinoamericana en Francia — música, cine, arte, literatura y más.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topnav">
+  <div class="topnav-inner">
+    <a class="brand" href="#/">
+      <span class="brand-mark"><i class="ti ti-map-2" aria-hidden="true"></i></span>
+      <span class="brand-name">Hub Cultural</span>
+    </a>
+    <div class="topnav-actions">
+      <button id="lang-es" class="lang-btn active" data-lang="es">ES</button>
+      <button id="lang-fr" class="lang-btn" data-lang="fr">FR</button>
+    </div>
+  </div>
+</header>
+
+<div class="filterbar-wrap">
+  <div class="filterbar" id="filterbar">
+    <div class="filter-group" id="geo-group">
+      <span class="filter-label" data-i18n="where"><i class="ti ti-map-pin" aria-hidden="true"></i> Dónde</span>
+      <div class="pill-row" id="geo-pills"></div>
+    </div>
+    <div class="filter-group" id="when-group">
+      <span class="filter-label" data-i18n="when"><i class="ti ti-calendar" aria-hidden="true"></i> Cuándo</span>
+      <div class="pill-row" id="when-pills"></div>
+    </div>
+    <div class="filter-group">
+      <button id="free-toggle" class="pill">
+        <i class="ti ti-tag" aria-hidden="true"></i> <span data-i18n="free">Gratis</span>
+      </button>
+    </div>
+    <div class="sort-control">
+      <label for="sort-select" data-i18n="sortLabel">Ordenar</label>
+      <select id="sort-select">
+        <option value="recommended" data-i18n="sortRecommended">Recomendado</option>
+        <option value="date" data-i18n="sortDate">Fecha</option>
+        <option value="popularity" data-i18n="sortPopularity">Popularidad</option>
+      </select>
+    </div>
+  </div>
+  <div class="theme-row" id="theme-pills"></div>
+</div>
+
+<main id="app">
+  <section id="hero-section"></section>
+  <section id="shelves"></section>
+  <section id="results-count" class="results-count"></section>
+</main>
+
+<div id="detail-overlay" class="overlay hidden">
+  <div class="overlay-backdrop" data-close></div>
+  <div class="detail-panel" id="detail-panel"></div>
+</div>
+
+<footer class="site-footer">
+  <p>Hub Cultural · Diáspora latinoamericana en Francia · Datos detectados automáticamente a partir de Instagram — verificá la fuente antes de asistir.</p>
+</footer>
+
+<script src="i18n.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
