@@ -1,10 +1,15 @@
 % ============================================================================
 % Hub Cultural — Master's Thesis (Mémoire de Master)
-% Outline / skeleton — LaTeX, standard academic report structure
-% Language: English. Generated as a starting skeleton; content notes are
-% marked with \todo{...} and should be replaced with real prose chapter by
-% chapter. Numbers/facts already known from the project are inserted as
-% placeholders to anchor the writing — verify each before final submission.
+% LaTeX, standard academic report structure. Language: English.
+%
+% Status convention: sections that are written are written; sections that
+% still depend on data/analysis that does not yet exist are marked with
+% \todo{...}, and each \todo now names the exact file, script or query that
+% would supply the missing material. Every figure quoted in the written
+% sections is traceable to docs/decisions_es.md, docs/runs_log_es.md,
+% docs/results_v2_network_analysis.md, docs/dashboard_redesign_proposal.md,
+% data_processed/eval_100_report.md or site/data.json — verify each against
+% the latest run before final submission.
 % ============================================================================
 
 \documentclass[12pt, a4paper]{report}
@@ -24,6 +29,11 @@
 \usepackage{caption}
 \usepackage{setspace}
 \onehalfspacing
+
+% Long \texttt{} identifiers (model names, script names with underscores)
+% cannot be hyphenated and otherwise push lines into the margin. \sloppy
+% trades slightly looser interword spacing for no overfull lines.
+\sloppy
 
 % Lightweight TODO marker (deliberately not using the todonotes package —
 % avoids a tikz/pgf version dependency that may not match every LaTeX
@@ -58,12 +68,12 @@ and local community events) is not systematically documented or
 discoverable, and this project originated from, but is no longer limited
 to, the specific case of the Latin American diaspora; (2) the method — a
 pipeline that scrapes Instagram, builds a Neo4j graph, applies network
-analysis (PageRank, betweenness, Leiden community detection) and an
-LLM/NLP event-extraction pipeline, combined with human curation as the
-trust signal, plus a research-operations discipline (decision log, run
-log, dry-run-first design) treated as methodology in its own right; (3)
-headline findings — network size and structure, the bridge role of
-commercial/institutional accounts, event landscape, and a transparent
+analysis (PageRank, betweenness, Leiden community detection) and a
+three-layer NLP/LLM event-extraction pipeline, combined with human
+curation as the trust signal, plus a research-operations discipline
+(decision log, run log, dry-run-first design) treated as methodology in
+its own right; (3) headline findings — network size and structure, the
+bridge role of institutional accounts, event landscape, and a transparent
 account of data-quality limits; (4) the practical artifact — a public,
 bilingual event-discovery website; (5) contribution — methodological
 (human curation vs.\ automated scoring; a cultural-relevance criterion
@@ -75,9 +85,11 @@ this kind for this cultural ecosystem in France).}
 
 % ============================================================================
 \chapter{Introduction}
+\label{ch:introduction}
 % ============================================================================
 
 \section{Context and Motivation}
+\label{sec:context}
 
 Hub Cultural began as an attempt to make visible something that is well
 known anecdotally but poorly documented empirically: the cultural life
@@ -115,9 +127,18 @@ apologized for, but as a methodological finding in its own right
 turned out to be both harder to operationalize consistently and less
 faithful to how cultural networks actually cohere in practice, where
 diaspora and host-society cultural production overlap and reinforce each
-other rather than remaining cleanly separable.
+other rather than remaining cleanly separable. It also turned out to be
+measurably encoded in the pipeline itself: the semantic reference set used
+by the first stage of event detection was written entirely in the
+vocabulary of Colombian diaspora events, and a blind evaluation of 100
+posts showed that non-diaspora cultural accounts consequently lost real
+events at roughly three times the rate of diaspora accounts
+(\S\ref{sec:eval-design}). The scope question was therefore never purely
+conceptual; it had a direct, quantifiable effect on what the system was
+able to see.
 
 \section{Problem Statement and Research Question}
+\label{sec:research-question}
 
 The cultural activity produced by, and adjacent to, migrant and diaspora
 communities in a host country is rarely centralized: it lives across
@@ -140,7 +161,7 @@ This breaks into three sub-questions:
     \item \textbf{Structural.} Who are the connective actors in this
     network — which accounts function as hubs or bridges between
     otherwise separate cultural circles, and does this differ between
-    commercial/institutional accounts and individual or grassroots ones?
+    institutional accounts and individual or grassroots ones?
     \item \textbf{Thematic.} How is cultural activity distributed across
     the project's priority domains (photography, cinema, literature,
     theatre, community events), and how well does an automated pipeline
@@ -152,6 +173,7 @@ This breaks into three sub-questions:
 \end{enumerate}
 
 \section{Objectives}
+\label{sec:objectives}
 
 The project's objectives, as originally framed (\texttt{docs/objetivos.md})
 and updated here to reflect the current, cultural-relevance-based scope:
@@ -175,6 +197,7 @@ and updated here to reflect the current, cultural-relevance-based scope:
 \end{enumerate}
 
 \section{Scope and Contributions}
+\label{sec:contributions}
 
 \textbf{Scope.} Geographically the project centers on Île-de-France,
 though a meaningful share of curated accounts and events originate from,
@@ -193,7 +216,9 @@ as explicit priorities rather than hard filters.
     analysis, multilingual NLP event extraction, and human curation as
     the operative trust signal, arrived at through an evidenced pivot
     away from fully automated account scoring
-    (\S\ref{sec:methodology-curation}); and a research-operations
+    (\S\ref{sec:methodology-curation}); a blind human-versus-pipeline
+    evaluation protocol used to drive successive redesigns of the
+    extraction logic (\S\ref{sec:eval-design}); and a research-operations
     practice — a running decision log, a run log, and a dry-run-first
     discipline applied to every script — treated here as part of the
     methodology rather than incidental bookkeeping
@@ -211,66 +236,117 @@ as explicit priorities rather than hard filters.
 
 \section{Thesis Structure}
 
-Chapter~2 situates the project within diaspora and migration studies,
-social network analysis, computational social science, and NLP-based
-event extraction. Chapter~3 details the methodology, including the two
+Chapter~\ref{ch:litreview} situates the project within diaspora and
+migration studies, cultural-sector network mapping, social network
+analysis, computational social science, and NLP-based event extraction.
+Chapter~\ref{ch:methodology} details the methodology, including the three
 methodological pivots this thesis treats as contributions in their own
-right: human curation as the trust signal, and a research-operations
-discipline of decision logging, run logging, and dry-run-first
-iteration. Chapter~4 describes the resulting system, from data
-collection through the public discovery website. Chapter~5 reports
-results: network structure, thematic and geographic distribution, and a
-transparent accounting of data quality. Chapter~6 discusses what these
-results mean, including a dedicated reflection on the project's
-evolution from a nationality-based to a cultural-relevance-based scope.
-Chapter~7 concludes, states limitations, and outlines future work.
+right: human curation as the trust signal, blind human-versus-pipeline
+evaluation as the driver of redesign, and a research-operations discipline
+of decision logging, run logging, and dry-run-first iteration.
+Chapter~\ref{ch:implementation} describes the resulting system, from data
+collection through the public discovery website.
+Chapter~\ref{ch:results} reports results: network structure, thematic and
+geographic distribution, and a transparent accounting of data quality.
+Chapter~\ref{ch:discussion} discusses what these results mean, including a
+dedicated reflection on the project's evolution from a nationality-based
+to a cultural-relevance-based scope. Chapter~\ref{ch:conclusion}
+concludes, states limitations, and outlines future work.
 
 
 % ============================================================================
 \chapter{Literature Review / Theoretical Framework}
+\label{ch:litreview}
 % ============================================================================
+
+This chapter frames the project along two axes that the project's own
+history forces it to hold together. The first is the diaspora-studies
+axis, which motivated the work and still describes a substantial part of
+the corpus. The second is the cultural-sector axis: since the operative
+inclusion criterion is now cultural relevance rather than national origin
+(\S\ref{sec:scope-evolution}), the theoretical framing has to account for
+the network as a field of cultural production in a metropolitan area,
+not only as a diaspora formation. The remaining sections supply the
+methodological grounding — network analysis, social media as data, graph
+databases, and NLP event extraction — that Chapters~\ref{ch:methodology}
+and \ref{ch:implementation} draw on.
 
 \section{Diaspora Studies and Cultural Networks}
 \todo{Situate within diaspora/migration studies: how migrant
 communities organize culturally, the role of associations and informal
 networks, prior work on Latin American diasporas in Europe specifically
-if available. Framing note: this remains one relevant thread — the
-project's motivating case and a meaningful share of its curated content
-— but since the operative inclusion criterion is now cultural relevance
-rather than national origin (\S\ref{sec:scope-evolution}), pair this with
-literature on cultural-sector/creative-industry network mapping more
-generally, so the theoretical framing matches the project's actual scope
-and not only its origin story.}
+if available. One concrete hook already present in the project's own
+notes: DD-020 in \texttt{docs/decisions\_es.md} reads the graph's low
+density as potentially sociological rather than purely technical —
+a very sparse network as a possible sign of diaspora fragmentation in a
+host country with high individualisation, citing Vertovec (2009). That
+citation needs to be checked and properly sourced before use, and is
+currently the only literature reference recorded anywhere in the repo.}
 
-\section{Social Network Analysis in Migration Contexts}
-\todo{Prior applications of SNA to migrant/diaspora networks;
-concepts to define here for later use: centrality (degree, betweenness,
-PageRank), community detection, structural holes / bridging, E-I index.}
+\section{Cultural-Sector and Creative-Industry Network Mapping}
+\todo{New section (was folded into the diaspora section in the
+first outline). Needed because the project's inclusion criterion is now
+cultural relevance, not national origin: cover prior work mapping
+cultural/creative-sector actors as networks (cultural intermediaries,
+venue/institution ecologies, scene and field theory, cultural
+participation and discoverability). This is the literature that justifies
+treating a heterogeneous set of venues, institutions, collectives and
+individuals as one object of study — and against which the thesis's
+empirical claim (a small institutional core with a large organic
+periphery, \S\ref{sec:bridge-actors}) should be read.}
+
+\section{Social Network Analysis in Migration and Cultural Contexts}
+\todo{Prior applications of SNA to migrant/diaspora networks and
+to cultural fields; concepts to define here for later use: degree,
+betweenness and PageRank centrality, community detection and modularity,
+structural holes and brokerage, participation coefficient, and the E-I
+index. All five are computed in \texttt{3\_analyze\_network.py} and
+reported in \S\ref{sec:network-structure}, so each needs a definition
+here that the results chapter can rely on without re-explaining.}
 
 \section{Computational Social Science and Social Media as Data}
 \todo{Justify Instagram as a data source; discuss known biases
-(who is/isn't represented on Instagram, algorithmic visibility, platform
-ToS and ethical use of public data).}
+(who is and is not represented on Instagram, algorithmic visibility,
+platform terms of service, and the ethics of public-data research). Two
+project-specific points to connect to the literature: (i) the corpus
+mixes a behavioural signal (mentions, tags, co-authorship) with a
+platform-inferred one (Instagram's own \texttt{relatedProfiles}
+suggestions), and this thesis keeps them as separate network layers
+rather than merging them (\S\ref{sec:network-methods}); (ii) scraping is
+mediated by a commercial actor (Apify), which is itself a methodological
+dependency worth naming.}
 
 \section{Graph Databases and Network Science Methods}
-\todo{Neo4j / property graph model; why a graph database over a
-relational one for this problem; brief technical grounding for PageRank,
-betweenness centrality, Leiden algorithm, k-core decomposition,
-participation coefficient — cite original papers.}
+\todo{Neo4j and the property-graph model; why a graph database
+rather than a relational one for this problem (DD-001); brief technical
+grounding, with original references, for PageRank, betweenness
+centrality, the Leiden algorithm, k-core decomposition, and the
+participation coefficient.}
 
 \section{NLP for Event Extraction and Classification}
-\todo{Ground the 3-layer detection design: sentence embeddings
-for candidate filtering, NLI zero-shot classification, LLM-based
-extraction/classification/gating. Cite relevant NLP literature (semantic
-similarity, zero-shot NLI, LLM information extraction) and note the
-multilingual requirement (ES/FR/EN) as a specific design constraint.}
+\todo{Ground the three-layer detection design: sentence
+embeddings for candidate filtering, zero-shot NLI classification, and
+LLM-based extraction, classification and gating. Cite relevant NLP
+literature (sentence embeddings and semantic similarity, zero-shot NLI,
+LLM information extraction, and the reliability problems of LLM output),
+and treat the multilingual requirement (ES/FR/EN) as a specific design
+constraint rather than an implementation detail — DD-008 records a
+monolingual English NLI model producing a 0.7\% detection rate on
+Spanish and French captions, which is the empirical anchor for this
+argument.}
 
 \section{Positioning}
-\todo{One paragraph: how this thesis differs from prior diaspora
-network studies (data-driven, automated + human-curated hybrid, produces
-a live public tool, not just an analysis) and from prior event-extraction
-NLP work (domain-specific gating logic, human-curation-as-trust-signal
-pivot).}
+\todo{One or two paragraphs. Three differentiators are already
+supported by the material in this thesis: (i) against prior diaspora
+network studies — a data-driven, automated-plus-human-curated hybrid
+that produces a live public tool rather than only an analysis; (ii)
+against prior event-extraction NLP work — domain-specific gating logic
+validated by blind human comparison at three successive scales
+(\S\ref{sec:eval-design}), and the finding that the semantic reference
+set encoded a cultural bias measurable in recall; (iii) against both —
+the explicit replacement of a nationality-based inclusion criterion by a
+cultural-relevance one, including the removal of a nationality bonus
+from the ranking formula (\S\ref{sec:scope-evolution}).}
 
 
 % ============================================================================
@@ -279,11 +355,56 @@ pivot).}
 % ============================================================================
 
 \section{Research Design Overview}
-\todo{High-level pipeline diagram description (7 phases):
-extraction $\to$ ingestion $\to$ network analysis $\to$ manual
-categorization $\to$ event enrichment $\to$ geo enrichment $\to$
-cleanup. Figure: reproduce/adapt the pipeline diagram from
-\texttt{docs/data\_flow.md}.}
+\label{sec:research-design}
+
+The project is organised as a seven-phase pipeline, each phase
+implemented as one or more independent, re-runnable scripts writing to a
+shared Neo4j graph:
+
+\begin{enumerate}
+    \item \textbf{Extraction} — Instagram profiles and posts are scraped
+    through Apify actors into local JSON
+    (\texttt{1\_harvest\_ig\_profiles.py},
+    \texttt{1\_harvest\_ig\_posts.py}, \texttt{extract\_profiles.py}).
+    \item \textbf{Ingestion} — the raw JSON is loaded into Neo4j Aura
+    (\texttt{2\_build\_graph.py}).
+    \item \textbf{Network analysis} — the graph is exported to CSV and
+    analysed offline with igraph and leidenalg, and the resulting metrics
+    are written back (\texttt{3\_analyze\_network.py}).
+    \item \textbf{Manual categorisation} — a hand-curated spreadsheet of
+    account attributes is uploaded onto the matching \texttt{:Account}
+    nodes (\texttt{load\_manual\_account\_categorization.py}).
+    \item \textbf{Event enrichment} — posts are passed through the
+    three-layer detection pipeline to create \texttt{:Event} nodes, with
+    inline deduplication (\texttt{4\_enrich\_events\_extract.py}), followed
+    by a standalone deduplication pass over existing events
+    (\texttt{4\_enrich\_events\_resolve.py}).
+    \item \textbf{Geographic enrichment} — location strings are geocoded
+    and placed in an administrative hierarchy
+    (\texttt{4\_enrich\_locations.py}).
+    \item \textbf{Cleanup} — accounts never touched by manual curation,
+    and everything depending exclusively on them, are deleted
+    (\texttt{cleanup\_legacy\_accounts.py}).
+\end{enumerate}
+
+Two design principles run through all seven phases and are treated in
+this thesis as methodological rather than merely technical.
+\emph{Idempotency}: every script can be re-run without duplicating or
+corrupting what previous runs produced, because each checks a sentinel
+property before processing (\texttt{eventExtracted}, \texttt{lat}) or
+merges rather than inserts. \emph{Separation of provenance}: the manual
+curation phase deliberately writes to a property namespace
+(\texttt{artType}, \texttt{culturalIdentity}, \texttt{geoZone},
+\texttt{manualFollowersCount}) disjoint from the one the ingestion phase
+writes, so that neither can silently overwrite the other. The practical
+consequence is that automated and human-produced data remain
+distinguishable in the graph after the fact, which is what makes the
+curation-as-trust-signal argument of \S\ref{sec:methodology-curation}
+verifiable rather than merely asserted.
+
+\todo{Insert the pipeline diagram here, adapted from
+\texttt{docs/data\_flow.md} (an English version already exists alongside
+\texttt{docs/data\_flow\_es.md}).}
 
 \section{Research Operations: Decision Logging, Run Tracking, and Iterative Safety}
 \label{sec:research-ops}
@@ -298,38 +419,51 @@ of the extraction logic.
 
 \textbf{A real-time decision log.} Every non-trivial design choice was
 recorded, at the moment it was made, in a sequentially numbered decision
-log (\texttt{docs/decisions.md}, entries DD-001 through DD-044 and
-counting) rather than reconstructed retrospectively for this thesis. Each
-entry states the alternatives considered, the evidence that motivated the
-final choice, and, where applicable, validation results. Three entries
-illustrate the range of what this captured: DD-041 documents a
-geo-conflict guardrail added to the event-deduplication resolver after a
-production dry-run surfaced a specific failure mode — two structurally
-similar events merged despite being in different cities — validated
-against a 14-case test suite before being applied to 68 pending merges;
-DD-042 documents the addition of a per-event, LLM-generated tag field
-designed specifically to avoid a parsing bug present in an earlier,
-account-level free-text field; DD-043 and DD-044 document the design of
-the Neo4j-to-static-JSON export and the resulting public website,
-including an explicit accounting of which ranking components could be
-precomputed server-side versus which needed to remain client-side.
-Maintaining this log in real time, rather than writing it up after the
-fact, is itself a methodological choice: it captures the reasoning
-available \emph{at the time} of each decision, including alternatives
-that were considered and rejected — something retrospective documentation
-systematically loses.
+log (\texttt{docs/decisions\_es.md}, forty-one entries numbered DD-001 to
+DD-044; three numbers in that range were reserved for decisions referenced
+in the code but never written up) rather than reconstructed retrospectively
+for this thesis.\footnote{The log is maintained in Spanish, the language in
+which the project work was conducted; \texttt{docs/decisions.md} holds a
+partial English translation that currently stops at DD-033. Where entries
+are quoted in this thesis, the translation is the author's.} Each entry
+states the alternatives considered, the evidence that motivated the final
+choice, and, where applicable, validation results. Four entries illustrate
+the range of what this captured. DD-041 documents a geographic-conflict
+guardrail added to the event-deduplication resolver after a production
+dry-run surfaced a specific failure mode: two structurally similar events
+merged despite being in different countries. It was validated first against
+fourteen isolated test cases and then in a live dry-run over the 664 events
+then in the graph, in which it blocked six geographically contradictory
+merges while leaving intact the 68 duplicate pairs the run had identified
+for merging. DD-042 documents the addition of a per-event, LLM-generated
+tag field, designed specifically to avoid a parsing failure present in an
+earlier, account-level free-text field, and scoped explicitly as
+prospective — the events already in the graph were left without it rather
+than backfilled at token cost. DD-043 and DD-044 document the design of the
+Neo4j-to-static-JSON export and the resulting public website, including an
+explicit accounting of which ranking components could be precomputed at
+export time and which had to remain client-side because they depend on the
+current date or on the individual visitor's session. Maintaining this log
+in real time, rather than writing it up after the fact, is itself a
+methodological choice: it captures the reasoning available \emph{at the
+time} of each decision, including alternatives that were considered and
+rejected — something retrospective documentation systematically loses.
 
 \textbf{A run log.} Separately, every substantive execution of the
 pipeline against live data — not every script invocation, but every run
 whose output was retained or acted upon — was logged with its date,
-parameters, and a summary of results (\texttt{docs/runs\_log.md}). This
-served two purposes beyond record-keeping: it made it possible to
-distinguish a genuine change in the underlying data (new accounts or
-events discovered) from a change in pipeline logic when comparing two
-exports, and it created a paper trail for decisions that depended on a
-specific run's output rather than on memory — for instance, the decision
-not to add a venue-specificity guardrail to the event resolver was made
-with explicit reference to a logged run's results.
+parameters, and a summary of results (\texttt{docs/runs\_log\_es.md},
+RUN-001 to RUN-021 at the time of writing). This served two purposes
+beyond record-keeping. It made it possible to distinguish a genuine
+change in the underlying data (new accounts or events discovered) from a
+change in pipeline logic when comparing two exports — a distinction that
+becomes impossible to reconstruct once several months of both have
+accumulated. And it created a paper trail for decisions that depended on
+a specific run's output rather than on memory: the decision not to add a
+venue-specificity guardrail to the event resolver, for instance, is
+recorded in RUN-021 with the concrete case that prompted it (one event
+node absorbing three separate watch parties for the same football match,
+held in different Paris bars) and the reasoning for accepting it.
 
 \textbf{Dry-run-first, diagnose-first design.} Every script that writes
 to the live Neo4j graph was built with a \texttt{--dry-run} or
@@ -340,12 +474,17 @@ single transaction and issues a \texttt{ROLLBACK} under
 estimated; \texttt{load\_manual\_account\_categorization.py} and the
 event-extraction and event-resolution scripts all follow the same
 pattern. Combined with the idempotent design of the extraction and
-ingestion scripts — re-running them is always safe, since already-
-processed accounts and posts are skipped or merged rather than
-duplicated — this made it possible to iterate on pipeline logic against
-a live, shared, non-trivially-sized research database without the usual
-risk of an irreversible mistake, a constraint that shaped several of the
-decisions recorded in the log above.
+ingestion scripts, this made it possible to iterate on pipeline logic
+against a live, shared, non-trivially-sized research database without the
+usual risk of an irreversible mistake. The discipline was not
+self-enforcing, however, and DD-038 records what happens when it lapses:
+the diagnostic CSV export was gated on \texttt{--dry-run}, so the first
+real production run of the event extractor produced no comparison file
+and — because event timestamps were written as strings rather than native
+Neo4j datetimes — could not be reliably queried by date afterwards
+either. A run that worked correctly left almost no auditable trace. The
+fix restored parity between the two modes, on the principle that a
+production run needs to be at least as inspectable as a rehearsal.
 
 Together, these three practices form a coherent research-operations
 discipline: decisions are recorded when made, runs are recorded when
@@ -356,156 +495,659 @@ state, for any given result in Chapter~\ref{ch:results}, exactly which
 version of the pipeline and which run produced it.
 
 \section{Data Collection}
-\todo{Apify actors used (instagram-profile-scraper,
-instagram-post-scraper); seed selection strategy — originally
-\texttt{@consuladocolparis} as single seed, BFS-style expansion via
-\texttt{RELATED\_TO} suggestions, later curated seed files
-(\texttt{config/seeds\_*.json}); cost control mechanism
-(\texttt{.apify\_cost\_log.json}); incremental/idempotent design
-(\texttt{extract\_profiles.py} only scrapes accounts not yet seen).}
+\label{sec:data-collection}
+
+Data collection relies on Apify's hosted \texttt{instagram-profile-scraper}
+and \texttt{instagram-post-scraper} actors rather than on a self-maintained
+browser-automation stack (DD-002). The reasoning recorded at the time was
+one of maintenance cost and risk: Instagram actively blocks direct
+scraping, so a self-hosted scraper implies continuous maintenance and
+IP-blocking risk, whereas a hosted actor externalises both at a metered
+per-use price. That price is not incidental to the method — it is tracked
+per run in \texttt{.apify\_cost\_log.json} and functions as a real
+constraint on sampling decisions, which is why the harvesting logic is
+built around spending as little as possible per unit of new information.
+Profile scraping and post scraping are separate scripts (DD-003) because
+they use different actors, return different JSON structures, and need
+different refresh frequencies.
+
+Seed selection changed across the project's two phases. The first phase
+used a single seed, the Colombian consulate in Paris, and expanded outward
+breadth-first through mentions, tags and Instagram's own
+\texttt{relatedProfiles} suggestions (DD-006); the reasoning was that a
+consulate is the most central institutional node of the community it
+serves, so relevant accounts should lie within one to three hops, and that
+organic expansion avoids the researcher-bias of a hand-written list. The
+second phase replaced the single seed with curated seed files
+(\texttt{config/seeds\_*.json}) covering Latin American consulates and
+embassies in France plus French cultural and academic institutions
+connected to Latin America (DD-022). These institutional seeds raised a
+conflict the log resolves explicitly: the account-classification scheme
+treated government accounts as out of cultural scope, yet the entire
+discovery process depends on them. DD-026 separates the two questions —
+\emph{is this account a valid target for cultural analysis?} and \emph{is
+this account structurally necessary to discover the network?} — and
+assigns consulates the role of seed source without treating them as
+cultural targets.
+
+Post collection is deliberately recency-biased rather than
+density-maximising. Rather than retrieving a fixed number of historical
+posts per account, the harvester computes a per-account time window equal
+to the gap since that account's most recent known post, capped at a
+configurable maximum, and merges results into a rolling window of the
+fifty most recent posts (DD-028, DD-029). The rationale is that the
+downstream objective is detecting forthcoming events, not reconstructing
+publication history; the earlier fixed-window design had a blind spot in
+which an account with a recent post was skipped entirely, losing anything
+published in between. A related robustness fix is worth recording as
+method rather than trivia: the Apify actor signals "no content found" by
+returning a one-element list containing an \texttt{error} key, which is
+truthy in Python and was therefore silently treated as a successful
+single-post result, corrupting both the run counters and — before the
+merge logic existed — the stored file (DD-030). Data collection failures
+in this setting do not always announce themselves as failures.
 
 \section{Data Model}
-\todo{Full Neo4j schema: node labels (\texttt{:Account},
-\texttt{:Post}, \texttt{:Hashtag}, \texttt{:Location}, \texttt{:Track},
-\texttt{:Comment}, \texttt{:IgtvVideo}, \texttt{:Event}, \texttt{:City},
-\texttt{:Country}, \texttt{:Arrondissement}) and relationship types
-(\texttt{PUBLISHED}, \texttt{HAS\_HASHTAG}, \texttt{MENTIONS},
-\texttt{TAGS\_USER}, \texttt{COAUTHORED\_BY}, \texttt{MENTIONS\_EVENT},
-\texttt{ORGANIZED}, \texttt{PARTICIPATED\_IN}, \texttt{LOCATED\_IN},
-etc.). Include an entity-relationship diagram (Appendix~\ref{app:schema}).}
+\label{sec:data-model}
+
+The graph uses eleven node labels and sixteen relationship types. Accounts,
+posts, hashtags, locations, music tracks, comments and IGTV videos come
+from ingestion; events come from the NLP pipeline; cities, arrondissements
+and countries come from geocoding. Accounts additionally carry
+\texttt{:Public} or \texttt{:Private} as a second label rather than a
+boolean property (DD-005), which allows indexed filtering in Cypher and
+visual separation in the Neo4j browser. The full schema is reproduced in
+Appendix~\ref{app:schema}.
+
+The design principle behind the node set (DD-004) is that the model should
+capture three distinct dimensions at once: content (posts, hashtags),
+social interaction (mentions, tags, co-authorship), and cultural context
+(locations, music tracks). A minimal account-and-post model was considered
+and rejected on the grounds that it would discard exactly the signals the
+research question depends on — venues, collaborations and thematic
+markers. One consequence of this model matters for the analysis chapter
+and is easy to overlook: social relationships such as \texttt{MENTIONS}
+and \texttt{TAGS\_USER} originate at the \texttt{:Post} node, not at the
+account, so any account-to-account social network has to be obtained by
+projecting author$\to$post$\to$target rather than read directly off the
+stored edges (\S\ref{sec:network-methods}).
 
 \section{Network Analysis Methods}
-\todo{Multiplex network design: social layer (MENTIONS/
-TAGS\_USER/COAUTHORED\_BY, author$\to$post$\to$target projection)
-separate from the algorithmic layer (\texttt{RELATED\_TO}, \texttt{Algo}
-suffix). Metrics computed: exact PageRank, exact betweenness, Leiden
-community detection at three resolutions ($\gamma = 0.5, 1.0, 1.5$,
-seed 42), weakly connected components, k-core, participation
-coefficient, E-I index by actor type. Note the pivot from Neo4j GDS
-(blocked — standard AuraDB lacks the plugin, corporate firewall also
-blocks port 7687) to a local igraph/leidenalg implementation
-(\texttt{3\_analyze\_network.py}) as a methodological adaptation worth
-documenting, not hiding.}
+\label{sec:network-methods}
+
+Network metrics are computed offline. The graph is exported to CSV, the
+metrics are computed locally with igraph and leidenalg, and the results
+are written back to Neo4j in batches. This is a deviation from the
+conventional approach of running Neo4j's Graph Data Science library
+in-database, and the reasons are recorded in DD-013: the Bolt port (7687)
+that GDS requires is blocked on the network the work was carried out
+from, standard AuraDB does not include the GDS plugin at all, and — the
+argument that made the constraint into a preference rather than a
+workaround — CSV outputs are version-controllable and re-analysable
+without any database connection or cloud credentials. The earlier
+GDS-based script is retained in \texttt{old/} for reference but never ran
+successfully in this project's actual environment, which also means the
+"Cultural Relevance Score" it computed is a documented design, not a
+produced result.
+
+The network is treated as \textbf{multiplex}: two layers analysed
+separately rather than merged. The \emph{social layer} contains organic
+interactions — mentions, tagged users and co-authorship — projected
+author$\to$post$\to$target as described above. The \emph{algorithmic
+layer} contains Instagram's own \texttt{relatedProfiles} similarity
+suggestions (\texttt{RELATED\_TO}). Keeping them apart is a substantive
+methodological choice rather than a technical convenience: the social
+layer records who actually engages with whom, while the algorithmic layer
+records what a proprietary recommender considers similar. Merging them
+would blend a behavioural signal with a platform inference, and any
+finding about brokerage or community structure would then be partly a
+finding about Instagram's recommendation engine.
+
+On each layer the analysis computes exact PageRank and exact betweenness
+centrality (not approximations, which the graph size permits), Leiden
+community detection at three resolutions ($\gamma = 0.5, 1.0, 1.5$ with a
+fixed seed of 42 for reproducibility), weakly connected components,
+k-core decomposition, the participation coefficient as a brokerage
+measure, and the E-I index of internal versus external mixing, computed
+both by curated actor type and by detected community. Running Leiden at
+three resolutions rather than one is a hedge against resolution-dependent
+artefacts: a community structure that survives all three is a stronger
+claim than one tuned to a single parameter. Centrality is computed over
+the whole graph rather than over a filtered subgraph, with tier filters
+applied only at the reporting stage (DD-014), because an account's
+PageRank depends on who mentions it, including accounts that are
+themselves out of scope; filtering first would measure the importance of
+accounts within a hand-picked subset rather than within the network they
+actually inhabit.
 
 \section{Event Detection Pipeline}
-\todo{Describe the 3-layer architecture as it exists today
-(post the 2026-08 rewrite that removed the old embeddings-based
-multi-label typification layer after a 100-post human-vs-pipeline
-evaluation — cite \texttt{data\_processed/eval\_100\_report.md}):
-\begin{enumerate}
-    \item Layer 1 — cosine similarity against $\sim$100 reference
-    phrases (\texttt{paraphrase-multilingual-MiniLM-L12-v2}) as a
-    candidate filter.
-    \item Layer 2 — binary NLI classification
-    (\texttt{MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli}),
-    hypothesis picked in the caption's detected language.
-    \item Layer 3 — LLM (Ollama/Groq/Cerebras) performs event typing
-    (16-label taxonomy), price-range extraction, and critically
-    \emph{gates} event creation based on
-    \texttt{is\_public\_invitation}/\texttt{is\_upcoming}.
-\end{enumerate}
-Report the false-positive reduction this gating produced, per the
-100-post eval.}
+\label{sec:event-pipeline}
+
+Event detection runs in three layers over post captions. The design was
+originally four layers and was reduced to three in August 2026 after the
+evaluation described in \S\ref{sec:eval-design}.
+
+\textbf{Layer 1 — semantic candidate filtering.} Each caption is embedded
+with \texttt{paraphrase-multilingual-MiniLM-L12-v2} and compared by cosine
+similarity against a reference set of roughly 100 phrases covering
+several event types, three languages and six announcement forms (calls,
+openings, listings, date-plus-place, registration, reminders). Embeddings
+rather than keywords were chosen because the corpus mixes Spanish, French
+and English with emoji and slang, where keyword matching fails on
+orthographic variation and indirect phrasing (DD-007); the reference set
+is large rather than minimal (DD-010) because a narrow reference space
+misses exactly the small community events the project most wants to
+capture. Layer 1 exists primarily as a cost control: running the NLI
+model over every post was measured at five to seven hours on the
+available hardware, whereas pre-filtering reduces the candidate set to
+roughly 40\% of the corpus and the total to about eighteen minutes
+(DD-009).
+
+\textbf{Layer 2 — is this event-like at all.} Surviving candidates are
+passed to a binary natural-language-inference classifier
+(\texttt{MoritzLaurer/multilingual-MiniLMv2-L6-mnli-xnli}). Two
+decisions here are worth stating explicitly. The model is multilingual by
+requirement, not by preference: an earlier English-trained NLI model
+produced a detection rate of 0.7\% on Spanish and French captions —
+effectively noise (DD-008). And the hypothesis sentence is now formulated
+in the caption's own detected language, after a fixed-Spanish hypothesis
+was shown to depress scores for English and French captions regardless of
+their content.
+
+\textbf{Layer 3 — LLM extraction, typing and gating.} Candidates that
+pass Layer 2 are sent to a large language model (Ollama locally, or Groq
+or Cerebras in the cloud, with automatic failover between the two cloud
+providers and a cap on rate-limit waiting, DD-033) which extracts title,
+description, date, location and price range, assigns an event type from a
+fixed sixteen-label taxonomy, proposes one to three free-form artistic
+tags (DD-042), and — the decisive change — \emph{gates} node creation.
+If the model reports that the post is not a public invitation, or not
+upcoming, no \texttt{:Event} node is created at all. In the earlier
+design the node was created regardless and merely scored lower, which
+\S\ref{sec:eval-design} shows was the single largest source of false
+positives.
+
+Three further constraints shape the layer-3 stage. Calls are deduplicated
+by post identifier within a run, so co-published posts share one call.
+Reasoning traces are requested only in dry-run mode, since they are
+expensive and only useful for auditing. And a deterministic
+\texttt{has\_text\_date} gate — requiring that a date actually appear in
+the caption text — is evaluated \emph{before} the model is called rather
+than after, which was measured to remove 40.7\% of calls offline and
+48.3\% in production without changing a single final decision (DD-036).
+The date extractor behind that gate is itself constrained to avoid
+manufacturing precision: a month or year mentioned without a day is
+discarded rather than resolved to an arbitrary first-of-month (DD-034),
+after four disagreements in the evaluation sample were traced to exactly
+that behaviour.
+
+Newly created events inherit \texttt{artType}, \texttt{institutionType},
+\texttt{culturalIdentity}, \texttt{geoZone} and \texttt{parentInstitution}
+directly from the publishing account's manual curation, at no model cost,
+whenever that account has been curated. Deduplication happens twice: an
+inline resolver checks cosine similarity above 0.82 together with a
+location match and a date within three days before creating a new node
+rather than enriching an existing one, and a standalone resolver
+(\S\ref{sec:event-resolver}) runs afterwards over the accumulated set.
+
+\section{Event Deduplication}
+\label{sec:event-resolver}
+
+Several accounts routinely publish about the same event, so deduplication
+is not an edge case but a structural feature of the corpus. The original
+resolver grouped events by normalised location string and compared pairs
+only within a group, using date proximity and cosine similarity as
+secondary criteria (DD-011). An audit of a production run showed this
+ordering to be the wrong way round: two posts about the same concert
+written the venue address differently and therefore never met, and an
+event with no location string at all could never be compared with
+anything (DD-040).
+
+The redesign inverts the order. All pairs are compared by embedding
+similarity first, using a vectorised cosine matrix, with dates as
+mandatory confirmation rather than as a primary filter: where both dates
+exist they must fall within three days and similarity must exceed 0.75;
+where one is missing, a stricter similarity threshold of 0.85 compensates
+for the lost corroboration. Location was explicitly \emph{not} converted
+into an embedding, on the reasoning that text embeddings capture lexical
+rather than geographic similarity — two different theatres sharing the
+words "Théâtre de" may embed close together, while two addresses on the
+same street may not. An audit of the location strings then in the corpus
+supported demoting them: roughly a fifth carried a full address, over
+half only a venue name, a tenth only a city or country, and around a
+seventh were empty.
+
+The predictable cost of dropping the location filter appeared on the
+first live dry-run: merges that were geographically contradictory, such as
+a Paris event merging with a Madrid one, because generic community posts
+share vocabulary regardless of where they take place. The response
+(DD-041) was a deliberately small gazetteer of country and city names
+drawn from the actual failure cases, which blocks a merge only when both
+sides name a recognisable and non-overlapping country. It is permissive
+by design — insufficient evidence on either side never blocks — precisely
+to avoid reintroducing the exact-match problem the redesign removed. Its
+residual limit is documented rather than patched: it compares countries,
+so two different venues within the same city can still merge, which
+RUN-021 shows happening and which the run log records as an accepted
+trade-off for the case at hand.
+
+\section{Evaluation Design: Blind Human-versus-Pipeline Comparison}
+\label{sec:eval-design}
+
+The pipeline's accuracy was assessed by blind manual classification of
+post captions against the pipeline's own decisions, repeated at three
+increasing scales, with each round feeding concrete changes back into the
+code. In each round the captions were classified without access to the
+pipeline's decision columns, and only then joined against the diagnostic
+CSV the extractor emits.
+
+\textbf{Round 1 — 100 posts (2026-08-09).} Overall agreement was 58\%.
+The asymmetry mattered more than the headline: 35 disagreements were
+posts the pipeline called events and the human classification did not,
+against 7 in the opposite direction. Of those 35 false positives, 29
+already carried the layer-3 model's own verdict that the post was neither
+a public invitation nor upcoming — the system had the information and
+did not act on it, because node creation was not conditioned on those
+flags, only scoring was. Simulating the gate on the same sample raised
+precision from 56\% to 90\% and overall agreement from 58\% to 86\%. This
+single finding is what turned gating from a scoring adjustment into a
+creation condition (\S\ref{sec:event-pipeline}).
+
+The same round produced the bias finding referred to in
+\S\ref{sec:context}. The reference phrases of layer 1 had been written
+entirely in the vocabulary of Colombian diaspora events. Splitting the
+sample by account theme, the false-negative rate was 4.3\% for
+Colombian and Latin American accounts against 12.9\% for general and
+French accounts — real events with explicit dates and venues, in French
+and English, discarded just below the similarity threshold. A criterion
+that was intended to be about cultural relevance was, at the level of
+implementation, partly about national vocabulary.
+
+\textbf{Round 2 — 495 posts (batches through 2026-08-12).} Aggregate
+precision was 0.824 and recall 0.858. Three code changes followed
+(DD-036): eighteen additional reference phrases in an institutional and
+formal register, added after the three layer-1 false negatives in the
+sample were found to share a sober institutional tone absent from the
+reference space; the deterministic \texttt{has\_text\_date} gate, which
+was shown offline to block 15 of the 27 false positives in the full
+sample; and an explicit negative instruction in the layer-3 prompt
+excluding course registrations, enrolment and admission calls, which had
+been producing events with a structure indistinguishable from real ones.
+A fourth change was considered and rejected on the evidence: lowering the
+layer-1 threshold from 0.45 to 0.35 would have recovered seven real
+events at the cost of admitting 47 additional non-events, a
+signal-to-noise ratio of roughly 1:6.7, which is the wrong trade in a
+pipeline whose dominant error was already precision.
+
+\textbf{Round 3 — 150 posts in a live dry-run (2026-08-12, RUN-020).}
+Agreement reached 96.7\%, with precision 97.3\% and recall approximately
+90\% — the first round run against the modified pipeline rather than a
+simulation. Four of the five remaining disagreements were traced to
+specific lines of code and fixed the same day (DD-037): a theatre
+season written "26/27" parsed as a day-and-month date, and a
+600-character truncation window in the date extractor that discarded
+dates appearing later in the long multi-line captions typical of event
+flyers. The fifth had no identifiable code cause — two nearly identical
+posts about the same event, one accepted and one rejected by the language
+model — and is recorded as observed variability rather than resolved.
+
+Two methodological caveats belong with these numbers. First, the human
+labels are the author's own, so this measures agreement with a single
+annotator's criterion, not with a consensus ground truth; the criterion
+itself had to be adjudicated in at least one case, where exhibitions
+announced with an explicit closing date were ruled to count as events
+even when the surrounding text is retrospective (DD-035), and that
+adjudication remains flagged as unresolved against the pipeline's own
+behaviour. Second, agreement rose across the three rounds partly because
+the pipeline improved and partly because the samples differ in
+composition, so the figures track a trajectory rather than three
+measurements of the same quantity.
 
 \section{Human Curation as the Trust Signal}
 \label{sec:methodology-curation}
-\todo{This is a genuine methodological pivot worth a dedicated
-section: the original automated account-scoring classifier
-(\texttt{old/1\_harvest\_account\_classifier.py}) selected accounts
-where well under 10\% turned out to be culturally valuable on manual
-review. \texttt{manualDataCuratedAt} (set only by
-\texttt{load\_manual\_account\_categorization.py}) replaced the
-scoring-based selection as the operative "worth keeping" signal.
-Discuss this as a finding in itself: automated relevance scoring
-under-performed simple human judgment for this domain, and why (cite
-whatever intuition emerged — commercial/political accounts scoring
-artificially high, genuinely small cultural accounts scoring low on
-network centrality despite being sociologically important).}
+
+The project's original design selected accounts automatically. A
+classifier scored each discovered account on geographic and cultural
+dimensions, combining semantic similarity against reference embeddings
+with hard signals from the profile, and accounts above a threshold were
+kept. In practice, well under 10\% of the accounts it selected turned out
+to be culturally valuable on manual review. The response was not to tune
+the classifier further but to change what the pipeline treats as
+authoritative: the property \texttt{manualDataCuratedAt}, written only by
+\texttt{load\_manual\_account\_categorization.py} when an account appears
+in the hand-curated spreadsheet, became the operative signal for "this
+account is worth keeping", and the automated score was retired from that
+role.
+
+This is a pivot worth stating as a finding rather than as a confession.
+Three mechanisms visible in the project's own records explain why the
+automated criterion underperformed. First, the score rewarded signals
+that correlate with visibility rather than with cultural relevance, so
+commercial and institutional accounts with strong profile metadata scored
+well while small collectives with sparse profiles did not. Second, the
+geographic component was systematically wrong in a way that was invisible
+until profiles were inspected by hand: several accounts scored as
+France-based were physically located elsewhere, and the fix required
+reading latitude and longitude out of the business address and testing
+them against a bounding box (DD-031), followed by a further narrow rule
+for a residual class the bounding box could not catch — Alliance
+Française branches in Latin American cities, whose bios legitimately
+mention France as a subject rather than a location (DD-032). Third, and
+most tellingly, an account's structural importance in the network is not
+the same quantity as its content volume: the network analysis found
+accounts ranking among the top bridging and top PageRank actors while
+having almost no posts loaded, their centrality coming entirely from
+being mentioned by others (\S\ref{sec:bridge-actors}). Any selection
+criterion that reads relevance off an account's own output will miss
+these.
+
+Curation also had to be reconciled with discovery, since the ingestion
+step creates one account node per Instagram \texttt{relatedProfiles}
+suggestion on every scrape. Treating "not curated" as "delete" would have
+destroyed fresh discoveries alongside old noise. The cleanup script
+therefore tags, rather than deletes, any uncurated account reachable via
+\texttt{RELATED\_TO} from a curated one, marking it
+\texttt{discoveredViaCuratedAccount} with a pending review status, so
+that these accounts survive as a review queue. The cost of the approach
+is stated plainly in \S\ref{sec:limitations}: human curation does not
+scale, and the boundary of the corpus is therefore set by how much
+reviewing one researcher can do.
 
 \section{Geospatial Enrichment}
-\todo{Nominatim geocoding, rate-limited (1.1s/req); hierarchy
-\texttt{Location}$\to$\texttt{Arrondissement}$\to$\texttt{City}$\to$
-\texttt{Country}; three-tier confidence strategy (exact / city-combined
-/ city-hint-only) and — \textbf{report honestly} — the empirical
-finding that low-confidence geocodes need explicit exclusion rather
-than fallback display, since a fallback to a default city hint can
-silently produce plausible-looking but wrong coordinates (found during
-dashboard validation, \S\ref{sec:limitations}).}
+\label{sec:geo}
 
-\section{Ranking / Relevance Scoring}
+Location strings extracted by the event pipeline are geocoded with
+Nominatim, the OpenStreetMap geocoder, chosen because it is free,
+requires no API key, covers both France and Colombia adequately, and
+imposes a rate limit (one request per second, implemented here as 1.1
+seconds between requests) that is tolerable at this corpus size (DD-018).
+Resolved locations are placed in an administrative hierarchy —
+\texttt{Location} $\to$ \texttt{Arrondissement} $\to$ \texttt{City}
+$\to$ \texttt{Country} — with Paris arrondissements derived from postal
+codes in the 750XX range. Sessions are logged so that a partial run can
+be resumed rather than repeated.
+
+The methodologically interesting part is what happens when geocoding
+fails. Roughly one event in seven never acquires coordinates, for two
+distinct reasons that should not be conflated: some have no location
+text in the caption at all, and some have text that Nominatim cannot
+resolve. A fallback to a city-level hint was available and was rejected
+as a display strategy, because it produces coordinates that look precise
+and are wrong — an event placed at the centre of Paris because its
+address could not be parsed is indistinguishable, on a map, from an event
+that really is there. The decision taken (\S\ref{sec:website}) is that
+the discovery site shows only events with genuinely resolved
+coordinates. This is a presentation filter, not a deletion: the
+\texttt{:Event} node remains in the graph for analysis, it simply does
+not enter a product whose central organising principle is geography.
+
+\section{Ranking and Relevance Scoring}
 \label{sec:ranking}
-\todo{Document the discovery-website ranking formula as a
-methodological artifact in its own right:
-$\text{Relevance} = 100 \cdot (0.30Q + 0.22A + 0.18B + 0.20T + 0.10C)
-\cdot \text{penalty}$, where $Q$ is extraction quality/confidence,
-$A$ is network centrality (percentile-blended PageRank/betweenness/
-followers/participation), $B$ is social resonance (hotness/post
-count), $T$ is temporal proximity, $C$ is session-based personalization
-with no login. Note the explicit removal of a nationality/
-"Colombian-ness" bonus once the project's scope broadened — a
-methodological choice worth justifying (avoiding a nationality bias
-baked into a supposedly neutral relevance score).}
+
+The discovery website ranks events with an explicit, documented formula
+rather than an opaque model, on the stated principle of contextual
+algorithmic curation rather than personalisation: there are no user
+accounts, and the same conditions produce the same ordering for every
+visitor. All component signals are converted to percentile ranks over the
+universe of publishable events before being combined. The score is
+
+\[
+\text{Relevance} = 100 \cdot \left(0.30\,Q + 0.22\,A + 0.18\,B
++ 0.20\,T + 0.10\,C\right) \cdot P
+\]
+
+where $Q$ is detection quality ($0.70 \cdot \texttt{eventScore} + 0.30
+\cdot \texttt{confidence}$); $A$ is the authority of the publishing
+account in the network, itself a weighted blend of PageRank (0.40),
+betweenness (0.25), follower count (0.20), participation coefficient
+(0.10) and verified status (0.05); $B$ is social resonance (hotness score
+and post count); $T$ is temporal proximity, implemented as explicit
+steps rather than an exponential decay so that it can be read and
+defended; and $C$ is session context. $P$ is a multiplicative penalty or
+bonus: political accounts $\times 0.55$, low-confidence extractions
+$\times 0.80$, free events $\times 1.05$.
+
+Three aspects of this formula are methodological choices rather than
+tuning. First, follower count is deliberately the smallest term in $A$:
+a consulate with forty thousand followers is not thereby more culturally
+relevant than a collective with three thousand, and PageRank is weighted
+highest precisely because it measures recognition \emph{within the
+cultural network} rather than general reach. Second, $Q$, $A$, $B$ and
+$P$ are precomputed at export time because they require percentile
+context over the whole dataset, whereas $T$ and $C$ are computed in the
+browser on each visit because they depend on the current date and on the
+individual session — precomputing them would freeze the ranking to the
+last export (DD-043, DD-044). Third, and discussed at length in
+\S\ref{sec:scope-evolution}, an earlier version of the formula included a
+$\times 1.05$ bonus for any event carrying a non-null
+\texttt{culturalIdentity} value; it was removed when the project's scope
+broadened. A mandatory diversification pass then caps how many events
+from the same author, category or parent institution can appear together
+at the top of the home page, without which the largest category
+mechanically dominates the front page.
 
 \section{Ethical Considerations}
-\todo{Public-data-only scope; Instagram ToS; no scraping of
-private accounts; anonymization/aggregation choices for anyone
-appearing in captions/comments who is not an organizational account;
-data retention and the decision to eventually delete non-curated
-accounts (\texttt{cleanup\_legacy\_accounts.py}).}
+\label{sec:ethics}
+
+The corpus is restricted to public accounts and publicly visible posts;
+private accounts are labelled as such in the graph and are not scraped.
+This does not by itself settle the ethics, since public availability and
+consent to research use are different things. Three positions were taken
+in consequence. Organisational accounts — venues, institutions,
+collectives — are treated as public actors and named directly, since
+their posts are promotional by intent and naming them is what makes the
+mapping useful to the community. Individuals appearing incidentally in
+captions, comments or tags are not the object of analysis, and the
+project's data-retention policy works in their favour: the cleanup phase
+deletes accounts never touched by manual curation together with their
+posts and comments, so the accumulated periphery of individual accounts
+discovered through mentions is removed rather than retained
+indefinitely.
+
+The public artifact adds a second set of considerations, handled by
+design rather than by policy. The site stores no personal data on any
+server: it is fully static, session preferences live in the browser's
+\texttt{localStorage} under a single key with no third-party cookies and
+no personally identifying information, and a reset control is exposed in
+the interface. Event cards link back to the original Instagram post
+rather than reproducing it, and the site presents itself as a discovery
+tool rather than a ticketing service. Automated detection is disclosed on
+each event, which matters because a language model sits in the pipeline
+and, as \S\ref{sec:limitations} documents, is wrong a measurable share of
+the time.
+
+\todo{Two items still to settle before submission: (i) whether the
+university requires a formal ethics statement or data-management plan for
+public-web data, and in what form; (ii) the precise status of Instagram's
+terms of service with respect to scraping via a third-party actor, stated
+accurately rather than assumed — this is a legal-risk question the thesis
+should address explicitly rather than leave implied.}
 
 \section{Limitations of Method}
 \label{sec:limitations}
-\todo{Be concrete and honest — this section should draw on
-real bugs found during the dashboard validation, not hypothetical
-caveats: (1) geocoding fallback producing false-precision coordinates
-when a location could not be reliably resolved; (2) LLM date
-extraction misreading year/date from ambiguous captions (e.g.\ a
-caption stating only a month, defaulting to the wrong year); (3)
-Instagram-only sourcing missing organizations that primarily use other
-channels; (4) accounts outside the intended geographic scope
-(e.g.\ France-branded institutions physically located in Colombia)
-occasionally entering the graph via automatic relationship discovery
-before being caught by curation.}
+
+The limitations below are drawn from failures actually observed in this
+project's runs, not from a generic list of caveats.
+
+\textbf{Geocoding produces false precision when it fails.} Around one
+event in seven has no usable coordinates, and the available fallback —
+resolving to a city-level hint — yields plausible-looking but wrong
+positions. The mitigation is exclusion from the map rather than
+approximation (\S\ref{sec:geo}), which trades coverage for honesty.
+
+\textbf{Date extraction is the pipeline's most fragile component.}
+Successive rounds of evaluation found dates invented from a bare month
+(DD-034), a theatre season "26/27" parsed as a calendar date, dates lost
+because the extractor truncated captions at 600 characters (DD-037), and
+implausible dates surviving a clamp that was silently skipped whenever
+either of two date parses threw — producing events dated 2036, 2052 and
+2090 from text that mentioned an anniversary, an age limit and a duration
+in minutes (DD-039). Each was fixed once found; the pattern worth
+reporting is that all of them failed silently, and all were found by
+manual inspection rather than by any automated check.
+
+\textbf{LLM classification is inconsistent at the margin.} RUN-020
+recorded two nearly identical posts about the same event receiving
+opposite verdicts, with no identifiable code cause. Layer 3 is also
+capable of typing an event with a label meaning "not a cultural event"
+while the surrounding logic created the node anyway, because creation did
+not consult the category field (DD-039).
+
+\textbf{Instagram-only sourcing bounds what can be observed.}
+Organisations that announce primarily through mailing lists, their own
+websites or other platforms are absent by construction, and the
+platform's own visibility dynamics shape which accounts are discoverable
+through \texttt{relatedProfiles} at all. The algorithmic layer of the
+network is a proprietary artefact and is analysed separately for that
+reason (\S\ref{sec:network-methods}).
+
+\textbf{Curation does not scale, and the tier labels are sparse.} The
+trust signal that replaced automated scoring is one researcher's
+judgement. The consequence is visible in the network analysis: at the
+time of RUN-015 only 62 of 7{,}269 account nodes carried an explicit tier
+label, so tier-based comparisons describe a small hand-curated subset
+rather than the graph as a whole, and this must be stated wherever such
+comparisons appear.
+
+\textbf{Geographic scope leaks through automatic discovery.} Accounts
+outside the intended geography enter the graph through
+\texttt{relatedProfiles} before curation catches them — Alliance
+Française branches in Colombian cities being the recurring case (DD-032)
+— and at least one event in the institutional sample examined in
+\S\ref{sec:data-quality} was a restaurant menu in Spain with no
+connection to the project at all.
 
 
 % ============================================================================
 \chapter{System Implementation: The Hub Cultural Platform}
+\label{ch:implementation}
 % ============================================================================
 
 \section{Pipeline Architecture Overview}
-\todo{Reproduce the phase diagram; emphasize idempotency and
-incrementality as design principles running through every script.}
+
+The system is a set of independent command-line scripts sharing a Neo4j
+Aura database, rather than an orchestrated application. Each script owns
+one phase (\S\ref{sec:research-design}), reads what it needs from the
+graph or from disk, and writes back a disjoint set of properties. There
+is no scheduler and no continuous integration: runs are manual and
+deliberate, which suits a research setting where each execution costs
+money (Apify credits, LLM tokens) and where the point of a run is usually
+to test a change rather than to keep a service fresh.
+
+Two properties of this architecture are load-bearing. \emph{Incremental
+processing}: \texttt{extract\_profiles.py} queries the graph for accounts
+not yet scraped rather than working from a static list, and the NLP
+phases skip any node whose sentinel property is already set, so a
+re-run costs nothing for work already done and an interrupted run can
+simply be restarted — which is how the connection failure mid-way through
+RUN-021 was recovered. \emph{Namespace separation}: manual curation and
+automated ingestion write property names chosen not to collide, so
+re-running either never clobbers the other's data.
 
 \section{Extraction and Ingestion}
-\todo{\texttt{1\_harvest\_ig\_profiles.py} /
-\texttt{1\_harvest\_ig\_posts.py} / \texttt{extract\_profiles.py} $\to$
-\texttt{2\_build\_graph.py}. Provenance tracking
-(\texttt{firstSeenAt}/\texttt{lastUpdatedAt}).}
+
+Extraction writes one JSON file per profile into a gitignored
+\texttt{data\_raw/} directory; ingestion reads that directory and merges
+its contents into the graph. Ingestion is written entirely with
+\texttt{MERGE} rather than \texttt{CREATE}, and stamps every node it
+touches with \texttt{firstSeenAt} on creation and \texttt{lastUpdatedAt}
+on every write, which gives a per-node provenance trail without a
+separate audit table.
+
+An instructive dead end is worth recording. Nodes created before that
+provenance stamping existed have neither property, and a script
+(\texttt{seal\_legacy\_batch.py}) was written to tag them as a legacy
+batch so they could be identified later. By the time it ran, every node
+already carried some other date field, so it had nothing to seal and the
+\texttt{legacyBatch} property never marked a single real node. The
+mechanism that actually solved the underlying problem — separating
+material worth keeping from accumulated noise — was not a timestamp at
+all but the curation signal (\S\ref{sec:methodology-curation}). The
+lesson generalises: provenance metadata answers "when did this arrive",
+which turned out not to be the question that needed answering.
 
 \section{Network Analysis Engine}
-\todo{\texttt{3\_analyze\_network.py} internals; why it runs
-entirely offline from exported CSVs (portability, reproducibility
-benefit worth noting for a thesis — the analysis can be re-run without
-live database access).}
+
+\texttt{3\_analyze\_network.py} exports nodes and edges to CSV, builds
+the two network layers in igraph, runs the metrics described in
+\S\ref{sec:network-methods}, and writes results back with batched
+\texttt{UNWIND} statements. It also supports a mode that performs the
+analysis alone, entirely offline from the exported CSVs, with no database
+connection at all. That mode is not merely a convenience: it means the
+analytical results of this thesis can be regenerated from files under
+version control, by someone with no access to the live database and no
+Neo4j licence, which is a stronger reproducibility guarantee than an
+in-database analysis could offer. Historical runs are additionally
+archived under \texttt{data\_processed/runs/} with a timestamped
+directory per execution (DD-017), so that the evolution of the rankings
+as the corpus grew remains inspectable.
+
+\section{Event Enrichment Services}
+
+The event phase is where the system depends on components it does not
+control: two sentence-transformer models, an NLI model, and a hosted
+language model. Robustness therefore had to be built at the boundary. The
+extractor selects between a local model server and two cloud providers,
+marks a provider as exhausted for the remainder of a run once it has
+failed, and switches to the alternative rather than retrying
+indefinitely; a cap on rate-limit waiting prevents a provider's
+\texttt{Retry-After} header from stalling a run for minutes at a time
+(DD-033). The mechanism was validated by two distinct failure modes in
+practice — quota exhaustion and genuine network errors — and handled both
+by switching providers within ninety seconds.
 
 \section{The Discovery Website}
-\todo{Describe the client-facing artifact built from
-\texttt{5\_export\_dashboard\_data.py} $\to$ static site (\texttt{site/}):
-dynamic category menu (a deliberate choice — no fixed editorial
-category list, so the menu reflects whatever the upstream human
-curation actually prioritizes), bilingual ES/FR interface, no-login
-session personalization via \texttt{localStorage}, similarity search
-via embeddings. Frame this as the thesis's applied contribution:
-turning the graph into something a member of the community could
-actually use, not just an analytical artifact for the researcher.}
+\label{sec:website}
 
-\section{Decision Log as Methodological Transparency}
-\todo{Note the project's practice of a running, dated decision
-log (\texttt{docs/decisions.md}, DD-001 through DD-044+) as a form of
-methodological transparency — cite it as supporting material and
-summarize its most consequential entries (the curation pivot, the
-GDS$\to$igraph pivot, the event-pipeline rewrite, the geocoding
-confidence gating fix).}
+The public artifact is a static site: \texttt{5\_export\_dashboard\_data.py}
+reads the graph and writes a single JSON file, and
+\texttt{site/} contains hand-written HTML, CSS and vanilla JavaScript
+that consumes it, deployed on Cloudflare Pages. There is no backend, no
+framework and no build step, which is a deliberate consequence of the
+dataset's size — the publishable events fit comfortably in a file of a
+few hundred kilobytes — and of the deployment constraint that the site
+must be reconnectable from a plain repository without configuration
+(DD-043, DD-044). The export is read-only and can be re-run after any
+extraction or resolution pass to refresh the site.
+
+Four design decisions are worth reporting as part of the thesis's applied
+contribution.
+
+\textbf{The category menu is fully dynamic.} There is no editorial list
+of families hard-coded anywhere. The "what" axis is assembled on each
+load from the union of the event categories and per-event artistic tags
+actually present in the data, with real counts, ordered by volume. The
+menu therefore reflects what the upstream human curation has prioritised
+rather than an assertion in the code, and it changes shape as the
+curation does.
+
+\textbf{Recommendation without accounts.} Session context is stored in
+\texttt{localStorage}: category weights increment when a visitor filters
+by or opens an event in that category, decay daily, and are dropped below
+a floor; recently seen events are down-weighted so the home page rotates.
+This yields the $C$ component of the ranking formula with no login, no
+server and no personal data.
+
+\textbf{Similarity without exposing embeddings.} The export computes
+cosine similarity across all events and stores, per event, the
+identifiers of its five nearest neighbours. The 384-dimensional vectors
+themselves are discarded after use and never reach the client, which
+keeps the payload small and avoids publishing a representation of the
+corpus that was never intended to be public.
+
+\textbf{Network analysis stays under the hood.} PageRank, betweenness and
+community structure influence the ordering of events and occasionally
+surface as a badge, but the first version deliberately has no dedicated
+organiser-profile or methodology pages. This was a scoping decision:
+those screens are more legible as thesis material than as product, and
+the remaining screens (Explore, Map, organiser profiles) are listed as
+future work in \S\ref{sec:future-work}.
+
+\todo{Include two or three screenshots here rather than only in
+Appendix~\ref{app:screenshots}, once the site has been reviewed in a real
+browser — DD-044 records that only the pure logic of
+\texttt{site/app.js} has been tested in isolation, not the rendered
+result.}
 
 
 % ============================================================================
@@ -513,48 +1155,250 @@ confidence gating fix).}
 \label{ch:results}
 % ============================================================================
 
+This chapter reports results from three sources, each tied to a specific,
+logged run: the network analysis of RUN-015 (2026-07-24), the event
+extraction and resolution of RUN-021 (2026-08-13), and the dashboard
+export of 2026-08-14. Because the graph grows continuously, every figure
+below is stated with its run of origin rather than as a standing fact.
+
+\todo{Before submission, re-run \texttt{3\_analyze\_network.py run-all}
+and \texttt{5\_export\_dashboard\_data.py} and refresh every number in
+this chapter from the resulting \texttt{data\_processed/*.csv} and
+\texttt{site/data.json}. The figures below are correct as of the runs
+named, but several are known to be superseded — in particular the
+network analysis predates both the scope broadening and the cleanup
+phase.}
+
 \section{Network Structure}
-\todo{Report current numbers precisely — re-pull from the
-latest \texttt{data\_processed/*.csv} before writing, do not reuse V1
-numbers unchanged (V1 reference point: $\sim$7{,}200 nodes seeded from
-a single account, 61 communities via Leiden, high modularity). State
-current account/event/location counts as of the most recent run
-(cf.\ latest export: 170 events, 200 accounts, at time of dashboard
-validation — confirm this is post-cleanup and reflects the broadened
-non-Colombia-only scope before citing).}
+\label{sec:network-structure}
+
+At RUN-015 the graph contained 7{,}269 \texttt{:Account} nodes.
+Table~\ref{tab:layers} reports the two layers separately, as
+\S\ref{sec:network-methods} requires.
+
+\begin{table}[htbp]
+\centering
+\caption{Structure of the two network layers (RUN-015, 2026-07-24).}
+\label{tab:layers}
+\begin{tabular}{lrr}
+\toprule
+Metric & Social layer & Algorithmic layer \\
+\midrule
+Nodes & 2{,}973 & 1{,}706 \\
+Edges & 3{,}348 & 1{,}956 \\
+Weakly connected components & 50 & 6 \\
+Giant component & 2{,}547 (85.7\%) & 1{,}537 (90.1\%) \\
+Leiden modularity ($\gamma = 0.5/1.0/1.5$) & 0.902 / 0.905 / 0.905 & 0.860 / 0.869 / 0.868 \\
+Communities ($\gamma = 0.5/1.0/1.5$) & 73 / 79 / 83 & 29 / 33 / 38 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Both layers are dominated by a single giant component holding 85--90\% of
+nodes, and modularity stays above 0.85 at all three resolutions tested —
+a stability that argues against the community structure being an artefact
+of one particular resolution choice. The graph is also sparse: the social
+layer averages barely more than one edge per node, a property recorded as
+a methodological limitation from the first version of the project (DD-020)
+rather than discovered late.
+
+Two cautions apply to the community counts. High modularity in a graph
+with many low-degree nodes can be partly mechanical, since peripheral
+accounts with one or two edges are assigned to small communities almost
+by default. The community-level E-I index gives some reassurance on this
+point — $-0.9273$ on the social layer and $-0.8436$ on the algorithmic
+layer, meaning the detected communities are strongly internally connected
+rather than arbitrary partitions — but does not fully resolve it.
+
+\todo{Run the community-size distribution check flagged in
+\texttt{docs/results\_v2\_network\_analysis.md} \S2 (how many of the
+73--83 communities have fewer than five members) before citing the
+community count as a substantive finding. This is the single most
+important open validation in the results chapter.}
 
 \section{Bridge Actors and Community Structure}
-\todo{The V1 sociological finding — commercial/institutional
-accounts show high E-I index (structural bridges) while individual
-accounts cluster locally — needs re-validation against the current
-graph (broadened scope, curation changes since V1). Report whether it
-still holds.}
+\label{sec:bridge-actors}
+
+Composition first: at RUN-015 the graph was 92.5\% individual accounts
+(6{,}725), with cultural institutions (182, 2.5\%), state institutions
+(163, 2.2\%), commercial accounts (151, 2.1\%) and media (48, 0.7\%)
+making up the remainder. The network is thus numerically a mass of
+individuals with a small institutional core — consistent with an
+organically formed cultural network rather than one structured top-down,
+though the two labelling systems involved (actor type and curatorial
+tier) are separate and only partially overlapping, and only 62 nodes
+carry an explicit tier.
+
+Restricting to the hand-classified core, the highest participation
+coefficients on the social layer — the accounts whose ties span the most
+distinct communities — were held by an institutional communications
+account, a podcast, an educational-cultural account and a set of
+community and venue accounts. The highest PageRank scores were held by a
+partly different set, weighted toward dance and salsa accounts and
+individual artists. That the two rankings do not coincide is itself
+informative: being frequently referenced within a community and bridging
+between communities are different structural positions, and the ranking
+formula of \S\ref{sec:ranking} weights them separately for that reason.
+
+The most consequential observation from this run concerns two accounts
+that ranked among the top bridging and top PageRank actors on both layers
+while having zero or one posts loaded, because their Apify scrapes
+returned empty. Their centrality derives entirely from being mentioned
+and tagged by others. This is direct empirical support for the design
+decision to stop inferring cultural relevance from an account's own
+output (\S\ref{sec:methodology-curation}, DD-028): a content-poor account
+can be structurally central, and any selection rule keyed to publication
+volume would have discarded exactly these accounts.
+
+\todo{Re-validate against the current graph. The RUN-015 analysis
+predates both the scope broadening and the cleanup phase, so the actor
+composition in particular is expected to have changed substantially — the
+92.5\%-individual figure counts the uncurated periphery that
+\texttt{cleanup\_legacy\_accounts.py} was subsequently designed to
+remove. State explicitly whether the bridging pattern survives.}
 
 \section{Thematic and Event Landscape}
-\todo{Distribution of events by category (musical, visual,
-institutional, festival, academic, etc.); how this compares to the
-four originally-targeted thematic agendas (literature, photography,
-cinema, theatre); note the empirical finding that
-\texttt{gastronomía}/institutional content over-represents relative to
-the curated thematic priorities, and how the dashboard's category
-menu and curation approach responded to that.}
+\label{sec:thematic}
+
+At RUN-021 the graph held 664 \texttt{:Event} nodes, of which 559 met the
+validity criteria for publication and 170 passed the additional
+requirement of resolved coordinates and entered the 2026-08-14 dashboard
+export alongside 200 accounts.
+
+The distribution of the exported events by category is markedly uneven:
+gastronomy 51, training and workshops 27, institutional 22, visual arts
+19, music 15, performing arts 9, community 9, festivals 6, audiovisual 6,
+politics 3 and academic 3. Gastronomy is thus the single largest
+category, at 30\% of the exported set and 35\% of the full graph.
+
+This is a finding about the pipeline, not about the cultural field. The
+manual curation actively avoids gastronomy in favour of the project's
+declared priorities; the curator marks such accounts explicitly as "not
+applicable" rather than assigning them an artistic type. Gastronomy
+dominates because gastronomic posts are easy to scrape and easy to detect
+as events — they announce dates, venues and prices in exactly the
+register the detection layers reward — not because the project set out to
+collect them. The response was to demote the category in the interface
+rather than to filter it out of the data, keeping it available as a
+filter while removing it from the default prominence it would otherwise
+take purely on volume.
+
+Against the four declared thematic pillars, the picture is mixed.
+Table~\ref{tab:themes} shows the distribution of curated accounts and
+their events by artistic theme.
+
+\begin{table}[htbp]
+\centering
+\caption{Curated accounts and their events by artistic theme
+(2026-08-13, derived from the curated \texttt{artType} field).}
+\label{tab:themes}
+\begin{tabular}{lrr}
+\toprule
+Theme & Accounts & Events \\
+\midrule
+Visual arts & 21 & 25 \\
+Music & 23 & 24 \\
+Dance & 21 & 20 \\
+Theatre & 15 & 16 \\
+Literature & 15 & 7 \\
+Circus & 5 & 5 \\
+Photography & 3 & 2 \\
+Cinema & 11 & 2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two of the four declared priorities — photography and cinema — have
+curated accounts but almost no detected events, while visual arts, music
+and dance, which were never declared priorities, dominate by volume. The
+gap between eleven curated cinema accounts and two detected cinema events
+is a detection problem rather than an absence of cultural activity.
+A related structural gap was found in the taxonomy itself: none of the
+sixteen event types available to the extractor corresponds to
+literature, so a book launch or a poetry reading has no correct label and
+falls into an adjacent category or none. Since literature is one of the
+project's four founding pillars, this is a pipeline gap rather than an
+interface detail, and it motivated the addition of per-event artistic
+tags (DD-042) — which, being prospective only, do not yet cover the
+events already in the graph.
+
+\todo{Re-run the theme distribution after a full extraction pass with
+\texttt{eventArtTags} populated, and report whether the
+photography/cinema gap narrows. Also decide whether the fifth,
+community-events category has grown enough to be reported separately
+here — currently it is visible only as the \texttt{comunitario}
+category, at 9 of 170 exported events.}
 
 \section{Geographic Distribution}
-\todo{Coverage: total events vs.\ events with a resolvable
-\texttt{Location} node vs.\ events with real lat/lon (report the
-actual, current, post-fix percentage — do not reuse the pre-fix
-85.5\% figure without re-checking after the geocoding-confidence
-exclusion fix described in \S\ref{sec:limitations}).}
+\label{sec:geographic}
+
+Of the 559 events meeting the validity criteria on 2026-08-13, 528
+(94.5\%) had an associated \texttt{:Location} node and 478 (85.5\%) had
+real coordinates. The two shortfalls have different causes: 31 events
+carry no location text at all, because the caption never stated one, and
+50 have location text that either failed to resolve in Nominatim or had
+not yet been through a geocoding pass. Only the first group is
+irrecoverable without a change to the extraction prompt.
+
+\todo{Re-run \texttt{4\_enrich\_locations.py --dry-run} to separate the
+50 unresolved locations into pending backlog and genuinely
+non-geocodable, then restate the coverage figure. Also report the
+distribution across arrondissements and communes, which the geocoding
+hierarchy supports but which has not yet been queried — this is the
+natural place to substantiate the Île-de-France scope claim of
+\S\ref{sec:contributions} with actual numbers.}
 
 \section{Data Quality Findings}
-\todo{Treat this as a genuine result, not just a limitations
-footnote: quantify how often the geocoding fallback produced
-false-precision coordinates before the fix, how often LLM date
-extraction required manual correction, what fraction of institutional-
-category events were miscategorized on manual sample review (cf.\ the
-20-event institutional sample: $\sim$35\% either miscategorized or
-pipeline-gate leaks). This kind of transparent error analysis is
-strong thesis material.}
+\label{sec:data-quality}
+
+Data quality is reported here as a result rather than deferred to a
+limitations footnote, because the error analysis is one of the more
+transferable outputs of the project.
+
+The evaluation trajectory described in \S\ref{sec:eval-design} is the
+headline: agreement between the pipeline and blind human classification
+moved from 58\% (100 posts, 2026-08-09) through 82.4\% precision and
+85.8\% recall (495 posts, 2026-08-12) to 96.7\% agreement with 97.3\%
+precision (150 posts, RUN-020). The largest single gain came from one
+conditional statement — making node creation depend on the language
+model's own invitation and upcoming flags, which it had been computing
+and ignoring.
+
+A manual review of a targeted sample sharpens the picture where the
+aggregate figures are most flattering. The twenty institutional events
+with the highest resonance scores were classified by hand: roughly eight
+were genuine public events correctly categorised; roughly seven were not
+events at all — interviews, podcasts, press releases, appointment
+announcements, a private meeting — and had passed the public-invitation
+gate that should have stopped them; and roughly five were real events
+placed in the wrong category, including two visual-art installations, a
+concert tour, a restaurant menu in Spain unrelated to the project, and a
+language-course enrolment that an explicit prompt instruction was
+supposed to exclude. Twelve of twenty problematic is a much worse rate
+than the aggregate figures suggest, and the discrepancy is itself the
+finding: the sample was selected by highest resonance within the
+institutional category, which is precisely where the pipeline's two known
+weaknesses concentrate — a leaky invitation gate and a tendency to type
+an event by the nature of the account that published it rather than by
+the content of the post. Aggregate accuracy over a random sample and
+accuracy within a targeted high-visibility slice are different quantities,
+and a discovery product surfaces the second.
+
+Deduplication performance is measurable on the same run. Over 664 events,
+the resolver evaluated 220{,}116 pairs in roughly twenty seconds,
+identified 68 duplicate pairs, and consolidated them through 189
+relationship redirections, transitive chains included. Of the pairs it
+rejected, 12{,}375 failed on similarity, 165{,}018 on the date window,
+and 6 on the geographic-conflict guardrail — the last group being
+precisely the failure cases that motivated the guardrail
+(\S\ref{sec:event-resolver}).
+
+\todo{Two quantifications are still missing and would strengthen this
+section: (i) how many events had false-precision coordinates before the
+geocoding-confidence decision, obtainable by comparing a geocoding run
+with and without the city-hint fallback; (ii) an error rate for date
+extraction on the current code, since all the date figures cited above
+predate the DD-037 and DD-039 fixes.}
 
 
 % ============================================================================
@@ -563,10 +1407,18 @@ strong thesis material.}
 % ============================================================================
 
 \section{Interpreting Network Structure}
-\todo{What does the bridge-actor pattern (if it holds) say
-sociologically about how this diaspora organizes culturally —
-mediated through a small number of institutional hubs rather than a
-dense peer network?}
+
+\todo{Depends on the re-validation flagged in
+\S\ref{sec:bridge-actors}. The argument to make, if the pattern holds:
+the network is numerically a mass of individual accounts organised around
+a small institutional core that does the bridging work, which suggests
+cultural circulation here is mediated through a handful of institutional
+hubs rather than through a dense peer network — with the corollary that
+such a topology is fragile, since removing a few hubs would fragment it.
+Connect to the sparse-density observation (DD-020), which reads the same
+structure as possible evidence of fragmentation, and be explicit about
+the alternative explanation: sparsity may be an artefact of how much was
+scraped rather than a property of the field.}
 
 \section{From a Diaspora Network to a Cultural-Relevance Network}
 \label{sec:scope-evolution}
@@ -585,24 +1437,48 @@ relevant, with explicit priority given to photography, cinema,
 literature, theatre, and locally-organized community events, regardless
 of the nationality or cultural origin of the organizers behind it. This
 is a stricter methodological change than it might first appear, because
-it also required removing a nationality bonus that had previously been
-present in the discovery website's relevance-ranking formula
-(\S\ref{sec:ranking}) — an explicit multiplicative bonus applied to
-events tagged with a Colombian cultural identity. Retaining that bonus
-after the scope change would have produced a ranking signal that was
-formally neutral (it ranks \emph{cultural} events) while materially
-still favoring one nationality over every other one present in the same
-graph; removing it was necessary for the ranking formula to be honest
-about what it actually measures.
+it also required removing a bonus that had previously been present in the
+discovery website's relevance-ranking formula (\S\ref{sec:ranking}) — a
+multiplicative $\times 1.05$ applied to any event carrying a non-null
+\texttt{culturalIdentity} value, a field which in this corpus is
+overwhelmingly populated with Colombian and Latin American values.
+Retaining that bonus after the scope change would have produced a ranking
+signal that was formally neutral (it ranks \emph{cultural} events) while
+materially still favouring one set of national identities over every
+other one present in the same graph; removing it was necessary for the
+ranking formula to be honest about what it actually measures. The field
+itself was kept, as an optional filter a visitor can choose to apply —
+the distinction being between an identity that a user selects and one
+that the system applies on their behalf without telling them.
+
+The same audit produced a negative result worth recording: community
+detection was confirmed to be purely topological, computed only from
+graph edges, so \texttt{culturalIdentity} never entered the community
+structure through a back door. The bias in the ranking formula was
+explicit and removable; the more interesting bias was not.
+
+That one is the reference set of the event detector's first layer. Its
+roughly 100 phrases had been written entirely in the vocabulary of
+Colombian diaspora events, and the blind evaluation of 100 posts
+(\S\ref{sec:eval-design}) measured the consequence: general and French
+accounts lost real events at 12.9\%, against 4.3\% for Colombian and
+Latin American accounts — nearly three times the rate, on events with
+explicit dates and venues that were unambiguous to a human reader. A
+project that had already decided, at the level of stated policy, to
+include cultural activity regardless of origin was still, at the level of
+implementation, seeing that activity less well. This is the strongest
+argument in the thesis for treating the scope change as methodological
+rather than administrative: the nationality criterion was not only a
+boundary drawn around the corpus, it was embedded in the instrument that
+produced the corpus, where it was invisible until measured.
 
 \todo{Once network composition is re-pulled for Chapter~\ref{ch:results},
-quantify here: what share of curated accounts/events are Colombian,
-other Latin American, French, or other, before vs.\ after the scope
-change; and revisit whether the four thematic pillars (literature,
-photography, cinema, theatre) still describe the bulk of curated content
-or whether the fifth, community-events category has grown large enough
-to warrant its own treatment in the results and in the discovery
-website's category menu.}
+quantify here: what share of curated accounts and events carry Colombian,
+other Latin American, French, or other \texttt{culturalIdentity} values,
+before versus after the scope change. The account-level query is
+straightforward against the curated fields; the before/after comparison
+requires the archived run directories under
+\texttt{data\_processed/runs/}.}
 
 What this change gained, beyond ranking-formula honesty, is a criterion
 that is easier to defend and to operationalize consistently:
@@ -622,24 +1498,70 @@ lens applied to a subset of the network (wherever \texttt{culturalIdentity}
 data supports it), rather than as the network's defining boundary.
 
 \section{On Data Quality and the Limits of Automation}
-\todo{Tie together \S\ref{sec:methodology-curation} and
-\S\ref{sec:limitations}: this project's most consistent lesson is that
-fully automated signals (account-relevance scoring, geocoding
-fallbacks, LLM date extraction) degrade silently and look confident
-even when wrong, while human curation — despite being unscalable — was
-the more reliable trust signal throughout. Discuss what this implies
-for similar future projects.}
+
+The project's most consistent lesson is that automated signals fail
+silently and confidently. This is not a general complaint about
+automation but a specific, repeated pattern in these results, visible in
+four independent places. The account classifier assigned high scores to
+accounts in the wrong country, because the geographic signal it trusted
+did not contain the field it assumed (DD-031). The geocoder, offered a
+fallback, returned coordinates that were precise and wrong rather than
+absent (\S\ref{sec:geo}). The date extractor filled in a day of the month
+that no caption ever stated (DD-034), and later accepted a theatre
+season as a date (DD-037). The language model typed events with a label
+meaning "not a cultural event" while the surrounding code created them
+anyway (DD-039). In none of these cases did the system report low
+confidence; in every case the failure was found by a human reading the
+output.
+
+The corresponding lesson about human curation is more qualified than
+"humans are better". Human curation was the more reliable trust signal
+here, and replacing automated account scoring with it was the right
+decision on the evidence — under 10\% of automatically selected accounts
+survived manual review. But it does not scale, it embeds a single
+researcher's judgement, and the evaluation protocol that validated the
+event pipeline measured agreement with that same judgement rather than
+with any external ground truth (\S\ref{sec:eval-design}). What the
+project actually demonstrates is narrower and more useful: automation was
+most reliable where it was constrained to deterministic, checkable
+operations (does this caption contain a date; do these two coordinates
+fall inside this bounding box; do these two country names conflict) and
+least reliable where it was asked to make the judgement of relevance
+itself. The design that emerged puts deterministic gates in front of and
+behind the probabilistic components, and reserves the relevance judgement
+for a person.
+
+\todo{Extend with the implication for comparable projects, stated as
+design guidance rather than as a moral: put a cheap deterministic gate in
+front of any expensive probabilistic component, prefer absence to
+plausible-looking approximation in any user-facing field, and instrument
+production runs at least as well as rehearsals (DD-038).}
 
 \section{Practical Implications: The Website as Intervention}
-\todo{Beyond analysis, the discovery website is itself a
-sociological intervention — it could actually change how the diaspora
-finds/attends events. Discuss this as a design-research contribution,
-distinct from the analytical contribution.}
+
+\todo{The discovery site is not only a dissemination channel but a
+sociological intervention: it makes a set of events visible together that
+were previously legible only to whoever followed the right accounts, and
+its ranking formula makes an explicit editorial claim about what counts
+as relevant. Two concrete hooks from the implementation are worth
+discussing as design research: the dynamic category menu, which delegates
+the taxonomy to whatever the curation prioritised rather than fixing it
+editorially in code; and the removal of the identity bonus, which is a
+worked example of an ordinary product decision that is also a political
+one. Connect back to the fourth objective (\S\ref{sec:objectives}) —
+whether the artifact produced actual contact with the community.}
 
 \section{Methodological Reflections}
-\todo{What would be done differently starting over — e.g.\
-building the geocoding-confidence gate and human curation trust signal
-in from day one rather than arriving at them through iteration.}
+
+\todo{What would be done differently starting over. Four candidates
+supported by the record: (i) build the human-curation trust signal in
+from the start rather than arriving at it after an automated classifier
+underperformed; (ii) write the semantic reference set to the scope you
+intend rather than the scope you started with, since it silently encodes
+the inclusion criterion (\S\ref{sec:scope-evolution}); (iii) instrument
+production runs for audit from the first run, not after a run proved
+unauditable (DD-038); (iv) prefer explicit absence over fallback values
+in every field a person will read.}
 
 
 % ============================================================================
@@ -648,31 +1570,48 @@ in from day one rather than arriving at them through iteration.}
 % ============================================================================
 
 \section{Summary of Contributions}
-\todo{Restate the three contributions from \S1.4 concretely
-against what was actually delivered.}
+\todo{Restate the three contributions of \S\ref{sec:contributions}
+against what was actually delivered, with figures: the pipeline and its
+evaluation trajectory (methodological), the mapped network and its
+documented error rates (empirical), and the deployed bilingual site
+(applied).}
 
 \section{Answering the Research Question}
-\todo{Direct answer, one paragraph.}
+\todo{Direct answer to \S\ref{sec:research-question} and its three
+sub-questions, one paragraph each at most. The structural sub-question is
+answerable now in outline (\S\ref{sec:bridge-actors}) pending
+re-validation; the thematic one is answerable with
+\S\ref{sec:thematic} and \S\ref{sec:eval-design}; the practical one is
+answerable with \S\ref{sec:website} and \S\ref{sec:data-quality}.}
 
 \section{Limitations}
-\todo{Consolidate — do not just repeat \S\ref{sec:limitations}
-verbatim; frame as boundaries on how far the findings generalize.}
+\todo{Consolidate \S\ref{sec:limitations} into boundaries on
+generalisation rather than a repeated list: single platform, single
+metropolitan area, single annotator, a corpus whose boundary is set by
+one researcher's curation capacity, and a snapshot of a network that
+continues to change.}
 
 \section{Future Work}
-\todo{From the project's own V2 planning notes: a new NLP
-account classifier with explicit geography/cultural-relevance
-dimensions and anti-embeddings to penalize commercial/political
-content; expanded seed set from Latin American consulates in Paris;
-revised harvest cycle prioritizing cheap profile scraping before
-expensive post scraping; remaining dashboard work (clickable
-arrondissement/commune map, dedicated Explorer/Map/Organizer-profile
-pages, per-event bilingual content generated at extraction time,
-generic category image set).}
+\label{sec:future-work}
+\todo{From the project's own planning notes and open items: a new
+account classifier with explicit geography and cultural-relevance
+dimensions plus anti-embeddings to penalise commercial and political
+content; an expanded seed set from Latin American consulates in Paris
+(DD-022 lists the handles, several still unverified); a revised harvest
+cycle prioritising cheap profile scraping before expensive post scraping;
+a literature label added to the event taxonomy and a backfill decision
+for \texttt{eventArtTags} (DD-042); resolution of the open question in
+DD-035 on ongoing exhibitions; normalisation of stylised Unicode digits
+in captions if confirmed frequent (DD-036); and the remaining site
+screens — clickable arrondissement and commune map, Explore, Map, and
+organiser-profile pages, per-event bilingual text generated at extraction
+time, and a generic category image set.}
 
 \section{Closing Reflection}
-\todo{Personal note tying back to \S1.3's fourth objective —
-whether/how the project succeeded by its own most human metric
-(meeting someone through it), separate from the technical metrics.}
+\todo{Personal note tying back to the fourth objective of
+\S\ref{sec:objectives} — whether and how the project succeeded by its own
+most human metric (meeting someone through it), separate from the
+technical metrics.}
 
 
 % ============================================================================
@@ -681,27 +1620,98 @@ whether/how the project succeeded by its own most human metric
 
 \chapter{Graph Schema Reference}
 \label{app:schema}
-\todo{Full node/relationship table, adapted from
-\texttt{docs/data\_flow.md} and \texttt{CLAUDE.md}.}
+
+\begin{table}[htbp]
+\centering
+\caption{Node labels in the Hub Cultural graph.}
+\small
+\begin{tabular}{lll}
+\toprule
+Label & Origin & Notes \\
+\midrule
+\texttt{:Account} & Ingestion & Also \texttt{:Public} or \texttt{:Private}; optionally \texttt{:Political} \\
+\texttt{:Post} & Ingestion & Caption is the unit of event detection \\
+\texttt{:IgtvVideo} & Ingestion & Treated like a post for authorship \\
+\texttt{:Comment} & Ingestion & Author linked via \texttt{WROTE} \\
+\texttt{:Hashtag} & Ingestion & \\
+\texttt{:Track} & Ingestion & Audio track used in a post \\
+\texttt{:Location} & Ingestion / events & Geocoded in phase 6 \\
+\texttt{:Event} & Event pipeline & Created only when the layer-3 gate passes \\
+\texttt{:Arrondissement} & Geocoding & Derived from postal codes 750XX \\
+\texttt{:City} & Geocoding & \\
+\texttt{:Country} & Geocoding & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Relationship types.}
+\small
+\begin{tabular}{ll}
+\toprule
+Group & Types \\
+\midrule
+Ingestion & \texttt{PUBLISHED}, \texttt{HAS\_HASHTAG}, \texttt{MENTIONS},
+\texttt{TAGS\_USER}, \texttt{COAUTHORED\_BY}, \\
+& \texttt{TAGGED\_AT}, \texttt{USES\_MUSIC}, \texttt{WROTE}, \texttt{ON},
+\texttt{LOCATED\_AT}, \texttt{RELATED\_TO} \\
+NLP and geo & \texttt{MENTIONS\_EVENT}, \texttt{ORGANIZED},
+\texttt{PARTICIPATED\_IN}, \texttt{SUPPORTED}, \texttt{LOCATED\_IN} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\todo{Add an entity-relationship diagram and a property-level table for
+\texttt{:Account} and \texttt{:Event}, distinguishing ingestion-written
+properties from curation-written ones (\texttt{artType},
+\texttt{culturalIdentity}, \texttt{geoZone},
+\texttt{manualFollowersCount}, \texttt{manualDataCuratedAt}) and
+analysis-written ones (\texttt{pageRankExact}, \texttt{betweennessExact},
+\texttt{participationCoef}, \texttt{kCore}, Leiden community labels).
+Source: \texttt{docs/data\_flow.md} and the \texttt{COLUMN\_MAP} of
+\texttt{load\_manual\_account\_categorization.py}.}
 
 \chapter{Selected Decision Log Entries}
-\todo{Reproduce/summarize the most thesis-relevant entries
-from \texttt{docs/decisions.md} (curation pivot, GDS$\to$igraph pivot,
-event-pipeline rewrite \& 100-post eval, geocoding confidence gate).}
+\todo{Translate and reproduce in full the entries most load-bearing
+for the argument: DD-006 (seed strategy), DD-013 (GDS to igraph),
+DD-018 (Nominatim), DD-026 (seed source versus cultural target),
+DD-031/032 (geographic misclassification), DD-034/037/039 (date
+extraction failures), DD-036 (the 495-post retuning), DD-040/041
+(resolver redesign and geographic guardrail), and DD-043/044 (export and
+site). Note in a preamble that the log is written in Spanish and that
+these are the author's translations.}
+
+\chapter{Evaluation Protocol and Samples}
+\todo{New appendix. Reproduce the classification criterion used for
+the blind human labelling (including the adjudication recorded in
+DD-035), the per-round sample sizes and dates, and the confusion counts
+behind the figures in \S\ref{sec:eval-design}. Source files:
+\texttt{data\_processed/eval\_100\_report.md},
+\texttt{data\_processed/claude\_labels.json}, and the per-batch
+\texttt{eval\_*.csv} files.}
 
 \chapter{Discovery Website — Screenshots}
-\todo{Home screen, filter bar, event detail panel — capture
-once the site is stable post-fixes (see current punch list: upcoming-
-filter bug, geocoding exclusion, account-scope cleanup).}
+\label{app:screenshots}
+\todo{Home screen, filter bar, event detail panel — capture once the
+site has been reviewed in a real browser and the outstanding punch list
+is cleared.}
 
 \chapter{Repository Structure}
-\todo{Reproduce the script naming convention and phase
-breakdown from \texttt{CLAUDE.md}'s Commands section as a reference
-table.}
+\todo{Reproduce the phase-by-phase script table from
+\texttt{CLAUDE.md}'s Commands section, including the naming convention
+(\texttt{1\_harvest\_}, \texttt{2\_build\_}, \texttt{3\_analyze\_},
+\texttt{4\_enrich\_}, \texttt{5\_export\_}, DD-019) and the folder
+conventions: \texttt{old/} for superseded or environment-incompatible
+scripts, \texttt{testing/} for verification and diagnostic scripts.}
 
 % ============================================================================
 % \bibliographystyle{apalike}   % or whatever citation style your program requires
 % \bibliography{references}
 % ============================================================================
+\todo{Create \texttt{thesis/references.bib} and uncomment the two
+bibliography lines above. No bibliography exists in the repository yet;
+the only literature reference recorded anywhere is Vertovec (2009) in
+DD-020, and it needs verification.}
 
 \end{document}
