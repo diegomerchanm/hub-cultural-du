@@ -106,19 +106,18 @@ WHERE NOT 'Rejected' IN labels(e)
   AND e.eventDate IS NOT NULL AND e.eventDate <> ''
 OPTIONAL MATCH (e)-[:LOCATED_AT]->(l:Location)
 WITH e, l
-// ALLOWLIST, no denylist (ver DD-045 update): confiar solo en los tiers de
-// geocodificación conocidos como confiables ("exact", "city_combined").
-// Descarta explícitamente "city_hint_only" Y, sobre todo, l.geocodeConfidence
-// IS NULL — que en la práctica resultó ser el caso más común de coordenadas
-// falsas (Locations geocodificadas antes de que existiera el campo de tier,
-// o por un camino del pipeline que nunca lo escribe). Confirmado con datos
-// reales: 40+ Location distintas con nombres arbitrarios ("Collège espagnol
-// Federico Garcia Lorca", "Teatro Colsubsidio...", "@viennacontemporary")
-// todas con geocodeConfidence=null y el mismo l.displayName genérico
-// ("París, Isla de Francia, Francia metropolitana, Francia") — es decir,
-// geocodificaron literalmente el --city-hint por defecto, no el lugar real.
+// NOTA (DD-045, segunda vuelta): l.geocodeConfidence NO EXISTE en la base —
+// Neo4j lo confirma con un warning ("property key does not exist"), no es
+// que esté null en algunos nodos: nunca se escribió en ninguno. Se ve en el
+// código de 4_enrich_locations.py, pero el script es idempotente por
+// `lat IS NULL` como criterio de "falta geocodificar" — como todos los
+// Location ya tenían lat/lon de antes de que se agregara ese campo, nunca se
+// volvió a correr sobre ellos y el campo quedó sin poblar en la práctica
+// (bug real, aparte, en 4_enrich_locations.py — no arreglado acá). Filtrar
+// por esa propiedad devuelve 0 resultados. Se retira el filtro acá; la
+// detección de coordenadas-fallback se hace en Python después de traer los
+// datos (_filter_fallback_coordinates), sin depender de esta propiedad.
 WHERE l IS NOT NULL AND l.lat IS NOT NULL AND l.lon IS NOT NULL
-  AND l.geocodeConfidence IN ['exact', 'city_combined']
 RETURN e.id AS id, e.title AS title, e.category AS category, e.type AS type,
        e.eventArtTags AS eventArtTags, e.artType AS artType,
        e.eventDate AS eventDate, e.locationName AS locationName,
@@ -227,6 +226,44 @@ def compute_ranking_subscores(events: list, accounts_by_username: dict) -> None:
         e["isFree"] = is_free(e.get("priceRange"))
 
 
+def _filter_fallback_coordinates(events: list[dict], min_distinct_names: int = 3) -> list[dict]:
+    """Detecta y excluye eventos cuyas coordenadas son, con alta probabilidad,
+    el resultado de geocodificar el --city-hint por defecto en vez del lugar
+    real (ver DD-045). No depende de l.geocodeConfidence (propiedad que en la
+    práctica nunca se pobló — ver nota en EVENTS_QUERY): la señal es empírica,
+    verificada contra datos reales el 2026-08-15 — una coordenada real de un
+    lugar específico tiene locationName repetido o casi idéntico entre los
+    eventos que la comparten (la misma cuenta postea varias veces desde el
+    mismo sitio real); una coordenada de fallback tiene locationName
+    completamente distinto entre eventos no relacionados (ej. un handle de
+    Instagram, un teatro en Medellín, y una dirección real de París,
+    los tres con la misma lat/lon). Umbral: 3+ locationName distintos en la
+    misma coordenada (redondeada a 4 decimales, ~11m de precisión) se
+    considera fallback y se excluye el grupo completo.
+    """
+    groups: dict[tuple, list[dict]] = {}
+    for e in events:
+        lat, lon = e.get("lat"), e.get("lon")
+        if lat is None or lon is None:
+            continue
+        key = (round(lat, 4), round(lon, 4))
+        groups.setdefault(key, []).append(e)
+
+    bad_ids: set[str] = set()
+    for key, group in groups.items():
+        names = {(e.get("locationName") or "").strip().lower() for e in group}
+        names.discard("")
+        if len(names) >= min_distinct_names:
+            bad_ids.update(e["id"] for e in group)
+            print(f"  ⚠️  Coordenada sospechosa {key}: {len(group)} eventos, "
+                  f"{len(names)} locationName distintos -> excluidos")
+
+    if bad_ids:
+        print(f"📍 {len(bad_ids)} eventos excluidos por coordenada de fallback "
+              f"(geocodificación no confiable)")
+    return [e for e in events if e["id"] not in bad_ids]
+
+
 @app.command()
 def main(
     out: str = typer.Option(DEFAULT_OUT, "--out", help="Ruta del JSON de salida"),
@@ -241,6 +278,8 @@ def main(
         accounts = [dict(r) for r in session.run(ACCOUNTS_QUERY)]
     driver.close()
 
+    print(f"📦 {len(events)} eventos con coordenadas antes del filtro de fallback")
+    events = _filter_fallback_coordinates(events)
     print(f"📦 {len(events)} eventos válidos y geocodificados")
     print(f"📦 {len(accounts)} cuentas curadas/con métricas de grafo")
 
