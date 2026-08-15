@@ -226,6 +226,39 @@ def compute_ranking_subscores(events: list, accounts_by_username: dict) -> None:
         e["isFree"] = is_free(e.get("priceRange"))
 
 
+def _dedupe_conflicting_locations(events: list[dict]) -> list[dict]:
+    """EVENTS_QUERY puede devolver más de una fila por evento cuando un
+    :Event tiene más de una relación :LOCATED_AT (varios :Location distintos
+    para el mismo lugar, cada uno geocodificado por separado). Descubierto el
+    2026-08-15 al validar el fix de coordenadas-fallback: 5 eventos traían
+    2-4 filas con el MISMO locationName pero coordenadas completamente
+    distintas y sin relación entre sí (ej. "Café Otraparte" resolviendo a la
+    vez en Colombia y en España) — geocodificación en conflicto, no un
+    duplicado inofensivo. Si las filas de un mismo id tienen coordenadas que
+    no coinciden, no hay forma de saber cuál (si alguna) es correcta: se
+    descarta el evento completo en vez de quedarse arbitrariamente con la
+    primera fila. Si coinciden (duplicado cartesiano real, mismas
+    coordenadas repetidas), se colapsa a una sola fila sin más.
+    """
+    by_id: dict[str, list[dict]] = {}
+    for e in events:
+        by_id.setdefault(e["id"], []).append(e)
+
+    out: list[dict] = []
+    conflicts = 0
+    for eid, rows in by_id.items():
+        coords = {(r.get("lat"), r.get("lon")) for r in rows}
+        if len(coords) > 1:
+            conflicts += 1
+            continue  # geocodificación en conflicto — se descarta, no se adivina
+        out.append(rows[0])
+
+    if conflicts:
+        print(f"  ⚠️  {conflicts} eventos con coordenadas en conflicto entre sí "
+              f"(varias geocodificaciones distintas para el mismo lugar) -> excluidos")
+    return out
+
+
 def _filter_fallback_coordinates(events: list[dict], min_distinct_names: int = 3) -> list[dict]:
     """Detecta y excluye eventos cuyas coordenadas son, con alta probabilidad,
     el resultado de geocodificar el --city-hint por defecto en vez del lugar
@@ -278,7 +311,8 @@ def main(
         accounts = [dict(r) for r in session.run(ACCOUNTS_QUERY)]
     driver.close()
 
-    print(f"📦 {len(events)} eventos con coordenadas antes del filtro de fallback")
+    print(f"📦 {len(events)} filas con coordenadas antes de deduplicar/filtrar")
+    events = _dedupe_conflicting_locations(events)
     events = _filter_fallback_coordinates(events)
     print(f"📦 {len(events)} eventos válidos y geocodificados")
     print(f"📦 {len(accounts)} cuentas curadas/con métricas de grafo")
