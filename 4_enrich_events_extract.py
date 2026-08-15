@@ -93,11 +93,15 @@ if not all([NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD]):
 if not GROQ_API_KEY:
     print("  ⚠️  GROQ_API_KEY ausente en .env — Capa 3 (LLM) se omitirá (valores null, sin penalización)")
 
-# Endpoint OpenAI-compatible de Groq. Confirmado en console.groq.com/docs/models
-# (2026-07-24): llama-3.3-70b-versatile es el modelo de texto grande vigente con
-# mejor soporte multilingüe entre los disponibles en producción.
+# Endpoint OpenAI-compatible de Groq. llama-3.3-70b-versatile fue decomisionado
+# por Groq el 2026-08-16 (aviso por email); reemplazo oficial recomendado por
+# Groq: GPT OSS 120B, id confirmado en console.groq.com/docs/models (2026-08-15)
+# como "openai/gpt-oss-120b" (con prefijo openai/, distinto del id que usa
+# Cerebras para el mismo peso abierto — ver CEREBRAS_MODEL debajo). Mismo
+# modelo subyacente que ya corre en el fallback de Cerebras, así que primario
+# y fallback quedan alineados — sin necesidad de re-validar calidad desde cero.
 GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL    = "llama-3.3-70b-versatile"
+GROQ_MODEL    = "openai/gpt-oss-120b"
 
 # Endpoint OpenAI-compatible de Cerebras (cloud.cerebras.ai). NO es el mismo
 # modelo que Groq — Cerebras retiró llama-3.3-70b de su catálogo público;
