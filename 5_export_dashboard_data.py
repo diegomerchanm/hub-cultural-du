@@ -9,9 +9,18 @@ un sitio estático (GitHub Pages / Cloudflare Pages) alcanza de sobra.
 
 Qué hace:
   1. Trae eventos válidos (no rechazados, invitación pública futura confirmada,
-     fecha real) Y CON COORDENADAS REALES (decisión 2026-08-13: un evento sin
-     lat/lon queda fuera de la experiencia de descubrimiento por completo —
-     es filtro de presentación, no borra nada del grafo).
+     fecha real) que tengan AL MENOS un texto de ubicación extraído por el LLM
+     (exactAddress / locationName / cityName). **Decisión de producto
+     2026-08-15 (DD-045), reemplaza la de 2026-08-13:** aparecer en el sitio y
+     tener pin en el mapa son dos cosas independientes. Un evento entra al
+     sitio si el LLM extrajo texto de ubicación — que es lo que el front
+     muestra realmente (`ev.exactAddress || ev.locationName || ev.cityName`,
+     ver site/app.js), nunca algo derivado de Nominatim. Que el geocoder haya
+     podido o no convertir ese texto en coordenadas confiables solo decide si
+     el evento tendrá pin de mapa (feature futura): cuando la geocodificación
+     es sospechosa, `lat`/`lon` salen en `null` y el evento igual se exporta.
+     Antes se descartaba el evento entero, lo que sacaba del sitio ~100 de 170
+     eventos por un problema del geocoder, no del evento.
   2. Trae cuentas curadas/con métricas de grafo (para el perfil de organizador
      y el componente A del ranking).
   3. Calcula, con el dataset completo en memoria, los sub-scores de ranking
@@ -104,6 +113,16 @@ WHERE NOT 'Rejected' IN labels(e)
   AND e.isPublicInvitation = true
   AND e.isUpcoming = true
   AND e.eventDate IS NOT NULL AND e.eventDate <> ''
+  // Requisito de ubicación (DD-045, tercera vuelta): basta con que el LLM haya
+  // extraído ALGÚN texto de ubicación. Es lo único que el sitio muestra; si no
+  // hay ni dirección ni nombre de lugar ni ciudad, el evento no es accionable
+  // para nadie y ahí sí no tiene sentido publicarlo. NO se exige nada sobre el
+  // :Location geocodificado — ver docstring del módulo.
+  AND (trim(coalesce(e.exactAddress, '')) <> ''
+       OR trim(coalesce(e.locationName, '')) <> ''
+       OR trim(coalesce(e.cityName, '')) <> '')
+// OPTIONAL: un evento sin :Location (o con :Location sin lat/lon) igual se
+// exporta, con lat/lon = null → simplemente no tendrá pin en el mapa.
 OPTIONAL MATCH (e)-[:LOCATED_AT]->(l:Location)
 WITH e, l
 // NOTA (DD-045, segunda vuelta): l.geocodeConfidence NO EXISTE en la base —
@@ -117,7 +136,6 @@ WITH e, l
 // por esa propiedad devuelve 0 resultados. Se retira el filtro acá; la
 // detección de coordenadas-fallback se hace en Python después de traer los
 // datos (_filter_fallback_coordinates), sin depender de esta propiedad.
-WHERE l IS NOT NULL AND l.lat IS NOT NULL AND l.lon IS NOT NULL
 RETURN e.id AS id, e.title AS title, e.category AS category, e.type AS type,
        e.eventArtTags AS eventArtTags, e.artType AS artType,
        e.eventDate AS eventDate, e.locationName AS locationName,
@@ -236,9 +254,11 @@ def _dedupe_conflicting_locations(events: list[dict]) -> list[dict]:
     vez en Colombia y en España) — geocodificación en conflicto, no un
     duplicado inofensivo. Si las filas de un mismo id tienen coordenadas que
     no coinciden, no hay forma de saber cuál (si alguna) es correcta: se
-    descarta el evento completo en vez de quedarse arbitrariamente con la
-    primera fila. Si coinciden (duplicado cartesiano real, mismas
-    coordenadas repetidas), se colapsa a una sola fila sin más.
+    colapsa a una sola fila **con lat/lon = None** (el evento sigue en el
+    sitio, simplemente sin pin de mapa — DD-045, decisión de producto del
+    2026-08-15: existir en el sitio no depende de la geocodificación). Si
+    coinciden (duplicado cartesiano real, mismas coordenadas repetidas), se
+    colapsa a una sola fila conservando la coordenada.
     """
     by_id: dict[str, list[dict]] = {}
     for e in events:
@@ -248,19 +268,24 @@ def _dedupe_conflicting_locations(events: list[dict]) -> list[dict]:
     conflicts = 0
     for eid, rows in by_id.items():
         coords = {(r.get("lat"), r.get("lon")) for r in rows}
+        row = rows[0]
         if len(coords) > 1:
             conflicts += 1
-            continue  # geocodificación en conflicto — se descarta, no se adivina
-        out.append(rows[0])
+            # geocodificación en conflicto — no se adivina cuál es correcta:
+            # el evento se conserva, pero sin coordenada.
+            row["lat"] = None
+            row["lon"] = None
+        out.append(row)
 
     if conflicts:
         print(f"  ⚠️  {conflicts} eventos con coordenadas en conflicto entre sí "
-              f"(varias geocodificaciones distintas para el mismo lugar) -> excluidos")
+              f"(varias geocodificaciones distintas para el mismo lugar) -> "
+              f"sin coordenada confiable (se mantienen, sin pin de mapa)")
     return out
 
 
 def _filter_fallback_coordinates(events: list[dict], min_distinct_names: int = 3) -> list[dict]:
-    """Detecta y excluye eventos cuyas coordenadas son, con alta probabilidad,
+    """Detecta y anula las coordenadas que son, con alta probabilidad,
     el resultado de geocodificar el --city-hint por defecto en vez del lugar
     real (ver DD-045). No depende de l.geocodeConfidence (propiedad que en la
     práctica nunca se pobló — ver nota en EVENTS_QUERY): la señal es empírica,
@@ -272,7 +297,12 @@ def _filter_fallback_coordinates(events: list[dict], min_distinct_names: int = 3
     Instagram, un teatro en Medellín, y una dirección real de París,
     los tres con la misma lat/lon). Umbral: 3+ locationName distintos en la
     misma coordenada (redondeada a 4 decimales, ~11m de precisión) se
-    considera fallback y se excluye el grupo completo.
+    considera fallback.
+
+    Los eventos del grupo NO se excluyen (DD-045, decisión de producto del
+    2026-08-15): se les setea `lat`/`lon` a None y siguen en la exportación.
+    El sitio muestra el texto de ubicación del LLM, no la coordenada; lo único
+    que se pierde es el pin en el mapa (feature futura).
     """
     groups: dict[tuple, list[dict]] = {}
     for e in events:
@@ -289,12 +319,16 @@ def _filter_fallback_coordinates(events: list[dict], min_distinct_names: int = 3
         if len(names) >= min_distinct_names:
             bad_ids.update(e["id"] for e in group)
             print(f"  ⚠️  Coordenada sospechosa {key}: {len(group)} eventos, "
-                  f"{len(names)} locationName distintos -> excluidos")
+                  f"{len(names)} locationName distintos -> sin pin de mapa")
 
     if bad_ids:
-        print(f"📍 {len(bad_ids)} eventos excluidos por coordenada de fallback "
-              f"(geocodificación no confiable)")
-    return [e for e in events if e["id"] not in bad_ids]
+        for e in events:
+            if e["id"] in bad_ids:
+                e["lat"] = None
+                e["lon"] = None
+        print(f"📍 {len(bad_ids)} eventos sin coordenada confiable por fallback de "
+              f"geocodificación (se mantienen, sin pin de mapa)")
+    return events
 
 
 @app.command()
@@ -311,10 +345,13 @@ def main(
         accounts = [dict(r) for r in session.run(ACCOUNTS_QUERY)]
     driver.close()
 
-    print(f"📦 {len(events)} filas con coordenadas antes de deduplicar/filtrar")
+    print(f"📦 {len(events)} filas antes de deduplicar/filtrar")
     events = _dedupe_conflicting_locations(events)
     events = _filter_fallback_coordinates(events)
-    print(f"📦 {len(events)} eventos válidos y geocodificados")
+    with_coords = sum(1 for e in events if e.get("lat") is not None and e.get("lon") is not None)
+    print(f"📦 {len(events)} eventos válidos con texto de ubicación "
+          f"({with_coords} con coordenada confiable → pin de mapa; "
+          f"{len(events) - with_coords} sin pin)")
     print(f"📦 {len(accounts)} cuentas curadas/con métricas de grafo")
 
     accounts_by_username = {a["username"]: a for a in accounts}
