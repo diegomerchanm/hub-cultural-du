@@ -822,5 +822,35 @@ Al validar el gate `has_text_date` sobre `104paris` (post `3925185624513914500`,
 
 ---
 
-*Última actualización: 2026-08-14*
-*Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos, resolución de DD-035 (exposiciones en curso), normalización de dígitos Unicode estilizados si se confirma que es frecuente, validación de los fixes DD-038/DD-039 y de los rediseños DD-040/DD-041 en corridas reales — en particular si la muestra de "fecha fuera de ventana" (DD-040) sugiere ensanchar date_window, y si la muestra de "conflicto geográfico" (DD-041) revela falsos positivos del gazetteer. También pendiente: limpieza de basura preexistente en eventos legacy detectada de paso (fecha `1492-11-01`, emoji como `locationName`, texto no-geográfico como `locationName`) — no es parte de esta tarea, pero quedó documentada para una futura pasada de limpieza. Validación en vivo de DD-042 (`eventArtTags`) contra output real del LLM, y decisión sobre si vale la pena un backfill de los 664 eventos existentes. Validación en vivo de DD-043/DD-044 contra Neo4j real y en un navegador real. Pantallas Explorar/Mapa/Perfil de organizador (DD-044 solo cubre Home) — pendientes de construir.*
+## DD-045 — Validación en vivo del sitio de descubrimiento: bugs encontrados, cambio de alcance del proyecto, y lista de pendientes antes del próximo scrapeo
+
+**Fecha:** 2026-08-14/15
+**Contexto:** Diego corrió `5_export_dashboard_data.py` contra Neo4j real (170 eventos, 200 cuentas — pisó el `site/data.json` sintético que dejaba DD-044), conectó el repo a Cloudflare mediante **Workers Builds** (no el flujo clásico de Pages documentado en DD-044 — Cloudflare unificó Workers y Pages; el deploy command por defecto es `npx wrangler deploy`, que requiere un `site/wrangler.jsonc` con `{"assets": {"directory": "."}}` y "Root directory" = `site/`), y publicó en `https://hub-cultural.diegomerchanm.workers.dev/`. Esta fue la primera revisión visual real del sitio (la que DD-044 dejaba pendiente) y encontró varios problemas concretos, con causa raíz confirmada leyendo el código, no solo observados en pantalla.
+
+**Bugs diagnosticados:**
+1. **Filtro "Próximos" no filtra nada** — `site/app.js` línea ~145, `if (STATE.when !== "upcoming")`: cuando el filtro activo ES "upcoming", el bloque que excluye eventos pasados/sin fecha se salta por completo (lógica invertida). No arreglado todavía.
+2. **Coordenadas falsas por fallback de geocodificación** — `4_enrich_locations.py` calcula `geocodeConfidence` (`"exact"` / `"city_combined"` / `"city_hint_only"`) pero `5_export_dashboard_data.py` solo filtra por `lat`/`lon IS NOT NULL`, ignorando esa señal. Eventos de Manizales/Medellín/Pereira aparecieron con coordenadas de París (48.8588897, 2.320041) porque el geocoder cayó al peor tier (`city_hint_only`, que geocodifica literalmente el `--city-hint` global `"Paris, France"` en vez de la ubicación real del evento) y esa coordenada pasó como si fuera válida. Fix propuesto: excluir `city_hint_only` en el export — no requiere LLM ni geocodificación nueva, solo usar una señal que ya se calcula y hoy se descarta.
+3. **Cuentas fuera de alcance geográfico**: `alianzafrancesamanizalesoficia`, `alianzafrancesademedellin`, `alianza_francesa_de_pereira` — instituciones físicamente en Colombia, sin `manualDataCuratedAt`, coladas vía descubrimiento automático `RELATED_TO`.
+4. **Fecha imprecisa**: al menos un evento con año mal inferido por el LLM (2027 en vez de 2026) a partir de una caption que solo mencionaba el mes. Confirma que fecha/ubicación es la mayor debilidad actual del pipeline.
+5. **No existe mapa clickeable** en el sitio — quedó solo como mockup de diseño; DD-044 nunca lo construyó.
+6. **No hay banco de imágenes** — placeholders genéricos únicamente.
+7. **Traducción ES/FR incompleta** — `i18n.js` solo cubre el chrome de la interfaz, no el contenido de los eventos (título/descripción quedan solo en el idioma original de la caption).
+
+**Cambio de alcance del proyecto (ampliación adicional a la de DD-041/ranking):** el criterio de inclusión deja de ser "diáspora latinoamericana" y pasa a ser **relevancia cultural**, con prioridad a fotografía, cine, literatura, teatro, y eventos de comunidades locales — de cualquier nacionalidad. Ya incorporado en `thesis/main.tex` (§1.1, §6.2); se registra también acá porque afecta directamente el punto 3 de la lista de pendientes (esas cuentas de Alianza Francesa en Colombia no se descartan por ser "no latinoamericanas", sino por estar fuera del área geográfica del proyecto).
+
+**Orden de trabajo acordado para antes del próximo scrapeo** (ninguno implementado todavía):
+1. Arreglar filtro "Próximos" (`site/app.js`)
+2. Excluir `geocodeConfidence="city_hint_only"` del export (`5_export_dashboard_data.py`)
+3. Revisar/retirar del scrape las cuentas de Alianza Francesa físicamente en Colombia (y auditar si hay otras cuentas fuera de área coladas igual)
+4. Mejorar precisión de fechas — enfoque aún por definir; Diego descartó que la solución pase necesariamente por el LLM ("actualmente es muy mediocre")
+5. Construir mapa clickeable (arrondissements + comunas de petite couronne)
+6. Banco de ~50 imágenes genéricas por categoría (fotografía, teatro, etc.) — candidato a trabajo con Opus/design
+7. Ayudar a seleccionar cuentas nuevas a partir del pool `discoveredViaCuratedAccount=true` / `candidateReviewStatus='pending'` (ver `cleanup_legacy_accounts.py`)
+8. Traducción ES/FR del contenido de eventos — al final de la lista a propósito, como edición a la pipeline de extracción (nuevo `titleFr`/`descriptionFr` generado por el LLM en `4_enrich_events_extract.py` al crear el evento); aplica solo a eventos nuevos, no retroactivo sobre los 170 existentes
+
+**Tesis:** `thesis/main.tex` — outline completo en LaTeX/inglés, revisado por un agente Opus (correcciones factuales sobre este mismo decision log, capítulos 3–5 completados con prosa real anclada en runs/decisiones reales, nueva §3.7 "Evaluation Design"). Gaps pendientes: sin `references.bib`, sin postura ética explícita sobre ToS de Instagram, sin figura del pipeline ni capturas del sitio, cifra de "73–83 comunidades" sin validar contra una corrida real antes de citarla.
+
+---
+
+*Última actualización: 2026-08-15*
+*Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos, resolución de DD-035 (exposiciones en curso), normalización de dígitos Unicode estilizados si se confirma que es frecuente, validación de los fixes DD-038/DD-039 en corridas reales, y si la muestra de "conflicto geográfico" (DD-041) revela falsos positivos del gazetteer. También pendiente: limpieza de basura preexistente en eventos legacy (fecha `1492-11-01`, emoji como `locationName`, texto no-geográfico como `locationName`). Validación en vivo de DD-042 (`eventArtTags`) contra output real del LLM, y decisión sobre si vale la pena un backfill de los eventos existentes. Los 8 puntos de DD-045 son ahora el punchlist activo — arrancar por el 1 y el 2 (ya diagnosticados, sin trabajo de investigación adicional).*
