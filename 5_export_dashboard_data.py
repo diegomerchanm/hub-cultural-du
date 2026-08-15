@@ -106,13 +106,19 @@ WHERE NOT 'Rejected' IN labels(e)
   AND e.eventDate IS NOT NULL AND e.eventDate <> ''
 OPTIONAL MATCH (e)-[:LOCATED_AT]->(l:Location)
 WITH e, l
-// geocodeConfidence = "city_hint_only" significa que el geocoder no pudo
-// resolver el nombre real de la ubicación y devolvió el --city-hint global
-// (por defecto "Paris, France") como si fuera la coordenada del evento —
-// produce lat/lon con apariencia válida pero falsos (ver DD-045). Excluir
-// acá, no solo exigir lat/lon IS NOT NULL, que no distingue este caso.
+// ALLOWLIST, no denylist (ver DD-045 update): confiar solo en los tiers de
+// geocodificación conocidos como confiables ("exact", "city_combined").
+// Descarta explícitamente "city_hint_only" Y, sobre todo, l.geocodeConfidence
+// IS NULL — que en la práctica resultó ser el caso más común de coordenadas
+// falsas (Locations geocodificadas antes de que existiera el campo de tier,
+// o por un camino del pipeline que nunca lo escribe). Confirmado con datos
+// reales: 40+ Location distintas con nombres arbitrarios ("Collège espagnol
+// Federico Garcia Lorca", "Teatro Colsubsidio...", "@viennacontemporary")
+// todas con geocodeConfidence=null y el mismo l.displayName genérico
+// ("París, Isla de Francia, Francia metropolitana, Francia") — es decir,
+// geocodificaron literalmente el --city-hint por defecto, no el lugar real.
 WHERE l IS NOT NULL AND l.lat IS NOT NULL AND l.lon IS NOT NULL
-  AND coalesce(l.geocodeConfidence, '') <> 'city_hint_only'
+  AND l.geocodeConfidence IN ['exact', 'city_combined']
 RETURN e.id AS id, e.title AS title, e.category AS category, e.type AS type,
        e.eventArtTags AS eventArtTags, e.artType AS artType,
        e.eventDate AS eventDate, e.locationName AS locationName,
