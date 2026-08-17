@@ -110,22 +110,30 @@ def geocode_location(
     pause_sec: float,
 ) -> Optional[dict]:
     """
-    Intenta geocodificar `name` con hasta 3 queries progresivamente más amplias.
+    Intenta geocodificar `name` con hasta 2 queries progresivamente más amplias.
     Respeta el rate limit de Nominatim con `pause_sec` entre llamadas.
 
     Devuelve además `geo["confidence"]` indicando qué query tuvo éxito:
-    "exact" (el nombre solo), "city_combined" (nombre + hint) o
-    "city_hint_only" (el hint solo, sin relación real con `name` más allá
-    de la ciudad) — este último es el tier menos confiable: si `name` y
-    `name+hint` fallan, Nominatim geocodifica literalmente el hint y eso
-    puede parecer un resultado "encontrado" aunque no tenga nada que ver
-    con el lugar real (ver DD-033 update 6). No se descarta automáticamente
-    — se deja visible como propiedad para que se pueda filtrar/revisar.
+    "exact" (el nombre solo) o "city_combined" (nombre + hint).
+
+    NOTA (DD-045, rediseño 2026-08-15): existía un tercer tier,
+    "city_hint_only", que si `name` y `name+hint` fallaban, geocodificaba
+    literalmente el hint solo (ej. "Paris, France") y lo devolvía como si
+    fuera un resultado válido — Nominatim casi siempre encuentra algo para
+    un hint así de genérico, así que este tier "encontraba" coordenadas con
+    apariencia correcta pero sin ninguna relación real con `name`. Se
+    confirmó en datos reales: docenas de Location con nombres completamente
+    distintos (un teatro en Medellín, un handle de Instagram, una dirección
+    real de París) todas cayendo en la MISMA coordenada — el centro de
+    "Paris, France" geocodificado a secas. Se retiró el tier: si `name` y
+    `name+hint` fallan, la Location se queda sin lat/lon (null) en vez de
+    una coordenada inventada — es preferible no saber a inventar, mismo
+    criterio que ya usa el prompt del LLM en 4_enrich_events_extract.py
+    para city/exact_address ("preferible null a una ubicación adivinada").
     """
     queries = [
         ("exact", name),
         ("city_combined", f"{name}, {city_hint}" if city_hint else None),
-        ("city_hint_only", city_hint or None),  # último recurso, el menos confiable
     ]
 
     for tier, query in queries:
@@ -242,9 +250,18 @@ def run_geocoding(
         # defecto, forzando resultados franceses para eventos colombianos
         # cuando el nombre exacto no matcheaba). Si ningún evento asociado
         # tiene cityName, cae al --city-hint de la CLI como antes.
+        # WHERE l.lat IS NULL OR l.geocodeConfidence IS NULL (no solo lat IS
+        # NULL): l.geocodeConfidence nunca se pobló en la práctica en toda la
+        # base (ver DD-045) — cualquier Location con lat/lon pero sin
+        # geocodeConfidence fue geocodificada por una versión anterior del
+        # script, antes de este hint por-evento (o de otras mejoras futuras),
+        # y JAMÁS se reprocesa bajo el criterio viejo `lat IS NULL`. Esta
+        # condición fuerza un backfill una sola vez: una vez que esta corrida
+        # deje geocodeConfidence poblado en todos, las corridas siguientes
+        # vuelven a ser tan baratas como antes (equivalente a `lat IS NULL`).
         locations = session.run("""
             MATCH (l:Location)
-            WHERE l.lat IS NULL
+            WHERE l.lat IS NULL OR l.geocodeConfidence IS NULL
             OPTIONAL MATCH (e:Event)-[:LOCATED_AT]->(l)
             WHERE e.cityName IS NOT NULL AND e.cityName <> ''
             WITH l, collect(DISTINCT e.cityName) AS cityHints
