@@ -1,7 +1,8 @@
 """
 Geocodificación de nodos (:Location) y creación de jerarquía geográfica.
 
-Para cada Location sin lat/lon:
+Para cada Location sin lat/lon (o sin geocodeConfidence — ver nota de
+idempotencia abajo):
   1. Nominatim geocode (geopy, 1 req/s — ToS)
   2. Extraer lat, lon, ciudad, país, arrondissement (Paris), quartier
   3. SET propiedades en el nodo Location
@@ -9,7 +10,20 @@ Para cada Location sin lat/lon:
        Location -[:LOCATED_IN]-> Arrondissement (si Paris)
                                   └─[:LOCATED_IN]-> City -[:LOCATED_IN]-> Country
 
-Idempotente: solo procesa Location donde lat IS NULL.
+Idempotente: procesa Location donde `lat IS NULL OR geocodeConfidence IS NULL`
+(ver DD-045 punto 6 — el criterio viejo, solo `lat IS NULL`, congelaba para
+siempre las Location geocodificadas por versiones anteriores y peores del
+script; nunca se revisitaban aunque la lógica mejorara).
+
+CAVEAT conocido (auditoría 2026-08-17, DD-045): esta condición es
+auto-limitante solo para los ÉXITOS. Una Location que falle la
+geocodificación no recibe ninguna escritura (ni geocodeConfidence, ni
+limpieza de su lat/lon viejo), así que vuelve a entrar en la cola en cada
+corrida futura y, si tenía coordenadas malas de la lógica vieja, las
+conserva. Sin decidir todavía si conviene escribir un centinela
+(geocodeConfidence='not_found' + lat/lon=null): borraría coordenadas buenas
+ante un fallo transitorio de Nominatim. Decisión pendiente de Diego.
+
 FinOps: registra número de requests Nominatim en .geocoding_log.json.
 """
 
