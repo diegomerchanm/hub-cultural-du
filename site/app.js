@@ -139,10 +139,24 @@ function fmtDate(dateStr) {
 }
 
 /* ── Filtrado ────────────────────────────────────────────────────────── */
+// DD-045 (punto 4): "por venir" y "pasados" son dos universos separados.
+// isUpcoming() es la misma regla que ya usaba la rama "upcoming" — se
+// extrae acá porque ahora también la necesitan renderFilterBar() (para que
+// los contadores de las pills reflejen solo eventos por venir) y el bucket
+// "past" nuevo.
+function isUpcoming(ev) {
+  const d = daysUntil(ev.eventDate);
+  return d !== null && d >= 0;
+}
 function applyFilters(events) {
   return events.filter((ev) => {
     if (STATE.geo !== "all" && ev.geoZone !== STATE.geo) return false;
-    if (STATE.when !== "upcoming") {
+    if (STATE.when === "past") {
+      if (isUpcoming(ev)) return false;
+      // "Pasados" es un bucket sin clasificar por tema a propósito
+      // (decisión de producto 2026-08-15, DD-045) — se salta el filtro de
+      // tema más abajo con la condición STATE.when !== "past".
+    } else if (STATE.when !== "upcoming") {
       const bucket = whenBucket(ev.eventDate);
       if (bucket === "past" || bucket === null) return false;
       if (STATE.when === "today" && bucket !== "today") return false;
@@ -152,10 +166,9 @@ function applyFilters(events) {
         if (d === null || d < 0 || d > 31) return false;
       }
     } else {
-      const d = daysUntil(ev.eventDate);
-      if (d === null || d < 0) return false;
+      if (!isUpcoming(ev)) return false;
     }
-    if (STATE.theme !== "all" && !eventThemes(ev).has(STATE.theme)) return false;
+    if (STATE.when !== "past" && STATE.theme !== "all" && !eventThemes(ev).has(STATE.theme)) return false;
     if (STATE.free && !ev.isFree) return false;
     return true;
   });
@@ -179,29 +192,46 @@ function diversify(sorted, maxPerAuthor, maxPerTheme, limit) {
 
 /* ── Render: filtros dinámicos ──────────────────────────────────────── */
 function renderFilterBar() {
+  // DD-045 (punto 4): los contadores de zona/tema reflejan solo eventos por
+  // venir — antes contaban DATA.events completo (pasados incluidos), por
+  // eso una categoría podía mostrar "Cine: 6" con los 6 ya pasados.
+  const upcomingEvents = DATA.events.filter(isUpcoming);
+
   const zoneCounts = {};
-  DATA.events.forEach((ev) => { if (ev.geoZone) zoneCounts[ev.geoZone] = (zoneCounts[ev.geoZone] || 0) + 1; });
+  upcomingEvents.forEach((ev) => { if (ev.geoZone) zoneCounts[ev.geoZone] = (zoneCounts[ev.geoZone] || 0) + 1; });
   const geoEl = document.getElementById("geo-pills");
   geoEl.innerHTML = "";
-  geoEl.appendChild(pillEl(t("geoAll"), DATA.events.length, STATE.geo === "all", () => setState({ geo: "all" })));
+  geoEl.appendChild(pillEl(t("geoAll"), upcomingEvents.length, STATE.geo === "all", () => setState({ geo: "all" })));
   Object.keys(zoneCounts).sort((a, b) => zoneCounts[b] - zoneCounts[a]).forEach((zone) => {
     geoEl.appendChild(pillEl(GEO_LABEL[zone] || zone, zoneCounts[zone], STATE.geo === zone, () => setState({ geo: zone })));
   });
 
+  // Pills de fecha, cada una con su propio conteo (independiente entre sí,
+  // sobre el dataset completo) — "Pasados" es el complemento de "por venir".
   const whenEl = document.getElementById("when-pills");
   whenEl.innerHTML = "";
-  [["today", t("whenToday")], ["week", t("whenWeek")], ["month", t("whenMonth")], ["upcoming", t("whenUpcoming")]]
-    .forEach(([key, label]) => whenEl.appendChild(pillEl(label, null, STATE.when === key, () => setState({ when: key }))));
+  const todayN = DATA.events.filter((ev) => whenBucket(ev.eventDate) === "today").length;
+  const weekN = DATA.events.filter((ev) => { const b = whenBucket(ev.eventDate); return b === "today" || b === "week"; }).length;
+  const monthN = DATA.events.filter((ev) => { const d = daysUntil(ev.eventDate); return d !== null && d >= 0 && d <= 31; }).length;
+  const upcomingN = upcomingEvents.length;
+  const pastN = DATA.events.length - upcomingN;
+  [
+    ["today", t("whenToday"), todayN],
+    ["week", t("whenWeek"), weekN],
+    ["month", t("whenMonth"), monthN],
+    ["upcoming", t("whenUpcoming"), upcomingN],
+    ["past", t("whenPast"), pastN],
+  ].forEach(([key, label, n]) => whenEl.appendChild(pillEl(label, n, STATE.when === key, () => setState({ when: key }))));
 
   const freeBtn = document.getElementById("free-toggle");
   freeBtn.classList.toggle("active", STATE.free);
   freeBtn.onclick = () => setState({ free: !STATE.free });
 
   const themeCounts = {};
-  DATA.events.forEach((ev) => eventThemes(ev).forEach((th) => { themeCounts[th] = (themeCounts[th] || 0) + 1; }));
+  upcomingEvents.forEach((ev) => eventThemes(ev).forEach((th) => { themeCounts[th] = (themeCounts[th] || 0) + 1; }));
   const themeEl = document.getElementById("theme-pills");
   themeEl.innerHTML = "";
-  themeEl.appendChild(pillEl(t("themeAll"), DATA.events.length, STATE.theme === "all", () => setState({ theme: "all" })));
+  themeEl.appendChild(pillEl(t("themeAll"), upcomingEvents.length, STATE.theme === "all", () => setState({ theme: "all" })));
   Object.keys(themeCounts).sort((a, b) => themeCounts[b] - themeCounts[a]).forEach((theme) => {
     themeEl.appendChild(pillEl(theme, themeCounts[theme], STATE.theme === theme, () => setState({ theme })));
   });
@@ -283,7 +313,9 @@ function render() {
     return;
   }
 
-  if (STATE.sort === "recommended") {
+  // "Pasados" (DD-045): sin héroe ni destacados — es una lista plana, sin
+  // clasificación, a propósito.
+  if (STATE.sort === "recommended" && STATE.when !== "past") {
     const hero = sorted[0];
     const heroMeta = themeMeta([...eventThemes(hero)][0] || "");
     heroSection.innerHTML = `
@@ -306,7 +338,9 @@ function render() {
     if (!STATE.free && freeOnes.length) shelves.appendChild(shelfEl(t("shelfFree"), t("shelfFreeSub"), freeOnes, hotnessP80, true));
   }
 
-  const gridTitle = STATE.sort === "recommended" ? t("resultsAll") : (STATE.sort === "date" ? t("sortDate") : t("sortPopularity"));
+  const gridTitle = STATE.when === "past" ? t("resultsPast")
+    : STATE.sort === "recommended" ? t("resultsAll")
+    : (STATE.sort === "date" ? t("sortDate") : t("sortPopularity"));
   shelves.appendChild(shelfEl(gridTitle, null, sorted, hotnessP80, false));
   resultsCount.textContent = t("resultsCount", sorted.length);
 }
