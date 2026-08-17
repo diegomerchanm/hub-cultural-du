@@ -109,10 +109,17 @@ def pctl_rank(values: list) -> dict:
 
 EVENTS_QUERY = """
 MATCH (e:Event)
+OPTIONAL MATCH (src:Account {username: e.sourceAuthor})
 WHERE NOT 'Rejected' IN labels(e)
   AND e.isPublicInvitation = true
   AND e.isUpcoming = true
   AND e.eventDate IS NOT NULL AND e.eventDate <> ''
+  // Cuentas fuera de alcance (exclude_accounts.py, ver DD-045 y
+  // config/excluded_accounts.json) — geográficamente fuera del proyecto,
+  // tageadas con outOfScope=true en vez de borradas. src puede ser NULL si
+  // por algún motivo la cuenta no está en el grafo; en ese caso no se
+  // excluye por esto (no hay señal de que esté fuera de alcance).
+  AND (src IS NULL OR NOT coalesce(src.outOfScope, false))
   // Requisito de ubicación (DD-045, tercera vuelta): basta con que el LLM haya
   // extraído ALGÚN texto de ubicación. Es lo único que el sitio muestra; si no
   // hay ni dirección ni nombre de lugar ni ciudad, el evento no es accionable
@@ -153,7 +160,8 @@ RETURN e.id AS id, e.title AS title, e.category AS category, e.type AS type,
 
 ACCOUNTS_QUERY = """
 MATCH (a:Account)
-WHERE a.manualDataCuratedAt IS NOT NULL OR a.pageRankExact IS NOT NULL
+WHERE (a.manualDataCuratedAt IS NOT NULL OR a.pageRankExact IS NOT NULL)
+  AND NOT coalesce(a.outOfScope, false)
 RETURN a.username AS username,
        coalesce(a.manualFollowersCount, a.followersCount) AS followers,
        a.verified AS verified,

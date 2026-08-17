@@ -1,0 +1,20 @@
+{
+  "accounts": [
+    {
+      "username": "alianzafrancesamanizalesoficia",
+      "reason": "Alianza Francesa de Manizales, Colombia — fuera del área geográfica del proyecto (Île-de-France). No tiene manualDataCuratedAt; se coló por descubrimiento automático RELATED_TO."
+    },
+    {
+      "username": "alianzafrancesademedellin",
+      "reason": "Alianza Francesa de Medellín, Colombia — mismo motivo que alianzafrancesamanizalesoficia."
+    },
+    {
+      "username": "alianza_francesa_de_pereira",
+      "reason": "Alianza Francesa de Pereira, Colombia — mismo motivo que alianzafrancesamanizalesoficia."
+    },
+    {
+      "username": "alianzafrancesacali",
+      "reason": "Alianza Francesa de Cali, Colombia — mismo motivo que alianzafrancesamanizalesoficia."
+    }
+  ]
+}
