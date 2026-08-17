@@ -128,7 +128,23 @@ def geocode_location(
     Respeta el rate limit de Nominatim con `pause_sec` entre llamadas.
 
     Devuelve además `geo["confidence"]` indicando qué query tuvo éxito:
-    "exact" (el nombre solo) o "city_combined" (nombre + hint).
+    "city_combined" (nombre + hint) o "name_only" (el nombre solo, sin hint).
+
+    ORDEN (fix 2026-08-17, DD-045): se prueba PRIMERO `city_combined` y
+    recién si falla se cae a `name_only` — al revés del orden original.
+    Motivo, confirmado con un dry-run real de 780 Location: con el orden
+    viejo (nombre solo primero), Nominatim resuelve casi CUALQUIER string
+    contra algún lugar del mundo entero sin restricción geográfica alguna
+    — "Consulado" cae en Ciudad de México pese a hint="Accra", "Cartier" en
+    Nueva York, "DE LA" en Bari (Italia), "Embajada Argentina" en Beijing,
+    "IHEAL" (instituto real de París) en Reino Unido — y como ese tier va
+    primero, el hint por-evento (que en 210/780 casos SÍ es correcto)
+    nunca llegaba a probarse: 0 de ~500+ resultados exitosos en ese
+    dry-run usaron `city_combined`. Este reorden no elimina el ruido de
+    nombres genéricos sin ningún candidato plausible ni siquiera con
+    hint (esos van a seguir caminando hasta `name_only` y pueden seguir
+    fallando mal) — ataca el caso, mayoritario, en el que el hint sí
+    tenía la respuesta y nunca se le daba la oportunidad de usarse.
 
     NOTA (DD-045, rediseño 2026-08-15): existía un tercer tier,
     "city_hint_only", que si `name` y `name+hint` fallaban, geocodificaba
@@ -146,8 +162,8 @@ def geocode_location(
     para city/exact_address ("preferible null a una ubicación adivinada").
     """
     queries = [
-        ("exact", name),
         ("city_combined", f"{name}, {city_hint}" if city_hint else None),
+        ("name_only", name),
     ]
 
     for tier, query in queries:
