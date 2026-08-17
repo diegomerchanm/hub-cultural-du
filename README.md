@@ -57,26 +57,25 @@ python load_manual_account_categorization.py                     # 4. upload cur
 python 4_enrich_events_extract.py                                # 5a. detect events
 python 4_enrich_events_resolve.py                                # 5b. de-duplicate events
 python 4_enrich_locations.py                                     # 6. geocode locations
-
-python 5_visualize_dashboard.py                                  # run the dashboard locally
+python 5_export_dashboard_data.py                                 # 7. export to site/data.json
 ```
 
-See `CLAUDE.md` for the full command reference, options, and architecture notes.
+Then push `site/` to `master` — Cloudflare Workers Builds redeploys automatically. See `CLAUDE.md` for the full command reference, options, and architecture notes.
 
 ## Project status
 
 - ✅ Extraction, Neo4j ingestion, local graph analysis, community detection.
-- ✅ Manual categorization pipeline (art type, institution, cultural identity, geo zone) with a filterable directory in the dashboard.
+- ✅ Manual categorization pipeline (art type, institution, cultural identity, geo zone).
 - ✅ Event extraction/de-duplication and geocoding.
-- ✅ Dashboard deployed (Render), multi-page (agenda, network view, account directory).
-- 🔩 In progress: broader geographic coverage, scoring refinements, French/Spanish documentation parity.
+- ✅ Static discovery site (`site/`) deployed on Cloudflare Workers Builds, replacing the old Dash dashboard (see DD-044/DD-045 in `docs/decisions_es.md`).
+- 🔩 In progress: broader geographic coverage, scoring refinements, French/Spanish documentation parity, clickable map, account image bank.
 
 ## Project layout
 
 - Numbered scripts at the repo root (`1_`–`6_`-ish) are the active pipeline, run in order — see `CLAUDE.md`.
-- `pages/` + `dash_common.py` + `5_visualize_dashboard.py` / `wsgi.py` — the Dash dashboard.
+- `5_export_dashboard_data.py` + `site/` (HTML/CSS/JS, no build step) — the live discovery site, deployed on Cloudflare.
 - `config/` — seed lists and account tiers. `docs/` — project notes.
-- `old/` — superseded or environment-incompatible scripts, kept for reference, not run.
+- `old/` — superseded or environment-incompatible scripts, kept for reference, not run. This includes the retired Dash dashboard (`5_visualize_dashboard.py`, `dash_common.py`, `pages/`), replaced by `site/`.
 - `testing/` — verification/diagnostic scripts, useful for QA but outside the main pipeline flow.
 
 ## Data & ethics
