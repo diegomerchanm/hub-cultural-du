@@ -98,10 +98,10 @@ jobs:
         run: python backfill_events_capa3.py
 
       # ── Refrescar el sitio ──────────────────────────────────────────────
-      # Reinicia el servicio en Render para que cargue los datos nuevos —
-      # dash_common.py solo lee de Neo4j UNA vez al arrancar el proceso
-      # (DATA = fetch_data() a nivel de módulo), así que sin este paso el
-      # sitio seguiría mostrando los datos viejos hasta el próximo reinicio.
-      - name: "Refrescar sitio en Render"
-        if: always() && secrets.RENDER_DEPLOY_HOOK_URL != ''
-        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+      # NOTA (2026-08-15): el paso que reiniciaba el dashboard Dash en Render
+      # se retiró — ese dashboard fue reemplazado por el sitio estático en
+      # Cloudflare (site/, ver DD-044/DD-045). El sitio nuevo se refresca
+      # corriendo `python 5_export_dashboard_data.py` (pisa site/data.json)
+      # y haciendo push a master; Cloudflare Workers Builds redespliega solo
+      # — no depende de este workflow. Ese paso automático quedó fuera del
+      # alcance de este job a propósito, por ahora es manual.
