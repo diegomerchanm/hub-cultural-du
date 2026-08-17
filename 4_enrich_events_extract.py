@@ -548,7 +548,7 @@ def _llm_schema_hint(include_reasoning: bool) -> str:
   "is_upcoming": bool,            // describe algo futuro respecto a la fecha de publicación, no algo que ya ocurrió
   "type": string,                  // EXACTAMENTE uno de estos valores, copiado tal cual (incluye las opciones "nulo" si no es un evento real): {_EVENT_TYPE_OPTIONS}
   "city": string o null,           // ciudad donde ocurre el EVENTO — solo si el caption la menciona o es inequívoca por contexto; NUNCA la ciudad de la cuenta/institución que publica si el caption no la confirma
-  "exact_address": string o null,  // dirección o venue específico (calle, número, nombre del lugar) SOLO si aparece textualmente en el caption; si no hay dirección exacta, null — no repitas aquí solo el nombre de la ciudad
+  "exact_address": string o null,  // dirección o venue específico (calle, número, nombre del lugar) SOLO si aparece textualmente en el caption Y nombra un lugar físico real y concreto (edificio, calle, plaza, institución con nombre propio) — NUNCA una palabra genérica, un verbo, el nombre de una persona, una marca sin dirección, o el título de una campaña/evento; si no hay algo así de concreto, null — no repitas aquí solo el nombre de la ciudad
   "clean_date": string "YYYY-MM-DD" o null,  // fecha real del evento, razonada por contexto
   "clean_description": string,   // 1-2 oraciones sin emojis/hashtags/menciones, para dashboard
   "title": string,                // título editorial corto (6-10 palabras), sin emojis/hashtags, para mostrar como encabezado de la tarjeta del evento — no repitas la categoría, describe el evento concreto
@@ -584,9 +584,17 @@ def _build_llm_prompt(caption: str, anchor_date: str, include_reasoning: bool = 
         "Para city y exact_address: el nombre de la cuenta o institución que publica NO es "
         "evidencia suficiente de dónde ocurre el evento (ej. una cuenta llamada \"Alianza "
         "Francesa de Medellín\" no implica que el evento sea en Medellín si el caption no lo "
-        "dice explícitamente) — usa exclusivamente lo que el texto del caption confirma. Si el "
-        "caption no da ninguna pista clara de ciudad o dirección, responde null en ambos "
-        "campos; es preferible null a una ubicación adivinada.\n"
+        "dice explícitamente) — usa exclusivamente lo que el texto del caption confirma.\n"
+        "Para exact_address en particular, no basta con que el texto aparezca literalmente "
+        "en el caption: tiene que nombrar un lugar físico concreto (una dirección, un "
+        "edificio, una plaza, un parque, una institución con nombre propio) — nunca una "
+        "palabra suelta genérica (ej. \"consulado\", \"remesas\", \"sur\"), un verbo, el "
+        "nombre de una persona, una marca sin dirección, ni el título de una campaña o del "
+        "propio evento. Aplicá esta prueba: si alguien viera ese texto solo, sin nada más de "
+        "contexto, ¿alcanzaría para ubicarlo en un mapa? Si la respuesta es no, o si el "
+        "caption no da ninguna pista clara de ciudad o dirección, respondé null en ambos "
+        "campos — es preferible decir que no se encontró ubicación a inventar o adivinar "
+        "una.\n"
         "IMPORTANTE — idioma: title y clean_description deben estar en ESPAÑOL, sin importar "
         "el idioma del caption original (aunque esté en francés o inglés) — el público de este "
         "hub es la diáspora colombiana/latinoamericana en Francia. Excepción: mantén sin "
