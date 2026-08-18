@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -40,6 +41,11 @@
         <i class="ti ti-tag" aria-hidden="true"></i> <span data-i18n="free">Gratis</span>
       </button>
     </div>
+    <div class="filter-group">
+      <button id="map-toggle" class="pill">
+        <i class="ti ti-map-2" aria-hidden="true"></i> <span id="map-toggle-label" data-i18n="viewMap">Ver mapa</span>
+      </button>
+    </div>
     <div class="sort-control">
       <label for="sort-select" data-i18n="sortLabel">Ordenar</label>
       <select id="sort-select">
@@ -54,6 +60,15 @@
 
 <main id="app">
   <section id="hero-section"></section>
+  <section id="map-section" class="map-section hidden">
+    <p id="map-caption" class="map-caption"></p>
+    <div id="map" class="map"></div>
+    <div id="map-empty" class="empty-state" style="display:none">
+      <i class="ti ti-map-off" aria-hidden="true"></i>
+      <p id="map-empty-title"></p>
+      <p id="map-empty-body" style="font-size:13px"></p>
+    </div>
+  </section>
   <section id="shelves"></section>
   <section id="results-count" class="results-count"></section>
 </main>
@@ -67,6 +82,7 @@
   <p>Hub Cultural · Diáspora latinoamericana en Francia · Datos detectados automáticamente a partir de Instagram — verificá la fuente antes de asistir.</p>
 </footer>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>

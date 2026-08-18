@@ -26,6 +26,10 @@ const I18N = {
     reasonPosts: "Mencionado por varias publicaciones",
     reasonC: "Coincide con lo que estuviste explorando",
     followers: "seguidores", frequency: "Frecuencia", freeEvents: "Eventos gratis",
+    viewMap: "Ver mapa", viewList: "Ver lista",
+    mapCaption: (withPin, total) => `${withPin} de ${total} eventos filtrados tienen ubicación exacta y aparecen en el mapa.`,
+    mapEmptyTitle: "Ningún evento con estos filtros tiene ubicación exacta",
+    mapEmptyBody: "Probá otros filtros o volvé a la lista para verlos todos.",
   },
   fr: {
     where: "Où", when: "Quand", free: "Gratuit",
@@ -54,6 +58,10 @@ const I18N = {
     reasonPosts: "Mentionné par plusieurs publications",
     reasonC: "Correspond à ce que vous explorez",
     followers: "abonnés", frequency: "Fréquence", freeEvents: "Événements gratuits",
+    viewMap: "Voir la carte", viewList: "Voir la liste",
+    mapCaption: (withPin, total) => `${withPin} des ${total} événements filtrés ont une localisation exacte et apparaissent sur la carte.`,
+    mapEmptyTitle: "Aucun événement avec ces filtres n'a de localisation exacte",
+    mapEmptyBody: "Essayez d'autres filtres ou revenez à la liste pour tous les voir.",
   },
 };
 

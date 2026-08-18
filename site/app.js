@@ -33,7 +33,7 @@ const PREFS_KEY = "hcdu_prefs";
 
 let DATA = { events: [], accounts: [] };
 let ACCOUNTS_BY_USER = {};
-let STATE = { geo: "all", when: "upcoming", theme: "all", free: false, sort: "recommended" };
+let STATE = { geo: "all", when: "upcoming", theme: "all", free: false, sort: "recommended", view: "list" };
 
 /* ── Preferencias de sesión (sin login, ver sección 3.5 de la propuesta) ── */
 function loadPrefs() {
@@ -227,6 +227,12 @@ function renderFilterBar() {
   freeBtn.classList.toggle("active", STATE.free);
   freeBtn.onclick = () => setState({ free: !STATE.free });
 
+  const mapBtn = document.getElementById("map-toggle");
+  mapBtn.classList.toggle("active", STATE.view === "map");
+  document.getElementById("map-toggle-label").textContent = STATE.view === "map" ? t("viewList") : t("viewMap");
+  mapBtn.querySelector("i").className = "ti " + (STATE.view === "map" ? "ti-list" : "ti-map-2");
+  mapBtn.onclick = () => setState({ view: STATE.view === "map" ? "list" : "map" });
+
   const themeCounts = {};
   upcomingEvents.forEach((ev) => eventThemes(ev).forEach((th) => { themeCounts[th] = (themeCounts[th] || 0) + 1; }));
   const themeEl = document.getElementById("theme-pills");
@@ -292,6 +298,20 @@ function render() {
   renderFilterBar();
   const prefs = loadPrefs();
   const filtered = applyFilters(DATA.events);
+
+  const heroSection = document.getElementById("hero-section");
+  const shelves = document.getElementById("shelves");
+  const resultsCount = document.getElementById("results-count");
+  const mapSection = document.getElementById("map-section");
+
+  if (STATE.view === "map") {
+    heroSection.innerHTML = ""; shelves.innerHTML = ""; resultsCount.textContent = "";
+    mapSection.classList.remove("hidden");
+    renderMap(filtered);
+    return;
+  }
+  mapSection.classList.add("hidden");
+
   const withScore = filtered.map((ev) => ({ ev, score: relevance(ev, prefs) }));
 
   const hotnessValues = DATA.events.map((e) => e.hotnessScore || 0).sort((a, b) => a - b);
@@ -302,9 +322,6 @@ function render() {
   else if (STATE.sort === "popularity") sorted = [...filtered].sort((a, b) => (b.hotnessScore || 0) - (a.hotnessScore || 0));
   else sorted = withScore.sort((a, b) => b.score - a.score).map((x) => x.ev);
 
-  const heroSection = document.getElementById("hero-section");
-  const shelves = document.getElementById("shelves");
-  const resultsCount = document.getElementById("results-count");
   heroSection.innerHTML = ""; shelves.innerHTML = "";
 
   if (!sorted.length) {
@@ -353,6 +370,66 @@ function shelfEl(title, sub, events, hotnessP80, scroll) {
   events.forEach((ev) => list.appendChild(eventCardEl(ev, hotnessP80)));
   wrap.appendChild(list);
   return wrap;
+}
+
+/* ── Mapa (Leaflet + CartoDB Positron, ver style.css para el tinte) ────
+   Solo entran eventos que ya pasaron applyFilters() Y tienen lat/lon
+   (decisión site-existence vs. map-pin, DD-045 punto 3 — muchos eventos
+   filtrados no tienen pin confiable y por diseño no aparecen acá, solo
+   en la lista). El mapa se crea una sola vez (Leaflet no se lleva bien
+   con recrearse en cada render) y se reusa; solo se limpian los pines. */
+let mapInstance = null;
+let markersLayer = null;
+function ensureMap() {
+  if (mapInstance) return mapInstance;
+  mapInstance = L.map("map", { scrollWheelZoom: true }).setView([48.8566, 2.3522], 11);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+    subdomains: "abcd",
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>',
+  }).addTo(mapInstance);
+  markersLayer = L.layerGroup().addTo(mapInstance);
+  return mapInstance;
+}
+function renderMap(filtered) {
+  const map = ensureMap();
+  // Leaflet calcula su tamaño cuando se crea; si el contenedor estaba en
+  // display:none (venías de la vista de lista) queda con tamaño 0 hasta
+  // el próximo resize del navegador. invalidateSize() lo corrige.
+  setTimeout(() => map.invalidateSize(), 0);
+
+  markersLayer.clearLayers();
+  const withPin = filtered.filter((ev) => ev.lat != null && ev.lon != null);
+  document.getElementById("map-caption").textContent = t("mapCaption", withPin.length, filtered.length);
+
+  const mapEl = document.getElementById("map");
+  const emptyEl = document.getElementById("map-empty");
+  if (!withPin.length) {
+    mapEl.style.display = "none";
+    emptyEl.style.display = "";
+    document.getElementById("map-empty-title").textContent = t("mapEmptyTitle");
+    document.getElementById("map-empty-body").textContent = t("mapEmptyBody");
+    return;
+  }
+  mapEl.style.display = "";
+  emptyEl.style.display = "none";
+
+  const bounds = [];
+  withPin.forEach((ev) => {
+    const meta = themeMeta([...eventThemes(ev)][0] || "");
+    const icon = L.divIcon({
+      className: "",
+      html: `<span class="map-pin" style="background:${meta.color}"></span>`,
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
+    const marker = L.marker([ev.lat, ev.lon], { icon }).addTo(markersLayer);
+    marker.bindTooltip(`${escapeHtml(ev.title || "")}<br>${fmtDate(ev.eventDate)}`, { direction: "top", offset: [0, -10] });
+    marker.on("click", () => openDetail(ev));
+    bounds.push([ev.lat, ev.lon]);
+  });
+  if (bounds.length > 1) map.fitBounds(bounds, { padding: [24, 24], maxZoom: 15 });
+  else map.setView(bounds[0], 14);
 }
 
 /* ── Detalle ─────────────────────────────────────────────────────────── */

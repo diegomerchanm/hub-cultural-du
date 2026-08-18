@@ -206,10 +206,48 @@ details.transparency summary { cursor: pointer; }
 .empty-state { text-align: center; padding: 60px 20px; color: var(--sub); }
 .empty-state i { font-size: 32px; opacity: 0.4; }
 
+/* ── Mapa (Leaflet + CartoDB Positron, teñido a la paleta del sitio) ──── */
+.map-section { margin-bottom: 32px; }
+.map-section.hidden { display: none; }
+.map-caption { font-family: var(--font-mono); font-size: 12px; color: var(--sub); margin: 0 0 10px; }
+.map {
+  height: 480px; border-radius: var(--radius-card); border: 1px solid var(--border);
+  overflow: hidden; background: var(--panel-bg);
+}
+/* Tiñe solo las teselas del mapa (no los pines ni popups) hacia el tono
+   cálido del sitio -- valores de primera pasada, se pueden afinar a ojo
+   una vez desplegado (ver DD-045, punto mapa). */
+.map .leaflet-tile-pane {
+  filter: grayscale(0.2) sepia(0.35) saturate(0.75) brightness(1.08) hue-rotate(-8deg) contrast(0.95);
+}
+.map .leaflet-control-zoom { border: none; box-shadow: none; }
+.map .leaflet-control-zoom a {
+  background: var(--card); border: 1px solid var(--border) !important; color: var(--text);
+  width: 30px; height: 30px; line-height: 28px; border-radius: var(--radius) !important;
+  font-family: var(--font-sans); margin-bottom: 4px;
+}
+.map .leaflet-control-zoom a:hover { border-color: var(--sub) !important; }
+.map .leaflet-control-attribution {
+  background: rgba(242,239,232,0.85); font-family: var(--font-mono); font-size: 10px;
+  color: var(--sub); border-radius: var(--radius) 0 0 0; padding: 2px 6px;
+}
+.map .leaflet-control-attribution a { color: var(--sub); }
+.map .leaflet-tooltip {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  font-family: var(--font-sans); font-size: 12px; color: var(--text); padding: 5px 9px;
+  box-shadow: none;
+}
+.map .leaflet-tooltip:before { display: none; }
+.map-pin {
+  width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--panel-bg);
+  cursor: pointer;
+}
+
 .site-footer { text-align: center; padding: 32px 24px; font-family: var(--font-mono); font-size: 11px; color: var(--sub); }
 
 @media (max-width: 720px) {
   .hero-card { grid-template-columns: 1fr; }
   .detail-grid { grid-template-columns: 1fr; }
   .sort-control { margin-left: 0; width: 100%; }
+  .map { height: 320px; }
 }
