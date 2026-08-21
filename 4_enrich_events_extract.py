@@ -1202,9 +1202,15 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
                 e.postCount    = coalesce(e.postCount, 0) + 1
         """, id=existing_id, score=event["eventScore"], hotness=event["hotnessScore"])
     else:
+        # :PendingReview — staging gate (2026-08-21, ver review_events.py). Todo
+        # evento nuevo nace oculto del sitio hasta que Diego lo apruebe/edite/
+        # rechace interactivamente; 5_export_dashboard_data.py excluye esta
+        # label igual que ya excluye :Rejected. Los eventos que ya estaban en
+        # Neo4j antes de este cambio no llevan la label, así que siguen en vivo.
         session.run("""
             MERGE (e:Event {id: $id})
-            SET e.title        = $title,
+            SET e:PendingReview,
+                e.title        = $title,
                 e.type         = $type,
                 e.category     = $category,
                 e.rawDate      = $rawDate,

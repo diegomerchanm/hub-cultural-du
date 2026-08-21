@@ -7,6 +7,7 @@ Uso:
     python export_events_excel.py
     python export_events_excel.py --out mis_eventos.xlsx
     python export_events_excel.py --include-rejected
+    python export_events_excel.py --include-pending
 """
 import os
 
@@ -40,6 +41,10 @@ def main(
         False, "--include-rejected",
         help="Incluir eventos marcados :Rejected (excluidos por defecto, igual que el dashboard).",
     ),
+    include_pending: bool = typer.Option(
+        False, "--include-pending",
+        help="Incluir eventos marcados :PendingReview, aún sin revisar en review_events.py (excluidos por defecto).",
+    ),
 ):
     driver = GraphDatabase.driver(
         os.getenv("NEO4J_URI"),
@@ -48,7 +53,12 @@ def main(
     driver.verify_connectivity()
     print("✅ Conexión Neo4j OK")
 
-    where = "" if include_rejected else "WHERE NOT 'Rejected' IN labels(e)"
+    conditions = []
+    if not include_rejected:
+        conditions.append("NOT 'Rejected' IN labels(e)")
+    if not include_pending:
+        conditions.append("NOT 'PendingReview' IN labels(e)")
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     query = QUERY_BASE.format(where=where)
 
     with driver.session() as s:

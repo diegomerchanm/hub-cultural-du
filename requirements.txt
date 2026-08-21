@@ -92,3 +92,7 @@ gunicorn==23.0.0
 # Export puntual a Excel (export_events_excel.py) — engine que necesita
 # pandas.to_excel() para escribir .xlsx.
 openpyxl==3.1.5
+
+# Staging zone de eventos (review_events.py) — UI interactiva local, ejecutar
+# con `streamlit run review_events.py`.
+streamlit>=1.40.0

@@ -111,6 +111,9 @@ EVENTS_QUERY = """
 MATCH (e:Event)
 OPTIONAL MATCH (src:Account {username: e.sourceAuthor})
 WHERE NOT 'Rejected' IN labels(e)
+  AND NOT 'PendingReview' IN labels(e)
+  // :PendingReview = staging gate (ver review_events.py, 2026-08-21) — eventos
+  // nuevos no salen al sitio hasta que Diego los revisa/aprueba a mano.
   AND e.isPublicInvitation = true
   AND e.isUpcoming = true
   AND e.eventDate IS NOT NULL AND e.eventDate <> ''
