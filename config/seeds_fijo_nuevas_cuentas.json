@@ -1,0 +1,868 @@
+{
+  "seeds": [
+    {
+      "handle": "centrepompidou",
+      "note": "Museo arte moderno París: exposiciones y eventos culturales públicos"
+    },
+    {
+      "handle": "_parisculture_",
+      "note": "Departamento de Asuntos Culturales de París con programación oficial"
+    },
+    {
+      "handle": "franceculture",
+      "note": "Estación de radio nacional francesa especializada completamente en cultura"
+    },
+    {
+      "handle": "labnf",
+      "note": "Biblioteca Nacional Francesa en París con programación cultural"
+    },
+    {
+      "handle": "museelouvre",
+      "note": "Museo de arte mundial en París con programación cultural pública"
+    },
+    {
+      "handle": "quaibranly",
+      "note": "Museo de artes de América África Asia y Oceanía en París"
+    },
+    {
+      "handle": "le_cnd",
+      "note": "Centro Nacional de la Danza institución pública danza contemporánea"
+    },
+    {
+      "handle": "le_grand_palais",
+      "note": "Museo de arte (Galeries nationales) 8º arrondissement París"
+    },
+    {
+      "handle": "lacollinetheatrenational",
+      "note": "Teatro nacional de París especializado en drama contemporáneo"
+    },
+    {
+      "handle": "forumdesimages",
+      "note": "Centro cine/artes París, 27K, oficial, organiza eventos."
+    },
+    {
+      "handle": "latinartetv",
+      "note": "Curador diáspora latina independiente, difunde eventos culturales."
+    },
+    {
+      "handle": "blogotheque",
+      "note": "Curador independiente música viva, difunde eventos aunque no organiza."
+    },
+    {
+      "handle": "laseinemusicale",
+      "note": "Venue musical París organiza conciertos, institución oficial grande."
+    },
+    {
+      "handle": "theatredeparis",
+      "note": "Teatro París programación ambiciosa, menos grande que teatros nacionales."
+    },
+    {
+      "handle": "theatrechaillot",
+      "note": "Teatro nacional danza, institución oficial (menor peso según calibración nueva)."
+    },
+    {
+      "handle": "labellevilloise",
+      "note": "Espacio artístico independiente París, conciertos eventos comunitarios."
+    },
+    {
+      "handle": "atlf_traduction",
+      "note": "Asociación pequeña literaria independiente París, promueve traducción"
+    },
+    {
+      "handle": "librairiemillepages",
+      "note": "Librería independiente París desde 1980, 614 posts activos"
+    },
+    {
+      "handle": "editions_bourgois",
+      "note": "Editorial 1966, destaca encuentros literarios en highlights"
+    },
+    {
+      "handle": "edlianalevi",
+      "note": "Pequeña independiente 1982, curieuse literatura"
+    },
+    {
+      "handle": "historias_con_acento_podcast",
+      "note": "Latino diaspora podcast Paris third places community"
+    },
+    {
+      "handle": "lecastorastral",
+      "note": "Independent small poetry literature publisher 1975 contemporary"
+    },
+    {
+      "handle": "cinema_arlequin",
+      "note": "Cine arte aleman-ruso Paris"
+    },
+    {
+      "handle": "coursflorentofficiel",
+      "note": "Escuela teatro musica Paris"
+    },
+    {
+      "handle": "edlatalante",
+      "note": "Editorial independiente especializada literatura especulativa"
+    },
+    {
+      "handle": "l_eloge_",
+      "note": "Curador principal de espectaculos vivos Francia"
+    },
+    {
+      "handle": "le_theotheatre",
+      "note": "Teatro de barrio pequeno desde 1995"
+    },
+    {
+      "handle": "mucem_officiel",
+      "note": "Museo civilizaciones con programacion cultural conferencias"
+    },
+    {
+      "handle": "palaisdetokyo",
+      "note": "Centro arte contemporaneo europeo abierto publico"
+    },
+    {
+      "handle": "semaine_de_la_critique",
+      "note": "Cannes Film Festival parallel section discovering new cinema talent"
+    },
+    {
+      "handle": "comedie.francaise.officiel",
+      "note": "Historic state theater company, 350 years history, three halls"
+    },
+    {
+      "handle": "operadeparis",
+      "note": "National opera, 350 years history, Palais Garnier, Opera Bastille"
+    },
+    {
+      "handle": "les_bouffes_du_nord",
+      "note": "Historic Paris theater since 1876, programs music, theater, opera"
+    },
+    {
+      "handle": "sortiraparis.officiel",
+      "note": "Media curadora eventos cultura Paris"
+    },
+    {
+      "handle": "holaqtaloff",
+      "note": "Media eventos cultura latinoamericana Francia"
+    },
+    {
+      "handle": "maisondesmetallos",
+      "note": "Centro cultural comunitario teatro musica"
+    },
+    {
+      "handle": "theatredelatempete",
+      "note": "Teatro que acoge companias en Bois Vincennes"
+    },
+    {
+      "handle": "caroycuervo",
+      "note": "Instituto investigacion filologia, linguistica, literatura"
+    },
+    {
+      "handle": "silhouettefestival",
+      "note": "Festival cine Paris 19, entrada gratuita eventos comunitarios"
+    },
+    {
+      "handle": "lesarchescitoyennes",
+      "note": "Tiers-lieu Paris solidaridad barrio, cerrado 2025"
+    },
+    {
+      "handle": "expositionparis.info",
+      "note": "Guia exposiciones Paris 2006, cura y difunde vida cultural"
+    },
+    {
+      "handle": "lafactory_fabriquedartvivant",
+      "note": "Contemporary art space with theater venues France"
+    },
+    {
+      "handle": "american_cosmograph",
+      "note": "Historic Toulouse cinema cultural third place venue"
+    },
+    {
+      "handle": "artetracks",
+      "note": "Urban culture subculture art music curator"
+    },
+    {
+      "handle": "atelier_librairie",
+      "note": "Librería independiente París, 8.5k seguidores"
+    },
+    {
+      "handle": "ecumedespages",
+      "note": "Librería París, 15k seguidores, Boulevard Saint-Germain"
+    },
+    {
+      "handle": "editions_chandeigne",
+      "note": "Editorial independiente 1992, narrativa viajes mundo lusófono"
+    },
+    {
+      "handle": "editions_globe",
+      "note": "Editorial independiente, novela poesía, 16 títulos año"
+    },
+    {
+      "handle": "editionsautrement",
+      "note": "Editorial humanidades desde 1975, lee piensa sueña"
+    },
+    {
+      "handle": "editionsdelherne",
+      "note": "Monografías críticas autores 60 años especialización"
+    },
+    {
+      "handle": "festivalcotecourt",
+      "note": "Festival cortometrajes Pantin Francia desde 1992"
+    },
+    {
+      "handle": "futuropolis",
+      "note": "Editorial novelas gráficas historia artes"
+    },
+    {
+      "handle": "hispalibox",
+      "note": "Box libros hispánicos pequeño curador cultural"
+    },
+    {
+      "handle": "lachouettelibrairie",
+      "note": "Librería independiente Lille, literatura"
+    },
+    {
+      "handle": "lematriculedesanges",
+      "note": "Revista mensual literatura contemporánea francesa"
+    },
+    {
+      "handle": "leprixdesincos",
+      "note": "Premio literario juvenil, curador de selecciones"
+    },
+    {
+      "handle": "librairie.lucioles",
+      "note": "Librería independiente 1976, eventos literarios"
+    },
+    {
+      "handle": "librairieledivan",
+      "note": "Librería 130 encuentros autores/año, 60K títulos"
+    },
+    {
+      "handle": "librairietome7",
+      "note": "Librería París, BD, manga, consejo personalizado"
+    },
+    {
+      "handle": "partirenlivre",
+      "note": "Festival nacional literatura infantil (CNL), Francia"
+    },
+    {
+      "handle": "quais_polar",
+      "note": "Festival internacional ficción criminal Lyon, multidisciplinario"
+    },
+    {
+      "handle": "sonatineeditions",
+      "note": "Editorial parisina pequeña: noir, cine, literatura alternativa"
+    },
+    {
+      "handle": "aca2nanterre",
+      "note": "Asociación cultural universitaria, festival artes escénicas, tercer lugar"
+    },
+    {
+      "handle": "actessudpapiers",
+      "note": "Editorial teatro independiente 40 años, productor artes escénicas"
+    },
+    {
+      "handle": "artivistas.paris",
+      "note": "Galería arte latinoamericano independiente, café, París"
+    },
+    {
+      "handle": "crrdeparis",
+      "note": "Conservatorio regional París, conciertos/recitales/talleres activos"
+    },
+    {
+      "handle": "editionsarlea",
+      "note": "Editorial París 1986, organiza encuentros literarios destacados 2026"
+    },
+    {
+      "handle": "editionslapeuplade",
+      "note": "Editorial independiente libros que viajan"
+    },
+    {
+      "handle": "ehess_officiel",
+      "note": "Escuela postgrado ciencias sociales, 26K seguidores"
+    },
+    {
+      "handle": "idemexparis",
+      "note": "Instituto cultural mexicano, diáspora, programación"
+    },
+    {
+      "handle": "idyllesculturelles",
+      "note": "Blog lifestyle fotografía cultura parisina"
+    },
+    {
+      "handle": "leslibrairesdenhaut",
+      "note": "Red librerías independientes + festival libros"
+    },
+    {
+      "handle": "librairies_charlemagne",
+      "note": "Librería independiente con 5 ubicaciones en el Var, Francia"
+    },
+    {
+      "handle": "maisondufilm",
+      "note": "Asociación apoyo creadores cine emergente, abierta toda Francia"
+    },
+    {
+      "handle": "malakoffscenenationale",
+      "note": "Centro cultural teatro danza cine música literatura Malakoff"
+    },
+    {
+      "handle": "mediatheque.canopee",
+      "note": "Biblioteca pública París culturas urbanas, hip hop, digital"
+    },
+    {
+      "handle": "nouveaux_espaces_latinos",
+      "note": "Estructura cultural Lyon culturas latinoamericanas, diáspora Francia"
+    },
+    {
+      "handle": "saurampslibrairies",
+      "note": "Librería independiente Montpellier-Alès, libros papelería juegos creativos"
+    },
+    {
+      "handle": "shakespeareandcoparis",
+      "note": "Librería histórica 1919 París, 228K followers, icono literario"
+    },
+    {
+      "handle": "transfugemagazine",
+      "note": "Revista independiente noticias culturales: literatura, arte, escena, cine"
+    },
+    {
+      "handle": "colegio_espana_paris",
+      "note": "Institución española programa cultural abierta: conciertos debates películas"
+    },
+    {
+      "handle": "connaissancedesarts",
+      "note": "Revista arte 1952 cura exposiciones museos arte contemporáneo diseño"
+    },
+    {
+      "handle": "cultureespagne.fr",
+      "note": "Embajada difunde cura expresiones culturales españolas en Francia"
+    },
+    {
+      "handle": "ensemble.intercontemporain",
+      "note": "Ensemble música contemporánea residente Philharmonie Paris desde 1976 Boulez"
+    },
+    {
+      "handle": "la.horde",
+      "note": "Colectivo artes escénicas: directores coreógrafos performers artes"
+    },
+    {
+      "handle": "la.machine.infernale",
+      "note": "Escuela teatro ofrece cursos adultos"
+    },
+    {
+      "handle": "lecarreaudutemple",
+      "note": "Espacio cultural barrio talleres performances"
+    },
+    {
+      "handle": "maison_argentine",
+      "note": "Casa estudiantes diáspora latinoamericana programación"
+    },
+    {
+      "handle": "talenslyriques",
+      "note": "Ensemble ópera música educación teatro"
+    },
+    {
+      "handle": "athenee.theatre",
+      "note": "Teatro histórico París con dramaturgia, ópera, jazz"
+    },
+    {
+      "handle": "lafabriquedeladanse",
+      "note": "Incubadora danza París, formación artistas, eventos"
+    },
+    {
+      "handle": "lesmots.co",
+      "note": "Escuela escritura París, cursos comunidad abierta"
+    },
+    {
+      "handle": "t2gennevilliers",
+      "note": "Centro Dramático Nacional Gennevilliers teatro danza"
+    },
+    {
+      "handle": "theatrebelleville",
+      "note": "Teatro comunitario Belleville, creación contemporánea"
+    },
+    {
+      "handle": "nuitsdefourviere",
+      "note": "Festival Lyon mayo-julio, teatro danza circo"
+    },
+    {
+      "handle": "anacharsis.editions",
+      "note": "Editorial independiente FR: viajes/encuentros culturas"
+    },
+    {
+      "handle": "asso.paulatino",
+      "note": "Terceros lugares Pau: talleres, charlas, diáspora"
+    },
+    {
+      "handle": "atelier__papier",
+      "note": "Papetería/talleres París Belleville: espacio encuentro"
+    },
+    {
+      "handle": "bibliothequesdemontreuil",
+      "note": "Biblioteca barrio Montreuil terceros lugares programación abierta"
+    },
+    {
+      "handle": "bibliothequesorbonnenouvelle",
+      "note": "Biblioteca universitaria eventos literarios abiertos público"
+    },
+    {
+      "handle": "centreculturelirlandais",
+      "note": "Centro cultural programación abierta público exposiciones"
+    },
+    {
+      "handle": "chercheursdautres",
+      "note": "Asociación cultural Toulouse, música arte vínculos culturas"
+    },
+    {
+      "handle": "cinema_abc",
+      "note": "Cine independiente Art & Essai Toulouse 3 salas"
+    },
+    {
+      "handle": "cinemaconcorde",
+      "note": "Cine independiente Art & Essai programación artística"
+    },
+    {
+      "handle": "cinemas_independants_parisiens",
+      "note": "Red 32 cines independientes París, curación programación"
+    },
+    {
+      "handle": "cinemasgncr",
+      "note": "Red venues cine innovador singulier, curación 30 años"
+    },
+    {
+      "handle": "cinemassy",
+      "note": "Cine-talleres, proyecciones, club Massy"
+    },
+    {
+      "handle": "cinematheqtlse",
+      "note": "Cinémathèque Toulouse, preservación cine"
+    },
+    {
+      "handle": "cinematnb",
+      "note": "Cinema Teatro Nacional Bretaña Rennes"
+    },
+    {
+      "handle": "citedelabd",
+      "note": "Cité cómics imagen Angoulême"
+    },
+    {
+      "handle": "cultureutcapitole",
+      "note": "Eventos cultura campus Toulouse Capitole"
+    },
+    {
+      "handle": "des.mots.des.merveilles",
+      "note": "Club lectura literatura espacio barrio"
+    },
+    {
+      "handle": "ecoledulouvre",
+      "note": "Institución historia arte arqueología París"
+    },
+    {
+      "handle": "editions.atlande",
+      "note": "Editorial francesa pequeña literatura estudios"
+    },
+    {
+      "handle": "editions_arpentsdesud",
+      "note": "Publica literatura latinoamericana traducida al francés"
+    },
+    {
+      "handle": "editionsdelaigretteofficiel",
+      "note": "Eventos literarios poesía y teatro en ciudades francesas"
+    },
+    {
+      "handle": "editionsdivergences",
+      "note": "Independiente Quimperlé librería/café crítica social comunitaria"
+    },
+    {
+      "handle": "editionsflblb",
+      "note": "Independiente Poitiers cómics fotonovelas artes narrativas"
+    },
+    {
+      "handle": "editionsmemoiredencrier",
+      "note": "Encuentros diálogos misión comunitaria voces culturales"
+    },
+    {
+      "handle": "editionssarbacane",
+      "note": "Editorial parisina independiente: libros ilustrados, novelas, cómics"
+    },
+    {
+      "handle": "editionsthierrymagnier",
+      "note": "Editorial francesa independiente literatura infantil juvenil"
+    },
+    {
+      "handle": "festivallarochellecinema",
+      "note": "Festival cine La Rochelle Francia desde 1973"
+    },
+    {
+      "handle": "festivalp2c",
+      "note": "Festival cortometrajes Antilles caribeño, territorio francés"
+    },
+    {
+      "handle": "festivalvovf",
+      "note": "Festival literatura traductores pequeño/independiente Gif-sur-Yvette"
+    },
+    {
+      "handle": "guayaba.film",
+      "note": "Home of Latin American cinema, community platform"
+    },
+    {
+      "handle": "integre.asso",
+      "note": "Latin American community association in France"
+    },
+    {
+      "handle": "la_revue_dessinee",
+      "note": "French comic journalism, documentary cultural magazine"
+    },
+    {
+      "handle": "le.temps.dun.livre",
+      "note": "Librería independiente pequeña, Pontarlier, recomendaciones libro"
+    },
+    {
+      "handle": "le_cnm",
+      "note": "Centro nacional música, difunde artistas franceses programación pública"
+    },
+    {
+      "handle": "lecenthuit",
+      "note": "Librería-café tercer lugar París, espacio literario comunitario"
+    },
+    {
+      "handle": "lecfestival",
+      "note": "Festival europeo literaturas Cognac, debates lecturas películas públicas"
+    },
+    {
+      "handle": "lecomptoirdeslettres",
+      "note": "Librería pequeña barrio París, sector latino comunitario"
+    },
+    {
+      "handle": "lectures.plurielles",
+      "note": "Festival anual primer novela Chambéry, programación literaria pública"
+    },
+    {
+      "handle": "les_utopiales",
+      "note": "Festival ciencia ficción europeo Nantes anual, multidisciplinar"
+    },
+    {
+      "handle": "lesalon_lelieuunique",
+      "note": "Contemporary cultures venue: shows, festivals, exhibitions, workshops (Nantes)"
+    },
+    {
+      "handle": "lesbelleslettreseditions",
+      "note": "Independent Paris publisher since 1919, classical texts"
+    },
+    {
+      "handle": "librairie.eau.vive",
+      "note": "Librería independiente pequeña Avignon, comunidad activa"
+    },
+    {
+      "handle": "librairie.garin",
+      "note": "Independiente histórica Chambéry, talleres, eventos, comunidad"
+    },
+    {
+      "handle": "librairie.herbe.rouge",
+      "note": "Librería independiente París desde 1977, barrio"
+    },
+    {
+      "handle": "librairie.le.renard.dore",
+      "note": "Especializada manga literatura cultura asiática, dedications"
+    },
+    {
+      "handle": "librairie.libralire",
+      "note": "General independiente París, comunidad activa"
+    },
+    {
+      "handle": "librairie_des_femmes",
+      "note": "Historic feminist bookstore 1974, meetings & events, Paris 75006"
+    },
+    {
+      "handle": "librairie_halldulivre",
+      "note": "Active events bookstore, signings & meetings, cultural programming"
+    },
+    {
+      "handle": "librairieatelier9",
+      "note": "Exhibiciones conciertos encuentros autor; pequeña independiente"
+    },
+    {
+      "handle": "librairiecommeunroman",
+      "note": "París Marais, eventos/lecturas regulares, 21k referencias"
+    },
+    {
+      "handle": "librairiedeparis",
+      "note": "París Place Clichy, 80 eventos autores anuales, 45k títulos"
+    },
+    {
+      "handle": "librairielalternative",
+      "note": "Neuilly-Plaisance (93) con eventos conciertos y encuentros autores"
+    },
+    {
+      "handle": "librairielarbrealettres",
+      "note": "Faubourg Saint-Antoine París 12e, eventos regulares signings 25 años"
+    },
+    {
+      "handle": "loiseausiffleur",
+      "note": "Independent bookstore in Valence"
+    },
+    {
+      "handle": "maisonbasque.paris",
+      "note": "Basque cultural diaspora community"
+    },
+    {
+      "handle": "maisonfumetti",
+      "note": "Comics/visual arts with public programming"
+    },
+    {
+      "handle": "mediatheque.leconquet",
+      "note": "Biblioteca comunitaria Le Conquet, literatura música acceso público"
+    },
+    {
+      "handle": "mediatheque_bourbonne",
+      "note": "Mediateca municipal Bourbonne-les-Bains, espacio cultura libre"
+    },
+    {
+      "handle": "mediatheque_pgx",
+      "note": "Mediatheque Pierre Fanlac, 524 posts literatura medios"
+    },
+    {
+      "handle": "mediathequefrancoisesagan",
+      "note": "Biblioteca París 10e, 100k documentos acceso público"
+    },
+    {
+      "handle": "mediatheques.lemans",
+      "note": "Red 5 mediatecas Le Mans, literatura música cine público"
+    },
+    {
+      "handle": "mediathequevillemursurtarn",
+      "note": "Mediateca Villemur-sur-Tarn, leer escuchar ver local"
+    },
+    {
+      "handle": "pariscinemaclub",
+      "note": "Cinema club 35mm films heritage cinema events"
+    },
+    {
+      "handle": "reseaudesmediatheques",
+      "note": "Library network 12 locations learning discovery"
+    },
+    {
+      "handle": "terres_amerique",
+      "note": "Posiblemente editorial; contenido poco claro búsqueda"
+    },
+    {
+      "handle": "13enart",
+      "note": "Arte 13º arrondissement París; falta programación"
+    },
+    {
+      "handle": "3027.troismillevingtsept",
+      "note": "Asociación cultural París, festival comunitario"
+    },
+    {
+      "handle": "3615reco",
+      "note": "Recomendaciones espectáculos Île-de-France, promueve otros"
+    },
+    {
+      "handle": "59rivoli",
+      "note": "Artist residency & public gallery, free weekly access"
+    },
+    {
+      "handle": "5demayo.paris",
+      "note": "Cinco de Mayo Latin diaspora cultural celebrations Paris"
+    },
+    {
+      "handle": "9_9bismetaphone",
+      "note": "Mining heritage converted to cultural venue: music & art"
+    },
+    {
+      "handle": "artcena.fr",
+      "note": "Centro nacional circo/artes callejeras/teatro Ministerio Cultura"
+    },
+    {
+      "handle": "arteradio",
+      "note": "ARTE Radio oficial, documentales/podcasts educativos cultura"
+    },
+    {
+      "handle": "artistestressauvages",
+      "note": "Compañía teatro improvisación, talleres educativos permanentes"
+    },
+    {
+      "handle": "asso_chef",
+      "note": "Cineastas hispanoamericanos Francia, comunidad diáspora encuentro"
+    },
+    {
+      "handle": "atelier_lesherbeshautes",
+      "note": "Estudio floral París talleres eventos"
+    },
+    {
+      "handle": "atelier_trois_huit",
+      "note": "Editorial independiente artes y cultura"
+    },
+    {
+      "handle": "atelierartistesexil",
+      "note": "Asociación artistas exilio París diáspora"
+    },
+    {
+      "handle": "atelierdepariscdcn",
+      "note": "Centro danza contemporánea París público"
+    },
+    {
+      "handle": "cinemalepeedebois",
+      "note": "Cine Art & Essai independiente París, 5to arr"
+    },
+    {
+      "handle": "citedescompositrices",
+      "note": "Promoción compositoras mujeres, conciertos París, editorial"
+    },
+    {
+      "handle": "citedessciences",
+      "note": "Museo científico París La Villette, programación pública"
+    },
+    {
+      "handle": "ciup.artists",
+      "note": "Artistas Cité, info limitada comunidad artística"
+    },
+    {
+      "handle": "culture_ulille",
+      "note": "Dirección Cultura, eventos gratuitos"
+    },
+    {
+      "handle": "cultureauquai",
+      "note": "Villette Basin: organiza espectáculos, debates, ateliers, conciertos"
+    },
+    {
+      "handle": "culturesecrets",
+      "note": "Curador especializado eventos artísticos París 33K"
+    },
+    {
+      "handle": "dansesaveclaplume",
+      "note": "Especializado agenda danza París 2026 eventos"
+    },
+    {
+      "handle": "festival_cadenceslibres_",
+      "note": "Festival ópera Fontainebleau, primer edición febrero 2026."
+    },
+    {
+      "handle": "festival_fil",
+      "note": "Festival literatura París, septiembre 2025-2026, 2700 followers."
+    },
+    {
+      "handle": "festival_litteraturesurbaines",
+      "note": "Festival lit. urbana París, colectivo Quartier Bis."
+    },
+    {
+      "handle": "festivaldetonnantsamateurs",
+      "note": "Festival Montreuil, amateurs teatro, 60+ performances."
+    },
+    {
+      "handle": "festivaljo",
+      "note": "Festival de improvisación teatro con 691 seguidores, programación cultural activa en París."
+    },
+    {
+      "handle": "fetedesmortsaparis",
+      "note": "Fête des Morts con 1,443 seguidores, festival anual octubre-noviembre, 9º arrondissement."
+    },
+    {
+      "handle": "fetemusique",
+      "note": "Fête de la Musique oficial (18,000 seguidores), festival nacional música anual junio París."
+    },
+    {
+      "handle": "fondation_hellenique",
+      "note": "Fundación Helénica Cité Universitaire (75014), conciertos y eventos acceso público activos."
+    },
+    {
+      "handle": "fondation_maison_du_maroc",
+      "note": "Maison du Maroc (14º París), conferencias/exposiciones/conciertos/cine cultura marroquí activos."
+    },
+    {
+      "handle": "fondationbiermanslapotre",
+      "note": "Fundación Cité Universitaire (14º), conciertos rock/jazz/clásicos/exposiciones acceso público."
+    },
+    {
+      "handle": "fondationcartier",
+      "note": "Cartier arte contemporáneo Place Palais-Royal (1er), exposiciones/conferencias/performances activas permanentes."
+    },
+    {
+      "handle": "fondationusa",
+      "note": "Fundación Estados Unidos (14º París), conciertos/exposiciones/talleres gratuitos, Lady Liberty 2026."
+    },
+    {
+      "handle": "improclub",
+      "note": "Plataforma impro Jamel Comedy Club París, 26K seguidores, activa"
+    },
+    {
+      "handle": "improenseine",
+      "note": "Festival 13ª edición, 100 shows París, junio 2026"
+    },
+    {
+      "handle": "improsupreme",
+      "note": "Fundado París 2010, método improvisación física, enseñanza"
+    },
+    {
+      "handle": "insomnie.impro",
+      "note": "Espectáculo impro solista Le Kibélé París, improvisación audiencia"
+    },
+    {
+      "handle": "jeudepaumeparis",
+      "note": "Centro de arte, exposiciones fotografía cine video instalaciones Paris"
+    },
+    {
+      "handle": "jeunescritiquesdart",
+      "note": "Colectivo crítica de arte, podcast, visitadores de galerías"
+    },
+    {
+      "handle": "la_fab_officiel",
+      "note": "Galería con exhibiciones, colección agnès b., 24K followers"
+    },
+    {
+      "handle": "la_fabrique_editions",
+      "note": "Editorial independiente parisina 1998, ensayos políticos, 45K followers"
+    },
+    {
+      "handle": "la_grimass_improvisation",
+      "note": "Colectivo impro París, funciones teatro sábados noche regulares"
+    },
+    {
+      "handle": "labodeshistoires",
+      "note": "Talleres escritura gratuitos París menores 25, Maison Poésía"
+    },
+    {
+      "handle": "lamaestraparis",
+      "note": "Academia internacional directoras orquesta con eventos París"
+    },
+    {
+      "handle": "lareguliere",
+      "note": "Librería café galería talleres en París XVIII, programación cultural activa"
+    },
+    {
+      "handle": "lestudiomaraisparis",
+      "note": "Espacio multidisciplinario París Marais: escena, showroom, galería, café"
+    },
+    {
+      "handle": "librairie_le_pied_a_terre",
+      "note": "Librería independiente París 75018 Montmartre, activa y consolidada"
+    },
+    {
+      "handle": "maisondegypte",
+      "note": "Maison d'Égypte CIUP París, 195 logements, eventos culturales activos"
+    },
+    {
+      "handle": "maisondelasuede",
+      "note": "Maison étudiants suédois CIUP, 44 logements, eventos culturales regulares"
+    },
+    {
+      "handle": "maisondelinde_ciup",
+      "note": "Maison Inde CIUP, conciertos danzas conferencias yoga activos"
+    },
+    {
+      "handle": "maisondelitalie",
+      "note": "Maison Italie CIUP París, 88 logements, programación cultural activa"
+    },
+    {
+      "handle": "maisoniledefrance",
+      "note": "Maison Île-de-France CIUP, conciertos conferencias proyecciones podcasts culturales"
+    },
+    {
+      "handle": "parisfacecachee",
+      "note": "Organiza descubrimientos culturales París, 8.6k followers, activo."
+    },
+    {
+      "handle": "quartierartdrouot",
+      "note": "Organiza Festival Artistas Ailleurs octubre, programacion clara."
+    },
+    {
+      "handle": "theatre.la.fleche",
+      "note": "Teatro Performance Paris 75011, programacion Primavera activa."
+    }
+  ]
+}
