@@ -584,6 +584,45 @@ mantener y sincronizar; el tope de espera ya resuelve el costo más alto
 (esperas largas) sin ese overhead. Revisar si correr el script muchas
 veces por día se vuelve un patrón habitual.
 
+**Update 8 (2026-08-21):** Diego pidió agregar Google (Gemini) y DeepSeek
+como proveedores cloud adicionales, con orden de fallback explícito
+`groq → google → deepseek → cerebras`. Implementado en `_CLOUD_PROVIDERS`
+(dict ordenado — Python preserva orden de inserción, así que el orden del
+dict ES el orden de fallback cuando `LLM_PROVIDER="groq"`, el default).
+
+- **Google/Gemini** (`LLM_PROVIDER=google`, `GOOGLE_API_KEY`): usa la capa
+  de compatibilidad OpenAI de Gemini (`generativelanguage.googleapis.com/
+  v1beta/openai/chat/completions`) en vez de la API nativa
+  (`generateContent`), para reutilizar el mismo shape de request/response
+  que Groq/Cerebras sin duplicar lógica. Modelo `gemini-2.5-flash-lite`
+  (mayor cupo diario gratis de los tres modelos free-tier de Gemini).
+  Throttling RPM/TPM implementado igual que Groq (`_google_request`), pero
+  con números conservadores/aproximados — Google no publica una tabla
+  estática de límites por tier en `ai.google.dev/gemini-api/docs/rate-limits`
+  (confirmado el 2026-08-21), remite a un dashboard interactivo
+  (`aistudio.google.com/rate-limit`) que no se pudo consultar desde acá.
+  Revisar y ajustar `GOOGLE_MAX_RPM`/`GOOGLE_MAX_TPM` una vez que Diego
+  vea los límites reales en su propia cuenta de AI Studio.
+- **DeepSeek** (`LLM_PROVIDER=deepseek`, `DEEPSEEK_API_KEY`): diferencia
+  importante frente a los otros tres — **no tiene tier gratis**, es pago
+  por token (confirmado en `api-docs.deepseek.com/quick_start/pricing`
+  el 2026-08-21: `deepseek-v4-flash`, el más barato del mercado por buen
+  margen, ~$0.22-0.44/M tokens de entrada y $0.66-1.32/M de salida según
+  horario peak/off-peak UTC). Tampoco publica RPM/TPM — su límite es de
+  concurrencia (2500 conexiones simultáneas para v4-flash), irrelevante
+  para este pipeline que llama secuencialmente, así que `_deepseek_request`
+  no tiene throttling propio, solo reintento en 429/error. En la práctica
+  nunca "se agota" como Groq/Google/Cerebras (que sí tienen cupo diario
+  gratis) — solo fallaría por saldo insuficiente o un tope de gasto que
+  Diego configure en su cuenta.
+- **Pendiente:** Diego mencionó querer probar la calidad del LLM de
+  DeepSeek específicamente (dice ser el más barato del mercado) antes de
+  confiar en él para escritura real — no se corrió ninguna comparación de
+  calidad todavía. Recomendado: correr `--dry-run` con `LLM_PROVIDER=
+  deepseek` sobre la misma muestra ya evaluada con Groq (ver
+  `verify_events_extraction.py` / `eval_100_report.md`) antes de dejarlo
+  en el orden de fallback para corridas de producción.
+
 ---
 
 ## DD-034 — Evitar falsa precisión de fecha en `extract_dates()`

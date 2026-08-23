@@ -23,9 +23,15 @@ NLI, así que se le sumó ese trabajo a la llamada que ya se hacía):
 
   Capa 3 — LLM: Ollama local (modelo configurable vía OLLAMA_MODEL, default
             qwen2.5:7b) por defecto, Groq disponible vía LLM_PROVIDER=groq
-            (ver DD-033 y DD-033 update 3) y Cerebras vía LLM_PROVIDER=cerebras
+            (ver DD-033 y DD-033 update 3), Cerebras vía LLM_PROVIDER=cerebras
             (ver DD-033 update 5 — mismo modelo llama-3.3-70b, ~10x cupo diario
-            gratis frente a Groq, endpoint OpenAI-compatible). Solo corre
+            gratis frente a Groq, endpoint OpenAI-compatible), y desde
+            DD-033 update 8 también Google/Gemini (LLM_PROVIDER=google,
+            gemini-2.5-flash-lite, tier gratis) y DeepSeek (LLM_PROVIDER=
+            deepseek, deepseek-v4-flash — sin tier gratis, pago por token
+            pero el más barato del mercado). El fallback automático entre
+            proveedores cloud cuando uno se agota sigue el orden
+            groq → google → deepseek → cerebras (ver _CLOUD_PROVIDERS). Solo corre
             sobre los que pasaron 2a (~30-50/corrida en pruebas, corpus
             completo en corridas reales — Ollama no tiene tope diario de
             tokens como el free tier de Groq/Cerebras). Limpia fecha/ubicación
@@ -85,6 +91,8 @@ NEO4J_URI      = os.getenv("NEO4J_URI")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 GROQ_API_KEY     = os.getenv("GROQ_API_KEY")
+GOOGLE_API_KEY   = os.getenv("GOOGLE_API_KEY")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY")
 
 if not all([NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD]):
@@ -102,6 +110,35 @@ if not GROQ_API_KEY:
 # y fallback quedan alineados — sin necesidad de re-validar calidad desde cero.
 GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL    = "openai/gpt-oss-120b"
+
+# Endpoint OpenAI-compatible de Gemini (ai.google.dev/gemini-api/docs/openai) —
+# se usa esta capa de compatibilidad en vez de la API nativa de Gemini
+# (generateContent) para reutilizar el mismo shape de request/response que
+# Groq/Cerebras (messages + response_format json_object) sin duplicar lógica.
+# Modelo: gemini-2.5-flash-lite — dentro del tier gratis (sin tarjeta) es el
+# que más cupo diario de request tiene de los tres modelos gratis de Gemini
+# (confirmado en ai.google.dev/gemini-api/docs/rate-limits el 2026-08-21;
+# los números exactos de RPM/TPM/RPD por tier viven en un dashboard interactivo
+# — aistudio.google.com/rate-limit — no en una tabla estática, así que los
+# de abajo son conservadores/aproximados, no un valor oficial confirmado dígito
+# a dígito). Igual que Groq/Cerebras: gratis con throttling, no pago por token.
+GOOGLE_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+GOOGLE_MODEL    = "gemini-2.5-flash-lite"
+
+# Endpoint OpenAI-compatible de DeepSeek (api-docs.deepseek.com). A diferencia
+# de Groq/Google/Cerebras, DeepSeek NO tiene tier gratis — es pago por token,
+# aunque el más barato del mercado por bastante margen (confirmado en
+# api-docs.deepseek.com/quick_start/pricing el 2026-08-21: deepseek-v4-flash,
+# ~$0.22-0.44/M tokens de entrada y $0.66-1.32/M de salida según horario
+# peak/off-peak). Tampoco publica RPM/TPM — su límite es de concurrencia
+# (2500 conexiones simultáneas para v4-flash, ver quick_start/rate_limit),
+# irrelevante para este pipeline que llama secuencialmente. Por eso NO tiene
+# throttling propio como Groq/Cerebras/Google más abajo — solo reintento en
+# 429/error igual que los demás. "Se acaba" en el sentido de que factura, no
+# de que tenga un cupo diario gratis que se agote (a diferencia de los otros
+# tres) — tenerlo en cuenta si algún día se le pone un tope de gasto.
+DEEPSEEK_ENDPOINT = "https://api.deepseek.com/chat/completions"
+DEEPSEEK_MODEL    = "deepseek-v4-flash"
 
 # Endpoint OpenAI-compatible de Cerebras (cloud.cerebras.ai). NO es el mismo
 # modelo que Groq — Cerebras retiró llama-3.3-70b de su catálogo público;
@@ -752,6 +789,149 @@ def _groq_request(caption: str, anchor_date: str, label: str = "", include_reaso
     return None
 
 
+# ── 6b-ii-bis. Transporte Google/Gemini (disponible vía LLM_PROVIDER=google) ─
+# Mismo patrón de throttling que Groq (RPM + TPM paceados antes de llamar,
+# más manejo de 429/Retry-After como red de seguridad). Números conservadores
+# — ver comentario en GOOGLE_ENDPOINT sobre por qué no son un valor oficial
+# exacto (Google no publica una tabla estática por tier, solo un dashboard).
+GOOGLE_MAX_RPM             = 12
+GOOGLE_MAX_TPM             = 200000
+GOOGLE_TPM_SAFETY_MARGIN   = 180000
+GOOGLE_MAX_ATTEMPTS        = 3
+GOOGLE_RESPONSE_TOKENS_EST = 150
+_last_google_call_ts       = 0.0
+_google_token_window: list = []
+
+
+def _google_rate_limit_wait() -> None:
+    """Espacia llamadas para no superar GOOGLE_MAX_RPM, antes de cada intento."""
+    global _last_google_call_ts
+    min_interval = 60.0 / GOOGLE_MAX_RPM
+    elapsed = time.time() - _last_google_call_ts
+    if elapsed < min_interval:
+        time.sleep(min_interval - elapsed)
+    _last_google_call_ts = time.time()
+
+
+def _google_tokens_used_last_60s() -> int:
+    global _google_token_window
+    cutoff = time.time() - 60
+    _google_token_window = [(ts, tok) for ts, tok in _google_token_window if ts >= cutoff]
+    return sum(tok for _, tok in _google_token_window)
+
+
+def _google_tpm_wait(estimated_tokens: int) -> int:
+    """Bloquea hasta que quepan estimated_tokens en la ventana de 60s bajo
+    GOOGLE_TPM_SAFETY_MARGIN, en vez de disparar la llamada y esperar el 429."""
+    while True:
+        used = _google_tokens_used_last_60s()
+        if used + estimated_tokens <= GOOGLE_TPM_SAFETY_MARGIN or not _google_token_window:
+            return used
+        oldest_ts = _google_token_window[0][0]
+        wait = max(0.5, 60 - (time.time() - oldest_ts) + 0.1)
+        print(f"  ⏳ Google TPM: {used}+{estimated_tokens} tok > {GOOGLE_TPM_SAFETY_MARGIN} margen"
+              f" — esperando {wait:.1f}s", flush=True)
+        time.sleep(wait)
+
+
+def _google_request(caption: str, anchor_date: str, label: str = "", include_reasoning: bool = False) -> Optional[dict]:
+    """Llama a Gemini (vía capa de compatibilidad OpenAI) con reintentos.
+    None si falla tras agotar GOOGLE_MAX_ATTEMPTS. Mismo patrón que
+    _groq_request — ver ese docstring para el detalle del manejo de 429.
+    """
+    if not GOOGLE_API_KEY:
+        return None
+    prompt = _build_llm_prompt(caption, anchor_date, include_reasoning)
+    est_tokens = _estimate_tokens(prompt) + GOOGLE_RESPONSE_TOKENS_EST
+
+    for attempt in range(1, GOOGLE_MAX_ATTEMPTS + 1):
+        _google_rate_limit_wait()
+        used = _google_tpm_wait(est_tokens)
+        _google_token_window.append((time.time(), est_tokens))
+        try:
+            resp = requests.post(
+                GOOGLE_ENDPOINT,
+                headers={"Authorization": f"Bearer {GOOGLE_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model":           GOOGLE_MODEL,
+                    "messages":        [{"role": "user", "content": prompt}],
+                    "temperature":     0.0,
+                    "response_format": {"type": "json_object"},
+                },
+                timeout=30,
+            )
+            if resp.status_code == 429:
+                wait = float(resp.headers.get("Retry-After", 2 ** attempt))
+                if wait > MAX_RATE_LIMIT_WAIT_S:
+                    print(f"  🔀 Google pide esperar {wait:.0f}s (>{MAX_RATE_LIMIT_WAIT_S}s) [{label}]"
+                          f" — probablemente tope diario, no por-minuto. No vale la pena esperar, "
+                          f"cambiando de proveedor ya.", flush=True)
+                    return None
+                print(f"  ⚠️  Google 429 rate-limit [{label}] intento {attempt}/{GOOGLE_MAX_ATTEMPTS}"
+                      f" (~{est_tokens} tok, ventana={used}) — esperando {wait:.1f}s", flush=True)
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"]
+            print(f"  🪙 Google [{label}] ~{est_tokens} tok  (ventana 60s: {used + est_tokens})", flush=True)
+            return json.loads(content)
+        except Exception as e:
+            print(f"  ⚠️  Google falló [{label}] intento {attempt}/{GOOGLE_MAX_ATTEMPTS}: "
+                  f"{type(e).__name__}: {e}", flush=True)
+            if attempt < GOOGLE_MAX_ATTEMPTS:
+                time.sleep(1.5)
+    return None
+
+
+# ── 6b-ii-ter. Transporte DeepSeek (disponible vía LLM_PROVIDER=deepseek) ────
+# Sin throttling de RPM/TPM propio — ver comentario en DEEPSEEK_ENDPOINT sobre
+# por qué (límite de concurrencia, no de por-minuto; irrelevante en llamadas
+# secuenciales). Reintenta igual que los demás ante 429/error de red.
+DEEPSEEK_MAX_ATTEMPTS        = 3
+DEEPSEEK_RESPONSE_TOKENS_EST = 150
+
+
+def _deepseek_request(caption: str, anchor_date: str, label: str = "", include_reasoning: bool = False) -> Optional[dict]:
+    """Llama a DeepSeek con reintentos. None si falla tras agotar
+    DEEPSEEK_MAX_ATTEMPTS. Mismo patrón que _groq_request pero sin pacing
+    RPM/TPM (no aplica — ver comentario en DEEPSEEK_ENDPOINT).
+    """
+    if not DEEPSEEK_API_KEY:
+        return None
+    prompt = _build_llm_prompt(caption, anchor_date, include_reasoning)
+    est_tokens = _estimate_tokens(prompt) + DEEPSEEK_RESPONSE_TOKENS_EST
+
+    for attempt in range(1, DEEPSEEK_MAX_ATTEMPTS + 1):
+        try:
+            resp = requests.post(
+                DEEPSEEK_ENDPOINT,
+                headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model":           DEEPSEEK_MODEL,
+                    "messages":        [{"role": "user", "content": prompt}],
+                    "temperature":     0.0,
+                    "response_format": {"type": "json_object"},
+                },
+                timeout=30,
+            )
+            if resp.status_code == 429:
+                wait = float(resp.headers.get("Retry-After", 2 ** attempt))
+                print(f"  ⚠️  DeepSeek 429 [{label}] intento {attempt}/{DEEPSEEK_MAX_ATTEMPTS}"
+                      f" (~{est_tokens} tok) — esperando {wait:.1f}s", flush=True)
+                time.sleep(min(wait, MAX_RATE_LIMIT_WAIT_S))
+                continue
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"]
+            print(f"  🪙 DeepSeek [{label}] ~{est_tokens} tok", flush=True)
+            return json.loads(content)
+        except Exception as e:
+            print(f"  ⚠️  DeepSeek falló [{label}] intento {attempt}/{DEEPSEEK_MAX_ATTEMPTS}: "
+                  f"{type(e).__name__}: {e}", flush=True)
+            if attempt < DEEPSEEK_MAX_ATTEMPTS:
+                time.sleep(1.5)
+    return None
+
+
 # ── 6b-iii. Transporte Cerebras (disponible vía LLM_PROVIDER=cerebras) ───────
 # Free tier de gpt-oss-120b en Cerebras (confirmado en
 # inference-docs.cerebras.ai/support/rate-limits el 2026-07-30, tabla "Free
@@ -937,16 +1117,50 @@ def llm_enrich_event_cerebras(caption: str, post_timestamp: str = "", label: str
     return _extract_llm_fields(_cerebras_request(caption, anchor_date, label=label, include_reasoning=include_reasoning))
 
 
-# ── 6b-iv. Fallback automático entre proveedores cloud (DD-033 update 7) ────
+def llm_enrich_event_google(caption: str, post_timestamp: str = "", label: str = "", include_reasoning: bool = False) -> dict:
+    """Capa 3 vía Gemini (gemini-2.5-flash-lite, capa de compatibilidad
+    OpenAI). Throttling RPM/TPM y reintentos en _google_request — ver
+    DD-033 (update 8).
+    """
+    if not caption:
+        return dict(_LLM_DEFAULTS)
+    anchor_date = (post_timestamp or "")[:10]
+    return _extract_llm_fields(_google_request(caption, anchor_date, label=label, include_reasoning=include_reasoning))
+
+
+def llm_enrich_event_deepseek(caption: str, post_timestamp: str = "", label: str = "", include_reasoning: bool = False) -> dict:
+    """Capa 3 vía DeepSeek (deepseek-v4-flash). Sin tier gratis (pago por
+    token, el más barato del mercado) — ver DD-033 (update 8). Reintentos
+    en _deepseek_request, sin throttling RPM/TPM propio (no aplica, ver
+    comentario en DEEPSEEK_ENDPOINT).
+    """
+    if not caption:
+        return dict(_LLM_DEFAULTS)
+    anchor_date = (post_timestamp or "")[:10]
+    return _extract_llm_fields(_deepseek_request(caption, anchor_date, label=label, include_reasoning=include_reasoning))
+
+
+# ── 6b-iv. Fallback automático entre proveedores cloud (DD-033 update 7, ────
+#          orden ampliado en update 8) ──────────────────────────────────────
 # Cuando el proveedor preferido (LLM_PROVIDER) agota su cupo diario a mitad
 # de una corrida, en vez de solo esperar/detenerse, se cambia automáticamente
-# al otro proveedor cloud (Groq <-> Cerebras) para el resto de la corrida —
-# así se aprovecha el cupo combinado de ambos sin que el usuario tenga que
-# pararla y reiniciarla manualmente cambiando LLM_PROVIDER a mano (como se
-# hizo antes de este fix). Ollama queda fuera: no tiene cupo diario que se
-# agote, y mezclar local+nube automáticamente no es lo que se pidió.
+# al siguiente proveedor cloud para el resto de la corrida — así se aprovecha
+# el cupo combinado de todos sin que el usuario tenga que pararla y
+# reiniciarla manualmente cambiando LLM_PROVIDER a mano (como se hacía antes
+# de este fix). Ollama queda fuera: no tiene cupo diario que se agote, y
+# mezclar local+nube automáticamente no es lo que se pidió.
+#
+# Orden pedido por Diego (2026-08-21): groq -> google -> deepseek -> cerebras,
+# a medida que cada uno se va agotando/fallando. Groq/google/cerebras tienen
+# tier gratis con cupo diario que efectivamente "se acaba"; deepseek no —
+# es pago por token (el más barato del mercado), así que en la práctica
+# nunca "falla por cupo agotado" salvo que la cuenta se quede sin saldo o
+# tope de gasto configurado. El orden de este dict ES el orden de fallback
+# (Python preserva el orden de inserción) cuando LLM_PROVIDER="groq" (default).
 _CLOUD_PROVIDERS = {
     "groq":     llm_enrich_event_groq,
+    "google":   llm_enrich_event_google,
+    "deepseek": llm_enrich_event_deepseek,
     "cerebras": llm_enrich_event_cerebras,
 }
 _provider_failed_this_run: set = set()
@@ -965,17 +1179,20 @@ def llm_enrich_event(caption: str, post_timestamp: str = "", label: str = "", in
     evento (reemplaza la vieja Capa 2b de embeddings) y detecta noticias
     institucionales sin invitación real al público. LLM_PROVIDER elige el
     transporte preferido: llm_enrich_event_ollama() (default), o uno de los
-    dos proveedores cloud (llm_enrich_event_groq()/llm_enrich_event_cerebras()).
+    cuatro proveedores cloud (groq/google/deepseek/cerebras — ver
+    _CLOUD_PROVIDERS).
 
     `include_reasoning`: solo True en --dry-run — en producción no se pide
     ese campo (nadie lo consume río abajo, y cuesta tokens de salida en
     cada llamada).
 
     Si LLM_PROVIDER es un proveedor cloud y falla (cupo agotado u otro error
-    tras sus reintentos internos), se reintenta automáticamente con el otro
-    proveedor cloud antes de rendirse — ver DD-033 (update 7). Un proveedor
-    que falla se marca para el resto de esta corrida (no se reintenta post
-    a post; los cupos diarios no se recuperan a mitad de una corrida).
+    tras sus reintentos internos), se reintenta automáticamente con el
+    siguiente proveedor cloud en el orden de _CLOUD_PROVIDERS antes de
+    rendirse — ver DD-033 (update 7, orden ampliado en update 8). Un
+    proveedor que falla se marca para el resto de esta corrida (no se
+    reintenta post a post; los cupos diarios no se recuperan a mitad de
+    una corrida).
 
     Se llama SOLO sobre candidatos que ya pasaron Capas 1+2 (~30-50/corrida en
     pruebas, corpus completo en corridas reales). Si TODOS los transportes
@@ -1317,6 +1534,10 @@ def run_extraction(
     print("=" * 60)
     if LLM_PROVIDER == "groq":
         capa3_status = f"Groq({GROQ_MODEL})" if GROQ_API_KEY else "Groq(GROQ_API_KEY ausente!)"
+    elif LLM_PROVIDER == "google":
+        capa3_status = f"Google({GOOGLE_MODEL})" if GOOGLE_API_KEY else "Google(GOOGLE_API_KEY ausente!)"
+    elif LLM_PROVIDER == "deepseek":
+        capa3_status = f"DeepSeek({DEEPSEEK_MODEL})" if DEEPSEEK_API_KEY else "DeepSeek(DEEPSEEK_API_KEY ausente!)"
     elif LLM_PROVIDER == "cerebras":
         capa3_status = f"Cerebras({CEREBRAS_MODEL})" if CEREBRAS_API_KEY else "Cerebras(CEREBRAS_API_KEY ausente!)"
     else:
@@ -1979,9 +2200,11 @@ def main(
     Capa 2a: NLI multilingüe ligero batcheado — detección binaria
              (--layer2-threshold), hipótesis en el idioma del caption.
     Capa 3:  Ollama local (modelo configurable vía OLLAMA_MODEL, default
-             qwen2.5:7b) por defecto — o Groq si LLM_PROVIDER=groq
-             (vía GROQ_API_KEY en .env), o Cerebras si LLM_PROVIDER=cerebras
-             (vía CEREBRAS_API_KEY en .env). Limpia fecha/ubicación, TIPIFICA
+             qwen2.5:7b) por defecto — o un proveedor cloud si LLM_PROVIDER
+             es "groq" (GROQ_API_KEY), "google" (GOOGLE_API_KEY), "deepseek"
+             (DEEPSEEK_API_KEY) o "cerebras" (CEREBRAS_API_KEY). Fallback
+             automático entre los cuatro en ese orden si el preferido falla.
+             Limpia fecha/ubicación, TIPIFICA
              el evento (reemplaza la vieja Capa 2b de embeddings), da
              price_range, redacta descripción y filtra noticias
              institucionales sin invitación real — si el LLM corrió y dice
