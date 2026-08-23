@@ -63,10 +63,24 @@ def handle_rows():
     """Reconstruye la lista de filas que tienen el handle real (columna A),
     saltando las filas de descripción intercaladas que quedaron del Excel
     original garabateado: cuenta N -> fila 2N para N<=38, fila 78 para N=39
-    (cuenta huérfana sin fila de descripción pareada), fila 2N-1 para N>=40."""
+    (cuenta huérfana sin fila de descripción pareada), fila 2N-1 para N>=40
+    hasta la fila 251 (cuenta 126, la última del lote original curado a mano).
+
+    Filas 253-413 (2026-08-21): 161 cuentas nuevas (bucket "fijo" de
+    pilot_classification.csv) categorizadas vía subagentes Haiku con
+    búsqueda web — ver decisions_es.md. A diferencia del bloque anterior,
+    estas NO llevan fila de descripción intercalada (una fila por cuenta,
+    contigua) porque el script nunca leyó esas filas de todos modos — son
+    puramente cosméticas para navegación visual en Excel. Filas 282 y 332
+    quedaron vacías a propósito (username en columna A = None, `load_rows`
+    las salta): `semaine_de_la_critique` y `citedelabd` ya estaban en el
+    bloque original (filas 95 y 109) con datos más completos — se detectó
+    el duplicado por username y se priorizó la entrada original.
+    """
     rows = [2 * n for n in range(1, 39)]
     rows.append(78)
     rows += [2 * n - 1 for n in range(40, 127)]
+    rows += list(range(253, 414))
     return rows
 
 
