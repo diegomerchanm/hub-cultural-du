@@ -851,6 +851,170 @@
     {
       "handle": "theatre.la.fleche",
       "note": "Teatro Performance Paris 75011, programacion Primavera activa."
+    },
+    {
+      "handle": "laroutedurock",
+      "note": "Música - Festival"
+    },
+    {
+      "handle": "rendezvousdelhistoire",
+      "note": "Literatura (historia), Cine - Festival"
+    },
+    {
+      "handle": "redcomunitariatrans",
+      "note": "Multidisciplinario (arte comunitario, performance, memoria) - Asociación/colectivo"
+    },
+    {
+      "handle": "latinas.en.francia",
+      "note": "No aplica — comunidad/red de apoyo, no arte específico - Asociación/colectivo (comunidad digital)"
+    },
+    {
+      "handle": "associationvoiedefemmes",
+      "note": "Música, Artes visuales (manualidades) - Asociación/colectivo"
+    },
+    {
+      "handle": "quinzaine_des_cineastes",
+      "note": "Cine - Festival (sección paralela de Cannes)"
+    },
+    {
+      "handle": "consuladocollondres",
+      "note": "Multidisciplinario (música, idiomas, pintura) - Institución pública (gubernamental, consular)"
+    },
+    {
+      "handle": "lanuitducirque",
+      "note": "Circo, Danza - Festival"
+    },
+    {
+      "handle": "grupo.encuentros.bol",
+      "note": "No confirmado (sin bio visible) - Asociación/colectivo (probable, comunidad boliviana)"
+    },
+    {
+      "handle": "holaqtaloff",
+      "note": "Multidisciplinario (medio de comunicación, cultura latina) - Medio de comunicación / colectivo"
+    },
+    {
+      "handle": "citeartsdelarue",
+      "note": "Circo, Teatro, Danza (artes de la calle/espacio público) - Centro cultural (polo de creación)"
+    },
+    {
+      "handle": "semaine_de_la_critique",
+      "note": "Cine - Festival (sección paralela de Cannes)"
+    },
+    {
+      "handle": "folimage",
+      "note": "Cine (animación) - Institución/empresa (estudio de producción)"
+    },
+    {
+      "handle": "lalibellulecafelibrairie",
+      "note": "Literatura, Música (conciertos) - Centro de eventos (café-librería)"
+    },
+    {
+      "handle": "32bisculture",
+      "note": "Multidisciplinario (formaciones artísticas variadas) - Centro cultural (espacio compartido/colectivo)"
+    },
+    {
+      "handle": "citedelabd",
+      "note": "Literatura (cómic/bande dessinée) - Centro cultural, Institución pública"
+    },
+    {
+      "handle": "el_sofrito_del_viernes",
+      "note": "Música (fiesta/baile latino) - Asociación/colectivo (organización de eventos)"
+    },
+    {
+      "handle": "diplomaciafeministaporlapaz",
+      "note": "No aplica — política/diplomacia, no arte - Institución pública (gubernamental/diplomática)"
+    },
+    {
+      "handle": "espacioafro",
+      "note": "Multidisciplinario (música, danza, activismo afrofeminista) - Centro cultural, Asociación/colectivo"
+    },
+    {
+      "handle": "bassinesnonmerci",
+      "note": "No aplica — activismo ambiental, no arte - Asociación/colectivo (movimiento social)"
+    },
+    {
+      "handle": "bibliothequedepartementale13",
+      "note": "Literatura - Institución pública (biblioteca departamental)"
+    },
+    {
+      "handle": "espacepasolini",
+      "note": "Teatro, Danza - Centro cultural"
+    },
+    {
+      "handle": "arepasdonapao",
+      "note": "No aplica — gastronomía, no arte - Negocio/comercio (restaurante)"
+    },
+    {
+      "handle": "mariannecultura",
+      "note": "Danza, Música, Cine - Institución pública (programa de cooperación diplomática)"
+    },
+    {
+      "handle": "jardin_de_la_resistencia",
+      "note": "Multidisciplinario (memoria, arte comunitario) - Asociación/colectivo"
+    },
+    {
+      "handle": "sankofadanzafro",
+      "note": "Danza - Centro cultural (compañía + corporación cultural)"
+    },
+    {
+      "handle": "compagnie_bestia",
+      "note": "Circo, Danza, Teatro - Centro cultural (compañía de circo contemporáneo)"
+    },
+    {
+      "handle": "latinos.enfrancia",
+      "note": "No aplica — medio/comunidad digital, no arte - Medio de comunicación / colectivo"
+    },
+    {
+      "handle": "assocrid",
+      "note": "No aplica — red de solidaridad internacional, no arte - Asociación/colectivo (ONG, red de ~50 organizaciones)"
+    },
+    {
+      "handle": "loscumbiamberosdelsur",
+      "note": "Música - Asociación/colectivo (grupo musical)"
+    },
+    {
+      "handle": "associationdv",
+      "note": "Multidisciplinario (arte y bienestar) - Asociación/colectivo"
+    },
+    {
+      "handle": "plateforme_cinelatino",
+      "note": "Cine - Festival (plataforma profesional)"
+    },
+    {
+      "handle": "assocolombianantes",
+      "note": "Multidisciplinario (música, exposiciones, gastronomía) - Asociación/colectivo"
+    },
+    {
+      "handle": "vuelo2136",
+      "note": "No aplica — podcast, no arte tradicional - Medio de comunicación / colectivo"
+    },
+    {
+      "handle": "colombiacuentaoficial",
+      "note": "Literatura (narración oral) - Asociación/colectivo (grupo de narradores)"
+    },
+    {
+      "handle": "fanfaremelotocon",
+      "note": "Música - Asociación/colectivo (banda de fanfarria)"
+    },
+    {
+      "handle": "elindioamerikaz",
+      "note": "Artes visuales, Danza (personaje/performance artístico) - No aplica — proyecto artístico (dos artistas)"
+    },
+    {
+      "handle": "maroespacios.co",
+      "note": "Artes visuales (arte y diseño de espacios) - No aplica — artista/diseñadora individual"
+    },
+    {
+      "handle": "guayabo.co",
+      "note": "Literatura, Artes visuales, Danza, Música - Centro cultural (asociación franco-latinoamericana)"
+    },
+    {
+      "handle": "aycaraycomedy",
+      "note": "Teatro (comedia/standup) - Asociación/colectivo (club de comedia)"
+    },
+    {
+      "handle": "ihoanschromebronce",
+      "note": "Artes visuales - No aplica — artista individual (cuenta verificada)"
     }
   ]
 }
