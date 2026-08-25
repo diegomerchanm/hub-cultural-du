@@ -45,6 +45,14 @@ def get_driver():
     return driver
 
 
+GEO_LABELS = {
+    "Île-de-France": "🇫🇷 Île-de-France",
+    "Francia fuera IDF": "🇫🇷 Francia (fuera IDF)",
+    "Fuera de Francia": "🌍 Fuera de Francia",
+}
+GEO_SIN_DATO = "— sin geoZone —"
+
+
 def fetch_pending():
     query = """
         MATCH (e:Event)
@@ -53,7 +61,8 @@ def fetch_pending():
                e.type AS type, e.eventDate AS eventDate, e.locationName AS locationName,
                e.cityName AS cityName, e.priceRange AS priceRange,
                e.sourceAuthor AS sourceAuthor, e.sourcePostUrl AS sourcePostUrl,
-               e.hotnessScore AS hotnessScore, e.eventScore AS eventScore
+               e.hotnessScore AS hotnessScore, e.eventScore AS eventScore,
+               e.geoZone AS geoZone
         ORDER BY e.eventDate ASC
     """
     with get_driver().session() as s:
@@ -70,6 +79,12 @@ def reject(event_id: str):
     query = "MATCH (e:Event {id: $id}) SET e:Rejected REMOVE e:PendingReview"
     with get_driver().session() as s:
         s.run(query, id=event_id)
+
+
+def reject_bulk(event_ids: list[str]):
+    query = "MATCH (e:Event) WHERE e.id IN $ids SET e:Rejected REMOVE e:PendingReview"
+    with get_driver().session() as s:
+        s.run(query, ids=event_ids)
 
 
 def save_edits(event_id: str, title: str, description: str, event_type: str,
@@ -94,11 +109,43 @@ def save_edits(event_id: str, title: str, description: str, event_type: str,
 
 st.title("🗂️ Revisión de eventos")
 
-events = fetch_pending()
-st.caption(f"{len(events)} evento(s) pendiente(s) de revisión")
+all_events = fetch_pending()
+st.caption(f"{len(all_events)} evento(s) pendiente(s) de revisión en total")
+
+if not all_events:
+    st.success("No hay eventos pendientes por ahora. 🎉")
+    st.stop()
+
+# Filtro por geoZone (2026-08-25): geoZone viene heredado de la cuenta que
+# publicó el evento (categorización manual) — no es infalible (solo existe
+# si la cuenta pasó por load_manual_account_categorization.py, y describe
+# la cuenta, no necesariamente la ubicación exacta del evento), pero Diego
+# reportó que en la práctica TODO lo de "Fuera de Francia" se estaba
+# rechazando uno por uno — este filtro + el botón de rechazo masivo de abajo
+# existen para no tener que hacer eso a mano evento por evento.
+geo_options = ["Todos"] + list(GEO_LABELS.values()) + [GEO_SIN_DATO]
+geo_choice = st.selectbox("Filtrar por zona geográfica", geo_options)
+
+if geo_choice == "Todos":
+    events = all_events
+else:
+    target_raw = GEO_SIN_DATO if geo_choice == GEO_SIN_DATO else next(
+        k for k, v in GEO_LABELS.items() if v == geo_choice
+    )
+    if geo_choice == GEO_SIN_DATO:
+        events = [e for e in all_events if not e.get("geoZone")]
+    else:
+        events = [e for e in all_events if e.get("geoZone") == target_raw]
+
+st.caption(f"{len(events)} evento(s) con este filtro")
+
+if geo_choice != "Todos" and events:
+    if st.button(f"❌ Rechazar los {len(events)} eventos visibles ({geo_choice})", type="primary"):
+        reject_bulk([e["id"] for e in events])
+        st.rerun()
 
 if not events:
-    st.success("No hay eventos pendientes por ahora. 🎉")
+    st.info("Ningún evento pendiente coincide con este filtro.")
     st.stop()
 
 for ev in events:
@@ -110,9 +157,10 @@ for ev in events:
     with st.container(border=True):
         cat_label = CATEGORY_LABELS.get(ev.get("type"), ev.get("type") or "sin categoría")
         st.markdown(f"**{ev.get('title') or '(sin título)'}**  \n{cat_label}")
+        geo_label = GEO_LABELS.get(ev.get("geoZone"), GEO_SIN_DATO)
         st.caption(
             f"📅 {ev.get('eventDate') or '?'} · 📍 {ev.get('locationName') or '?'}"
-            f"{', ' + ev['cityName'] if ev.get('cityName') else ''} · 💶 {ev.get('priceRange') or '?'}"
+            f"{', ' + ev['cityName'] if ev.get('cityName') else ''} · 💶 {ev.get('priceRange') or '?'} · {geo_label}"
         )
         st.write(ev.get("description") or "_(sin descripción)_")
         st.caption(f"Fuente: @{ev.get('sourceAuthor') or '?'} — {ev.get('sourcePostUrl') or ''}")

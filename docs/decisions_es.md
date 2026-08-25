@@ -1056,6 +1056,15 @@ Costo estimado del scrape de 50 perfiles: trivial (~$0.03-0.20 según el precio 
 
 ---
 
+**DD-052 — Filtro por geoZone + rechazo masivo en `review_events.py` (2026-08-25).** Diego reportó, revisando a mano la primera tanda real de eventos pendientes, que estaba rechazando uno por uno absolutamente todo lo etiquetado "Fuera de Francia" — pidió que se pudiera repartir/filtrar por eso en vez de revisar cada uno individualmente.
+
+- `fetch_pending()` ahora trae `e.geoZone` (heredado de la cuenta publicadora en la creación del evento, mismo campo que ya usa `site/app.js` vía `GEO_LABEL`: `Île-de-France` / `Francia fuera IDF` / `Fuera de Francia`).
+- Nuevo selector arriba de la lista para filtrar por esa zona (o "sin dato" para eventos cuya cuenta nunca pasó por `load_manual_account_categorization.py`), y un botón "❌ Rechazar los N eventos visibles" que aplica `reject_bulk()` (mismo mecanismo que el rechazo individual — `:Rejected` + quitar `:PendingReview`, nunca `DETACH DELETE`) a todo lo que quedó filtrado, en una sola operación.
+- **Caveat explícito, no resuelto:** `geoZone` describe la cuenta que publicó, no necesariamente la ubicación real del evento — una cuenta parisina podría anunciar un evento en otro país (o viceversa). El filtro es una heurística útil para el caso mayoritario que Diego describió, no una garantía por evento; sigue quedando a su criterio revisar antes de usar el botón masivo.
+- Verificado con `py_compile`. No probado contra Neo4j real en este sandbox (sin credenciales).
+
+---
+
 **Tesis:** `thesis/main.tex` — outline completo en LaTeX/inglés, revisado por un agente Opus (correcciones factuales sobre este mismo decision log, capítulos 3–5 completados con prosa real anclada en runs/decisiones reales, nueva §3.7 "Evaluation Design"). Gaps pendientes: sin `references.bib`, sin postura ética explícita sobre ToS de Instagram, sin figura del pipeline ni capturas del sitio, cifra de "73–83 comunidades" sin validar contra una corrida real antes de citarla.
 
 ---
