@@ -419,10 +419,10 @@ of the extraction logic.
 
 \textbf{A real-time decision log.} Every non-trivial design choice was
 recorded, at the moment it was made, in a sequentially numbered decision
-log (\texttt{docs/decisions\_es.md}, forty-one entries numbered DD-001 to
-DD-044; three numbers in that range were reserved for decisions referenced
-in the code but never written up) rather than reconstructed retrospectively
-for this thesis.\footnote{The log is maintained in Spanish, the language in
+log (\texttt{docs/decisions\_es.md}, fifty-one entries numbered DD-001 to
+DD-053; two numbers in that range, DD-021 and DD-024, were reserved for
+decisions referenced in the code but never written up) rather than
+reconstructed retrospectively for this thesis.\footnote{The log is maintained in Spanish, the language in
 which the project work was conducted; \texttt{docs/decisions.md} holds a
 partial English translation that currently stops at DD-033. Where entries
 are quoted in this thesis, the translation is the author's.} Each entry
@@ -655,17 +655,34 @@ was shown to depress scores for English and French captions regardless of
 their content.
 
 \textbf{Layer 3 — LLM extraction, typing and gating.} Candidates that
-pass Layer 2 are sent to a large language model (Ollama locally, or Groq
-or Cerebras in the cloud, with automatic failover between the two cloud
-providers and a cap on rate-limit waiting, DD-033) which extracts title,
-description, date, location and price range, assigns an event type from a
-fixed sixteen-label taxonomy, proposes one to three free-form artistic
-tags (DD-042), and — the decisive change — \emph{gates} node creation.
-If the model reports that the post is not a public invitation, or not
-upcoming, no \texttt{:Event} node is created at all. In the earlier
-design the node was created regardless and merely scored lower, which
+pass Layer 2 are sent to a large language model — Ollama locally, or one
+of four cloud providers tried in order with automatic failover and a cap
+on rate-limit waiting (Groq, Google, Cerebras, DeepSeek, DD-033) — which
+extracts title, description, date, location and price range in Spanish,
+together with French translations of the title and description generated
+in the same call at no extra request cost (\texttt{title\_fr},
+\texttt{description\_fr}, DD-051, feeding the bilingual site of
+\S\ref{sec:website}), assigns an event type from a fixed sixteen-label
+taxonomy, proposes one to three free-form artistic tags (DD-042), and —
+the decisive change — \emph{gates} node creation. If the model reports
+that the post is not a public invitation, or not upcoming, no
+\texttt{:Event} node is created at all. In the earlier design the node
+was created regardless and merely scored lower, which
 \S\ref{sec:eval-design} shows was the single largest source of false
 positives.
+
+DeepSeek sits last in that order rather than third, and the reordering
+is itself evidence about a failure mode worth recording. In its original
+position it failed more often than the three free-tier providers, but
+not through the expected quota error: it returned HTTP 200 with an empty
+\texttt{message.content}, which the JSON parser downstream treated
+identically to a malformed response until an explicit emptiness check
+was added to tell the two failure modes apart (DD-050). Because DeepSeek
+is the only one of the four that is paid, and proved the least stable of
+the four across a live run of 315 posts, it was moved behind the three
+free providers so that it is tried only once they are all exhausted,
+rather than ahead of one of them for no reason the observed failure
+pattern could justify.
 
 Three further constraints shape the layer-3 stage. Calls are deduplicated
 by post identifier within a run, so co-published posts share one call.
@@ -1017,6 +1034,18 @@ Française branches in Colombian cities being the recurring case (DD-032)
 \S\ref{sec:data-quality} was a restaurant menu in Spain with no
 connection to the project at all.
 
+\textbf{A property inherited from the account is used as a proxy for the
+event's own location.} Every \texttt{:Event} node inherits
+\texttt{geoZone} from the account that published it, at no additional
+extraction cost, and that inheritance has since become an operational
+filter: the human-review interface groups pending events by it for bulk
+triage (\S\ref{sec:website}, DD-052). A Paris-based account can announce
+something happening elsewhere, however, so the property describes who
+posted, not necessarily where the event is. That the first bulk-filtered
+batch matched the reviewer's manual judgement in practice is evidence
+the heuristic works for the common case, not evidence that it is correct
+for every event it groups.
+
 
 % ============================================================================
 \chapter{System Implementation: The Hub Cultural Platform}
@@ -1102,15 +1131,21 @@ by switching providers within ninety seconds.
 The public artifact is a static site: \texttt{5\_export\_dashboard\_data.py}
 reads the graph and writes a single JSON file, and
 \texttt{site/} contains hand-written HTML, CSS and vanilla JavaScript
-that consumes it, deployed on Cloudflare Pages. There is no backend, no
-framework and no build step, which is a deliberate consequence of the
-dataset's size — the publishable events fit comfortably in a file of a
-few hundred kilobytes — and of the deployment constraint that the site
-must be reconnectable from a plain repository without configuration
-(DD-043, DD-044). The export is read-only and can be re-run after any
-extraction or resolution pass to refresh the site.
+that consumes it, deployed to Cloudflare Workers as a static-assets
+bundle (\texttt{site/wrangler.jsonc}, Workers Assets). There is no
+backend, no framework and no build step, which is a deliberate
+consequence of the dataset's size — the publishable events fit
+comfortably in a file of a few hundred kilobytes — and of the deployment
+constraint that the site must be reconnectable from a plain repository
+without configuration (DD-043, DD-044). The export is read-only and can
+be re-run after any extraction or resolution pass to refresh the data
+file, but regenerating that file and publishing it are two separate
+manual steps: neither a \texttt{git push} nor running the export script
+triggers \texttt{wrangler deploy}, a gap that went unnoticed for some
+time because the site had already been deployed once with older data and
+so never looked broken, only stale (DD-053).
 
-Four design decisions are worth reporting as part of the thesis's applied
+Six design decisions are worth reporting as part of the thesis's applied
 contribution.
 
 \textbf{The category menu is fully dynamic.} There is no editorial list
@@ -1142,6 +1177,43 @@ organiser-profile or methodology pages. This was a scoping decision:
 those screens are more legible as thesis material than as product, and
 the remaining screens (Explore, Map, organiser profiles) are listed as
 future work in \S\ref{sec:future-work}.
+
+\textbf{Publication is gated by human review, not by the extraction
+pipeline alone.} Every \texttt{:Event} node is created with a second
+label, \texttt{:PendingReview}, and both the JSON export and the Excel
+export exclude it by default, so a newly detected event stays invisible
+on the live site until it has been triaged. Triage happens in
+\texttt{review\_events.py}, a small local Streamlit application with
+three actions per event — approve (removes the label), edit (an inline
+form that rewrites fields directly on the node), and reject — where
+reject is deliberately soft, adding a \texttt{:Rejected} label rather
+than deleting the node, so a mistaken rejection is always recoverable
+(DD-047). This reuses the same label-based status pattern already used
+for the automated Layer-3 gate (\S\ref{sec:event-pipeline}) rather than
+introducing a second status system for human decisions. In practice, the
+first real batch of pending events showed that most out-of-scope items
+shared one property — a \texttt{geoZone} outside France, inherited from
+the publishing account at creation time — and reviewing those one by one
+was disproportionate to the judgement each one required, so the
+interface was extended with a filter on that property and a bulk-reject
+action scoped to whatever the filter currently shows (DD-052). The
+trade-off is explicit and unresolved: \texttt{geoZone} describes the
+account, not the event, so the bulk action is a heuristic for the
+common case rather than a per-event guarantee, and it remains at the
+reviewer's discretion to apply.
+
+\textbf{Event content is bilingual only going forward, by design.} The
+interface text — menus, filters, labels — already switched between
+Spanish and French; the content of individual events did not, because
+\texttt{title} and \texttt{description} were written once, in Spanish
+only, by Layer 3 (\S\ref{sec:event-pipeline}). Rather than translate the
+existing corpus after the fact, French versions are now generated by the
+same LLM call that extracts the event (DD-051), and the frontend falls
+back to the Spanish text whenever the French field is absent rather than
+leaving a blank card. The scope was deliberately narrowed to new events
+only, so the two language modes are not at parity and will not be until
+either enough of the corpus is re-extracted or a backfill pass is run;
+translation quality has also not yet been separately validated.
 
 \todo{Include two or three screenshots here rather than only in
 Appendix~\ref{app:screenshots}, once the site has been reviewed in a real
@@ -1602,10 +1674,18 @@ cycle prioritising cheap profile scraping before expensive post scraping;
 a literature label added to the event taxonomy and a backfill decision
 for \texttt{eventArtTags} (DD-042); resolution of the open question in
 DD-035 on ongoing exhibitions; normalisation of stylised Unicode digits
-in captions if confirmed frequent (DD-036); and the remaining site
+in captions if confirmed frequent (DD-036); the remaining site
 screens — clickable arrondissement and commune map, Explore, Map, and
-organiser-profile pages, per-event bilingual text generated at extraction
-time, and a generic category image set.}
+organiser-profile pages, and a generic category image set; a backfill
+decision for \texttt{titleFr}/\texttt{descriptionFr} on events created
+before DD-051, together with a first quality check of the translations
+it produces; whether DeepSeek should remain in the default cloud cascade
+at all, given the empty-response failures of DD-050; collapsing the
+export and deploy steps (\S\ref{sec:website}) into a single command so
+publishing stops being the step that gets forgotten (DD-053); and
+resolving why a second, stale \texttt{.workers.dev} subdomain exists
+alongside the real deployment target, in case it is a forgotten
+deployment rather than an intentional alias.}
 
 \section{Closing Reflection}
 \todo{Personal note tying back to the fourth objective of
@@ -1636,7 +1716,7 @@ Label & Origin & Notes \\
 \texttt{:Hashtag} & Ingestion & \\
 \texttt{:Track} & Ingestion & Audio track used in a post \\
 \texttt{:Location} & Ingestion / events & Geocoded in phase 6 \\
-\texttt{:Event} & Event pipeline & Created only when the layer-3 gate passes \\
+\texttt{:Event} & Event pipeline & Created only when the layer-3 gate passes; also \texttt{:PendingReview} until a human approves it, or \texttt{:Rejected} if declined (soft reject, never deleted) \\
 \texttt{:Arrondissement} & Geocoding & Derived from postal codes 750XX \\
 \texttt{:City} & Geocoding & \\
 \texttt{:Country} & Geocoding & \\
@@ -1678,9 +1758,14 @@ for the argument: DD-006 (seed strategy), DD-013 (GDS to igraph),
 DD-018 (Nominatim), DD-026 (seed source versus cultural target),
 DD-031/032 (geographic misclassification), DD-034/037/039 (date
 extraction failures), DD-036 (the 495-post retuning), DD-040/041
-(resolver redesign and geographic guardrail), and DD-043/044 (export and
-site). Note in a preamble that the log is written in Spanish and that
-these are the author's translations.}
+(resolver redesign and geographic guardrail), DD-043/044 (export and
+site), DD-047 (the \texttt{:PendingReview} staging gate and its
+human-review interface), DD-050 (the DeepSeek empty-content failure and
+cloud-provider cascade reorder), DD-051 (bilingual event extraction),
+DD-052 (the \texttt{geoZone} review filter and its account-versus-event
+caveat), and DD-053 (the manual deploy step and the two-subdomain
+confusion it exposed). Note in a preamble that the log is written in
+Spanish and that these are the author's translations.}
 
 \chapter{Evaluation Protocol and Samples}
 \todo{New appendix. Reproduce the classification criterion used for
