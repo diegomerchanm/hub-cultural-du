@@ -927,7 +927,16 @@ def _deepseek_request(caption: str, anchor_date: str, label: str = "", include_r
                 time.sleep(min(wait, MAX_RATE_LIMIT_WAIT_S))
                 continue
             resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"]
+            choice = resp.json()["choices"][0]
+            content = choice["message"]["content"]
+            if not content:
+                # Hallazgo 2026-08-24: DeepSeek a veces devuelve 200 con
+                # content vacío bajo carga (no un 429/error explícito) —
+                # json.loads("") daría el mismo JSONDecodeError genérico de
+                # siempre, pero acá lo distinguimos explícitamente y
+                # logueamos finish_reason (length/content_filter/etc.) para
+                # saber la causa real la próxima vez que pase.
+                raise ValueError(f"content vacío, finish_reason={choice.get('finish_reason')!r}")
             print(f"  🪙 DeepSeek [{label}] ~{est_tokens} tok", flush=True)
             return json.loads(content)
         except Exception as e:
@@ -1156,18 +1165,25 @@ def llm_enrich_event_deepseek(caption: str, post_timestamp: str = "", label: str
 # de este fix). Ollama queda fuera: no tiene cupo diario que se agote, y
 # mezclar local+nube automáticamente no es lo que se pidió.
 #
-# Orden pedido por Diego (2026-08-21): groq -> google -> deepseek -> cerebras,
-# a medida que cada uno se va agotando/fallando. Groq/google/cerebras tienen
-# tier gratis con cupo diario que efectivamente "se acaba"; deepseek no —
-# es pago por token (el más barato del mercado), así que en la práctica
-# nunca "falla por cupo agotado" salvo que la cuenta se quede sin saldo o
-# tope de gasto configurado. El orden de este dict ES el orden de fallback
-# (Python preserva el orden de inserción) cuando LLM_PROVIDER="groq" (default).
+# Orden original pedido por Diego (2026-08-21): groq -> google -> deepseek ->
+# cerebras. Reordenado 2026-08-24 tras observar en una corrida real de 315
+# posts que DeepSeek falla con más frecuencia que los otros tres, pero de
+# forma distinta a lo esperado: no es 429/cupo agotado, es la API
+# devolviendo HTTP 200 con message.content VACÍO (revienta json.loads con
+# "Expecting value: line 1 column 1 (char 0)", ver _deepseek_request) —
+# probablemente el motor de inferencia cortando bajo carga sin devolver un
+# error explícito. Como además es el único proveedor pago de los cuatro
+# (groq/google/cerebras son gratis con cupo diario), no tiene sentido
+# intentarlo antes que una alternativa gratis y más estable — se movió al
+# final, después de Cerebras (que en esa misma corrida real no falló ni una
+# vez, ver decisions_es.md DD-050). El orden de este dict ES el
+# orden de fallback (Python preserva el orden de inserción) cuando
+# LLM_PROVIDER="groq" (default).
 _CLOUD_PROVIDERS = {
     "groq":     llm_enrich_event_groq,
     "google":   llm_enrich_event_google,
-    "deepseek": llm_enrich_event_deepseek,
     "cerebras": llm_enrich_event_cerebras,
+    "deepseek": llm_enrich_event_deepseek,
 }
 _provider_failed_this_run: set = set()
 
