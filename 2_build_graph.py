@@ -109,7 +109,16 @@ def load_profile(tx, p):
 
 
 # ── 3. POSTS ──────────────────────────────────────────────────────────────────
-def load_posts(tx, username, posts):
+def load_posts(tx, username, posts, source="unknown"):
+    """source: "dedicated_scraper" (1_harvest_ig_posts.py, respeta la ventana
+    onlyPostsNewerThan verificada localmente) o "profile_embed" (latestPosts
+    embebido en profile_<username>.json de 1_harvest_ig_profiles.py — SIN
+    ninguna garantía de ventana de días; ver decisions_es.md, hallazgo
+    2026-08-24: 4,579/5,269 posts embebidos en perfiles NO pasaron nunca por
+    el scraper dedicado). Un mismo post puede llegar por ambas vías a lo
+    largo del tiempo, así que los dos flags son acumulativos (OR con el valor
+    previo vía coalesce), nunca se pisan a false — el nodo recuerda todo
+    origen por el que alguna vez pasó, no solo el más reciente."""
     for post in posts:
         pid = post.get("id")
         if not pid:
@@ -133,7 +142,11 @@ def load_posts(tx, username, posts):
                 p.videoDuration      = $videoDuration,
                 p.displayUrl         = $displayUrl,
                 p.productType        = $productType,
-                p.isCommentsDisabled = $isCommentsDisabled
+                p.isCommentsDisabled = $isCommentsDisabled,
+                p.sourceDedicatedScraper = CASE WHEN $source = 'dedicated_scraper'
+                                                 THEN true ELSE coalesce(p.sourceDedicatedScraper, false) END,
+                p.sourceProfileEmbed     = CASE WHEN $source = 'profile_embed'
+                                                 THEN true ELSE coalesce(p.sourceProfileEmbed, false) END
             MERGE (a)-[:PUBLISHED]->(p)
         """,
             username           = username,
@@ -150,6 +163,7 @@ def load_posts(tx, username, posts):
             videoDuration      = post.get("videoDuration", 0.0) or 0.0,
             displayUrl         = post.get("displayUrl", ""),
             productType        = post.get("productType", ""),
+            source             = source,
             isCommentsDisabled = post.get("isCommentsDisabled", False),
         )
 
@@ -355,10 +369,11 @@ def process_account(username):
 
             session.execute_write(load_profile, profile)
 
-            # latestPosts dentro del perfil
+            # latestPosts dentro del perfil — SIN garantía de ventana de días
+            # (ver docstring de load_posts): trazado como source="profile_embed"
             latest = profile.get("latestPosts", [])
             if latest:
-                session.execute_write(load_posts, username, latest)
+                session.execute_write(load_posts, username, latest, "profile_embed")
 
             # IGTV
             igtv = profile.get("latestIgtvVideos", [])
@@ -371,11 +386,12 @@ def process_account(username):
         else:
             print(f"  ⚠️  Sin perfil para @{username}")
 
-        # Posts separados (más completos)
+        # Posts separados (más completos) — vienen del scraper dedicado,
+        # que sí verifica localmente la ventana onlyPostsNewerThan (DD-029)
         if os.path.exists(posts_path):
             with open(posts_path, "r", encoding="utf-8") as f:
                 posts = json.load(f)
-            session.execute_write(load_posts, username, posts)
+            session.execute_write(load_posts, username, posts, "dedicated_scraper")
             print(f"  📸 {len(posts)} posts cargados")
 
 

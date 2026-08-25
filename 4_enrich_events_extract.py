@@ -72,7 +72,7 @@ import random
 import re
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import numpy as np
@@ -115,15 +115,21 @@ GROQ_MODEL    = "openai/gpt-oss-120b"
 # se usa esta capa de compatibilidad en vez de la API nativa de Gemini
 # (generateContent) para reutilizar el mismo shape de request/response que
 # Groq/Cerebras (messages + response_format json_object) sin duplicar lógica.
-# Modelo: gemini-2.5-flash-lite — dentro del tier gratis (sin tarjeta) es el
-# que más cupo diario de request tiene de los tres modelos gratis de Gemini
-# (confirmado en ai.google.dev/gemini-api/docs/rate-limits el 2026-08-21;
-# los números exactos de RPM/TPM/RPD por tier viven en un dashboard interactivo
-# — aistudio.google.com/rate-limit — no en una tabla estática, así que los
-# de abajo son conservadores/aproximados, no un valor oficial confirmado dígito
-# a dígito). Igual que Groq/Cerebras: gratis con throttling, no pago por token.
+# Modelo: gemini-3.5-flash-lite. Originalmente se eligió gemini-2.5-flash-lite
+# por ser, dentro del tier gratis (sin tarjeta), el de más cupo diario de los
+# tres modelos gratis de Gemini (confirmado en ai.google.dev/gemini-api/docs/
+# rate-limits el 2026-08-21). Cambiado a 3.5 el 2026-08-24 tras un 404 real en
+# producción: Google descontinuó 2.5-flash-lite para cuentas nuevas
+# ("This model models/gemini-2.5-flash-lite is no longer available to new
+# users... use models/gemini-3.5-flash-lite", error NOT_FOUND confirmado con
+# la propia API key de Diego). No se re-verificaron los límites de cupo/RPM
+# de 3.5-flash-lite contra el dashboard — los de abajo siguen siendo los
+# aproximados heredados de 2.5, pendiente de confirmar si difieren. Los
+# números exactos de RPM/TPM/RPD por tier viven en un dashboard interactivo
+# — aistudio.google.com/rate-limit — no en una tabla estática. Igual que
+# Groq/Cerebras: gratis con throttling, no pago por token.
 GOOGLE_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-GOOGLE_MODEL    = "gemini-2.5-flash-lite"
+GOOGLE_MODEL    = "gemini-3.5-flash-lite"
 
 # Endpoint OpenAI-compatible de DeepSeek (api-docs.deepseek.com). A diferencia
 # de Groq/Google/Cerebras, DeepSeek NO tiene tier gratis — es pago por token,
@@ -1528,6 +1534,8 @@ def run_extraction(
     dry_run: bool           = False,
     accounts: list[str]     = None,
     diag_csv: str           = None,
+    max_post_age_days: int  = 20,
+    only_dedicated_scraper: bool = True,
 ):
     t_start = time.time()
     print("\n🎭 Fase 4-B — Extracción de Eventos (3 capas)")
@@ -1545,6 +1553,8 @@ def run_extraction(
     print(f"  L1≥{layer1_threshold}  L2≥{layer2_threshold}  "
           f"max_posts={max_posts or '∞'}  batch={batch_size}  "
           f"sim≥{sim_threshold}  date±{date_window}d  "
+          f"max_post_age={max_post_age_days}d  "
+          f"solo_scraper_dedicado={only_dedicated_scraper}  "
           f"Capa3={capa3_status}")
     if accounts:
         print(f"  Filtro cuentas: {accounts}")
@@ -1561,19 +1571,41 @@ def run_extraction(
     skip_clause  = f"SKIP {skip_posts}" if skip_posts > 0 else ""
     limit_clause = f"LIMIT {max_posts}" if max_posts > 0 else ""
     account_filter = "AND a.username IN $accounts" if accounts else ""
+    # Filtro de recencia (hallazgo 2026-08-24, decisions_es.md): posts
+    # embebidos en profile_<username>.json (source="profile_embed", ver
+    # 2_build_graph.py) NUNCA pasan por la ventana onlyPostsNewerThan
+    # verificada del scraper dedicado — pueden ser de cualquier antigüedad.
+    # Comparación de string (los primeros 10 chars de un timestamp ISO
+    # ordenan igual que la fecha real) en vez de datetime(p.timestamp) para
+    # no reventar la query si algún timestamp viene malformado/vacío.
+    age_filter = ""
+    cutoff_date_str = None
+    if max_post_age_days and max_post_age_days > 0:
+        cutoff_date_str = (datetime.now(timezone.utc) - timedelta(days=max_post_age_days)).strftime("%Y-%m-%d")
+        age_filter = "AND p.timestamp IS NOT NULL AND substring(p.timestamp, 0, 10) >= $cutoffDate"
+    # Filtro de origen (2026-08-24): usa la firma de arquitectura del JSON que
+    # 2_build_graph.py ya traduce a p.sourceDedicatedScraper — true solo si
+    # ese post id alguna vez se cargó desde posts_<username>.json (el actor
+    # apify/instagram-post-scraper, que sí trae latestComments/musicInfo/
+    # productType y pasó por la ventana onlyPostsNewerThan verificada). Los
+    # posts que SOLO llegaron embebidos en profile_<username>.json
+    # (latestPosts del actor de perfil) quedan fuera por defecto.
+    source_filter = "AND p.sourceDedicatedScraper = true" if only_dedicated_scraper else ""
     with driver.session() as session:
         posts = session.run(f"""
             MATCH (a:Account)-[:PUBLISHED]->(p:Post)
             WHERE p.caption IS NOT NULL
               AND size(p.caption) >= {MIN_CAPTION_LEN}
               AND (p.eventExtracted IS NULL OR p.eventExtracted = false)
+              {age_filter}
+              {source_filter}
               {account_filter}
             RETURN p.id            AS id,
                    p.caption       AS caption,
                    p.likesCount    AS likes,
                    p.commentsCount AS comments,
                    p.timestamp     AS timestamp,
-                   p.hashtags      AS hashtags,
+                   [(p)-[:HAS_HASHTAG]->(h:Hashtag) | h.name] AS hashtags,
                    p.url           AS url,
                    a.username      AS author,
                    a.artType             AS artType,
@@ -1587,7 +1619,7 @@ def run_extraction(
             ORDER BY p.id
             {skip_clause}
             {limit_clause}
-        """, accounts=accounts or []).data()
+        """, accounts=accounts or [], cutoffDate=cutoff_date_str).data()
 
     if not posts:
         print("  ✅ No hay posts pendientes.")
@@ -2066,7 +2098,24 @@ def run_extraction(
         for cat, n in sorted(dry_counts.items(), key=lambda x: -x[1]):
             print(f"    {n:>4}  {cat}")
 
-    if not dry_run or not diag_cands:
+    # Cuántos quedan pendientes tras esta corrida: misma query de candidatos
+    # (mismos filtros de edad/origen/cuenta), sin SKIP/LIMIT, contando en vez
+    # de traer filas. En modo real esto ya refleja el eventExtracted=true que
+    # se acaba de marcar en este batch (se corre después de esas escrituras).
+    with driver.session() as session:
+        pending = session.run(f"""
+            MATCH (a:Account)-[:PUBLISHED]->(p:Post)
+            WHERE p.caption IS NOT NULL
+              AND size(p.caption) >= {MIN_CAPTION_LEN}
+              AND (p.eventExtracted IS NULL OR p.eventExtracted = false)
+              {age_filter}
+              {source_filter}
+              {account_filter}
+            RETURN count(p) AS n
+        """, accounts=accounts or [], cutoffDate=cutoff_date_str).single()["n"]
+    print(f"  ⏳ Posts pendientes aún (mismo filtro, sin contar este batch): {pending}")
+
+    if not diag_cands:
         return
 
     # ── DIAGNÓSTICO (dry-run) ─────────────────────────────────────────────────
@@ -2190,6 +2239,19 @@ def main(
         None, "--diag-csv",
         help="Solo con --dry-run: exporta el diagnóstico completo (todos los posts, no solo ejemplos) a este CSV.",
     ),
+    max_post_age_days: int = typer.Option(
+        20, "--max-post-age-days",
+        help="Ignora posts con p.timestamp más viejo que N días (0 = sin filtro). Existe porque los posts "
+             "embebidos en profile_<username>.json (latestPosts) NUNCA pasan por la ventana onlyPostsNewerThan "
+             "verificada del scraper dedicado de posts — pueden ser arbitrariamente viejos. Default 20 (un poco "
+             "más laxo que los 10 días de --days en 1_harvest_ig_posts.py, de margen).",
+    ),
+    only_dedicated_scraper: bool = typer.Option(
+        True, "--only-dedicated-scraper/--include-profile-embed",
+        help="Por defecto solo procesa posts con p.sourceDedicatedScraper=true (vinieron de "
+             "1_harvest_ig_posts.py, con ventana de días verificada). --include-profile-embed también "
+             "admite posts que solo llegaron embebidos en el perfil (latestPosts), sin esa garantía.",
+    ),
 ):
     """
     Fase 4-B: extracción de eventos en 3 capas.
@@ -2229,6 +2291,8 @@ def main(
         dry_run=dry_run,
         accounts=accounts_list,
         diag_csv=diag_csv,
+        max_post_age_days=max_post_age_days,
+        only_dedicated_scraper=only_dedicated_scraper,
     )
 
     driver.close()
