@@ -3,7 +3,11 @@ __pycache__/
 venv/
 data_raw/
 .apify_cost_log.json
+.apify_network_cost_log.json
+.hikerapi_cost_log.json
 .geocoding_log.json
+test_10_seeds.txt
+hikerapi_seeds_batch2.txt
 data_processed/
 data_processed/runs/
 ref_embeddings.npz
