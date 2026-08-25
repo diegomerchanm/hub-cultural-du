@@ -15,6 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 6. **Geo** — `4_enrich_locations.py` → Nominatim geocoding + `:LOCATED_IN` hierarchy
 7. **Cleanup** — `cleanup_legacy_accounts.py` → one-off (repeatable) deletion of `:Account` nodes never touched by manual curation, plus everything that depends exclusively on them (see below)
 8. **Staging review** — `review_events.py` (Streamlit) → Diego reviews every newly-created `:Event` (tagged `:PendingReview` at creation by `4_enrich_events_extract.py`) before it reaches the live site: aprobar (removes `:PendingReview`), editar (inline form, saves fields), or rechazar (soft — adds `:Rejected`, never a real delete). `5_export_dashboard_data.py` and `export_events_excel.py` exclude both `:Rejected` and `:PendingReview` by default.
+9. **Publish** — `5_export_dashboard_data.py` writes `site/data.json`, but that alone does NOT update the live site: `site/` deploys to Cloudflare Workers via `wrangler.jsonc` (Workers Assets, static files served from `site/`), a separate manual step (`cd site && npx wrangler deploy`) with no automatic trigger from `git push` or from running the export script. Forgetting this step is the most likely reason newly-approved events don't show up on the live site even after export + `git push` both succeeded (confirmed 2026-08-25 — DD-053).
 
 **Folder conventions:** `old/` holds scripts that are superseded or don't work in this project's actual environment (kept for reference, not run). `testing/` holds verification/diagnostic scripts (`verify_events_extraction.py`, `check_geotag_coverage.py`, `test.py`, `plot_eventscore_boxplot.py`) that are still useful for QA but aren't part of the main pipeline flow.
 
@@ -41,6 +42,8 @@ python 4_enrich_locations.py                # Phase 6: geocode :Location + hiera
 python cleanup_legacy_accounts.py --dry-run # Phase 7: preview deletion of non-curated accounts (exact counts, rolls back)
 python cleanup_legacy_accounts.py           #   delete for real (asks for typed confirmation first)
 streamlit run review_events.py              # Phase 8: staging review UI — approve/edit/reject :PendingReview events
+python 5_export_dashboard_data.py           # Phase 9a: regenerate site/data.json from Neo4j (run AFTER approving in Streamlit)
+cd site && npx wrangler deploy              # Phase 9b: actually publish to the live Cloudflare Workers site — the step people forget
 
 # Key options
 python 4_enrich_events_extract.py --threshold 0.6 --max-posts 500 --dry-run

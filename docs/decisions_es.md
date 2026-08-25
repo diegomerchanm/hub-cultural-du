@@ -1065,6 +1065,15 @@ Costo estimado del scrape de 50 perfiles: trivial (~$0.03-0.20 según el precio 
 
 ---
 
+**DD-053 — El deploy del sitio es un paso manual aparte (Cloudflare Workers / Wrangler), no automático (2026-08-25).** Diego corrió `5_export_dashboard_data.py` después de aprobar eventos en `review_events.py` y de hacer `git push`, pero el sitio en vivo (`hub-cultural.diegomerchanm.workers.dev`) seguía sin mostrar los eventos nuevos. Diagnóstico: `site/wrangler.jsonc` confirma que el sitio se sirve como Cloudflare Workers Assets (archivos estáticos de `site/`), desplegado con `npx wrangler deploy` desde esa carpeta — un comando manual, sin ningún trigger automático desde `git push` ni desde correr el script de export. Confirmado con evidencia directa: `git log` mostraba el último commit a `site/data.json` el 18 de agosto (muy anterior a toda la sesión de hoy), mientras que el archivo en disco tenía timestamp de minutos antes (el export sí había corrido bien, solo que nunca se publicó).
+
+- **Fix:** `CLAUDE.md` actualizado — nueva fase 9 del pipeline ("Publish"), separada en 9a (`5_export_dashboard_data.py`, regenera `site/data.json`) y 9b (`cd site && npx wrangler deploy`, el paso que se estaba salteando).
+- **No resuelto / desconocido:** no está claro por qué nunca se había corrido `wrangler deploy` antes en ninguna sesión visible para mí — el sitio ya estaba en vivo con datos de antes, así que en algún momento sí se desplegó (posiblemente desde la máquina de Diego, fuera de cualquier sesión de Cowork/Claude, o vía el dashboard de Cloudflare en vez del CLI). No se investigó más a fondo.
+- Al correr `wrangler deploy` por primera vez en esta sesión, la CLI detectó agentes de código IA (Claude Code, GitHub Copilot) y ofreció instalar "Cloudflare skills" — Diego aceptó (`Y`), es una función oficial de Wrangler, no representa riesgo.
+- **Pendiente:** evaluar si vale la pena automatizar 9a+9b en un solo script/alias, para que este paso deje de olvidarse — mencionado como idea, no implementado todavía (Diego no lo pidió explícitamente, solo documentar el flujo).
+
+---
+
 **Tesis:** `thesis/main.tex` — outline completo en LaTeX/inglés, revisado por un agente Opus (correcciones factuales sobre este mismo decision log, capítulos 3–5 completados con prosa real anclada en runs/decisiones reales, nueva §3.7 "Evaluation Design"). Gaps pendientes: sin `references.bib`, sin postura ética explícita sobre ToS de Instagram, sin figura del pipeline ni capturas del sitio, cifra de "73–83 comunidades" sin validar contra una corrida real antes de citarla.
 
 ---
