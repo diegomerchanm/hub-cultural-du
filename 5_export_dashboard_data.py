@@ -146,14 +146,14 @@ WITH e, l
 // por esa propiedad devuelve 0 resultados. Se retira el filtro acá; la
 // detección de coordenadas-fallback se hace en Python después de traer los
 // datos (_filter_fallback_coordinates), sin depender de esta propiedad.
-RETURN e.id AS id, e.title AS title, e.category AS category, e.type AS type,
+RETURN e.id AS id, e.title AS title, e.titleFr AS titleFr, e.category AS category, e.type AS type,
        e.eventArtTags AS eventArtTags, e.artType AS artType,
        e.eventDate AS eventDate, e.locationName AS locationName,
        e.cityName AS cityName, e.exactAddress AS exactAddress,
        l.lat AS lat, l.lon AS lon,
        e.hotnessScore AS hotnessScore, e.eventScore AS eventScore,
        e.confidence AS confidence, e.postCount AS postCount,
-       e.description AS description, e.priceRange AS priceRange,
+       e.description AS description, e.descriptionFr AS descriptionFr, e.priceRange AS priceRange,
        e.sourcePostUrl AS sourcePostUrl, e.sourceAuthor AS sourceAuthor,
        e.sourcePostDate AS sourcePostDate,
        e.culturalIdentity AS culturalIdentity, e.geoZone AS geoZone,

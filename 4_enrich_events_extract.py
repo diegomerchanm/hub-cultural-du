@@ -593,8 +593,10 @@ def _llm_schema_hint(include_reasoning: bool) -> str:
   "city": string o null,           // ciudad donde ocurre el EVENTO — solo si el caption la menciona o es inequívoca por contexto; NUNCA la ciudad de la cuenta/institución que publica si el caption no la confirma
   "exact_address": string o null,  // dirección o venue específico (calle, número, nombre del lugar) SOLO si aparece textualmente en el caption Y nombra un lugar físico real y concreto (edificio, calle, plaza, institución con nombre propio) — NUNCA una palabra genérica, un verbo, el nombre de una persona, una marca sin dirección, o el título de una campaña/evento; si no hay algo así de concreto, null — no repitas aquí solo el nombre de la ciudad
   "clean_date": string "YYYY-MM-DD" o null,  // fecha real del evento, razonada por contexto
-  "clean_description": string,   // 1-2 oraciones sin emojis/hashtags/menciones, para dashboard
-  "title": string,                // título editorial corto (6-10 palabras), sin emojis/hashtags, para mostrar como encabezado de la tarjeta del evento — no repitas la categoría, describe el evento concreto
+  "clean_description": string,   // 1-2 oraciones sin emojis/hashtags/menciones, para dashboard, EN ESPAÑOL
+  "title": string,                // título editorial corto (6-10 palabras), sin emojis/hashtags, para mostrar como encabezado de la tarjeta del evento — no repitas la categoría, describe el evento concreto. EN ESPAÑOL
+  "description_fr": string,      // MISMO contenido que clean_description, pero traducido al FRANCÉS — mismo criterio (1-2 oraciones, sin emojis/hashtags/menciones, nombres propios sin traducir)
+  "title_fr": string,             // MISMO contenido que title, pero traducido al FRANCÉS — mismo criterio (6-10 palabras, sin emojis/hashtags, nombres propios sin traducir)
   "price_range": string o null,    // precio tal como aparece en el caption, ej. "Gratis", "Entrada libre", "30€ individual / 50€ grupo", "10€ sugerido" — usa una de esas frases tipo "Gratis"/"Entrada libre" si el caption dice explícitamente que no cuesta; null si el texto no menciona nada sobre precio, no asumas
   "art_tags": array de strings     // 1-3 etiquetas cortas (máx 3 palabras cada una) que describan la disciplina/medio artístico de ESTE evento concreto — más granular que "type", pensado como filtro clickeable. Reusá temas conocidos si aplican: "Música", "Danza", "Teatro", "Circo", "Literatura", "Cine", "Fotografía", "Artes visuales", "Moda", "Gastronomía", "Arquitectura", "Cómic" — pero si ninguno describe bien el evento, proponé uno nuevo corto. NUNCA uses paréntesis ni frases largas ni explicaciones dentro de cada tag (nada de "Multidisciplinario (música, historia)") — cada tag es una palabra o frase corta suelta, sin comas dentro del tag. Si el evento no tiene ningún componente artístico claro (p.ej. trámite consular, comunicado), devolvé una lista vacía [].{reasoning_line}
 }}"""
@@ -640,9 +642,11 @@ def _build_llm_prompt(caption: str, anchor_date: str, include_reasoning: bool = 
         "una.\n"
         "IMPORTANTE — idioma: title y clean_description deben estar en ESPAÑOL, sin importar "
         "el idioma del caption original (aunque esté en francés o inglés) — el público de este "
-        "hub es la diáspora colombiana/latinoamericana en Francia. Excepción: mantén sin "
-        "traducir los nombres propios (lugares, instituciones, títulos de eventos) tal como "
-        "aparecen en el caption.\n\n"
+        "hub es la diáspora colombiana/latinoamericana en Francia. Además, generá title_fr y "
+        "description_fr: son la traducción al FRANCÉS de title/clean_description (el sitio "
+        "también se muestra en francés) — mismo contenido, mismo criterio de longitud, pero en "
+        "francés. En AMBOS idiomas: mantené sin traducir los nombres propios (lugares, "
+        "instituciones, títulos de eventos) tal como aparecen en el caption.\n\n"
         f"{_llm_schema_hint(include_reasoning)}"
     )
 
@@ -1055,6 +1059,8 @@ _LLM_DEFAULTS = {
     "clean_date":           None,
     "clean_description":    None,
     "title":                None,
+    "description_fr":       None,
+    "title_fr":             None,
     "price_range":          None,
     "art_tags":             [],
     "reasoning":            None,
@@ -1094,6 +1100,8 @@ def _extract_llm_fields(data: Optional[dict]) -> dict:
         "clean_date":           data.get("clean_date") or None,
         "clean_description":    data.get("clean_description") or None,
         "title":                data.get("title") or None,
+        "description_fr":       data.get("description_fr") or None,
+        "title_fr":             data.get("title_fr") or None,
         "price_range":          data.get("price_range") or None,
         "art_tags":             _clean_art_tags(data.get("art_tags")),
         "reasoning":            data.get("reasoning") or None,
@@ -1465,6 +1473,8 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
                 e.embedding    = $embedding,
                 e.createdAt    = datetime(),
                 e.description        = $description,
+                e.titleFr            = $titleFr,
+                e.descriptionFr      = $descriptionFr,
                 e.isPublicInvitation = $isPublicInvitation,
                 e.isUpcoming         = $isUpcoming,
                 e.priceRange         = $priceRange,
@@ -1482,7 +1492,8 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
             "id", "title", "type", "category", "rawDate", "eventDate",
             "locationName", "cityName", "exactAddress", "hotnessScore", "eventScore", "confidence",
             "layer1Score", "embedding",
-            "description", "isPublicInvitation", "isUpcoming", "priceRange", "eventArtTags", "llmReasoning",
+            "description", "titleFr", "descriptionFr",
+            "isPublicInvitation", "isUpcoming", "priceRange", "eventArtTags", "llmReasoning",
             "sourcePostUrl", "sourceAuthor", "sourcePostDate",
             "artType", "institutionType", "culturalIdentity", "geoZone", "parentInstitution",
         ]})
@@ -1787,6 +1798,7 @@ def run_extraction(
         # Ahora también tipifica el evento (reemplaza Capa 2b) y da price_range.
         is_public_invitation = is_upcoming = clean_description = llm_reasoning = None
         llm_title = llm_price_range = top_label = None
+        llm_description_fr = llm_title_fr = None
         llm_city = llm_exact_address = None
         llm_art_tags = []
         llm_penalty = 1.0
@@ -1845,6 +1857,8 @@ def run_extraction(
             clean_description    = llm_out.get("clean_description")
             llm_reasoning         = llm_out.get("reasoning")
             llm_title            = llm_out.get("title")
+            llm_description_fr   = llm_out.get("description_fr")
+            llm_title_fr         = llm_out.get("title_fr")
             llm_price_range      = llm_out.get("price_range")
             llm_art_tags         = llm_out.get("art_tags") or []
             if is_public_invitation is None or is_upcoming is None:
@@ -1933,6 +1947,8 @@ def run_extraction(
             "is_upcoming":          is_upcoming,
             "clean_description":    clean_description or "",
             "title":                llm_title or "",
+            "description_fr":       llm_description_fr or "",
+            "title_fr":             llm_title_fr or "",
             "price_range":          llm_price_range or "",
             "city":                 llm_city or "",
             "exact_address":        llm_exact_address or "",
@@ -2002,6 +2018,13 @@ def run_extraction(
             # fijan al crear el evento, nunca se sobreescriben al fusionar
             # (representan la publicación ORIGINAL, ver DD-033).
             "description":        clean_description or "",
+            # Traducción al francés (2026-08-24, DD-051) — mismo criterio que
+            # description/title de arriba: solo se fijan al CREAR el evento,
+            # nunca se sobreescriben al fusionar (ver upsert_event). Eventos
+            # creados antes de este cambio simplemente no tienen estas dos
+            # propiedades — el sitio cae al español si faltan (sin backfill).
+            "titleFr":             llm_title_fr or "",
+            "descriptionFr":       llm_description_fr or "",
             "isPublicInvitation":  is_public_invitation,
             "isUpcoming":          is_upcoming,
             "priceRange":          llm_price_range,

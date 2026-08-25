@@ -1046,6 +1046,16 @@ Costo estimado del scrape de 50 perfiles: trivial (~$0.03-0.20 según el precio 
 
 ---
 
+**DD-051 — Eventos bilingües ES/FR (2026-08-24).** El sitio ya tenía el botón ES/FR (`site/i18n.js`, `CURRENT_LANG`) funcionando para todo el texto de interfaz (menús, filtros, etiquetas), pero el contenido de cada evento (`title`/`description`) se usaba tal cual en `app.js` sin ninguna rama de idioma — 5 sitios distintos (tarjeta, hero, tooltip del mapa, panel de detalle, fila de "similares"). Diego pidió que los eventos también respondan al idioma, con alcance explícito: **solo eventos nuevos, sin backfill de los ya existentes.**
+
+- **LLM (`4_enrich_events_extract.py`):** se agregaron `title_fr`/`description_fr` al mismo JSON que ya le pedimos al LLM por post — misma llamada, sin requests extra, solo más tokens de salida. Instrucción añadida al prompt: son la traducción al francés de `title`/`clean_description`, mismo criterio de longitud, nombres propios sin traducir en ambos idiomas.
+- **Neo4j:** nuevas propiedades `titleFr`/`descriptionFr` en `:Event`, seteadas **solo en la rama de creación** de `upsert_event()` (igual que `description`/`sourceAuthor` — nunca se sobreescriben al fusionar con un evento existente, ver comentario ya existente sobre esto en el código). Como no hay backfill, los eventos creados antes de este cambio simplemente no tienen estas dos propiedades.
+- **Export (`5_export_dashboard_data.py`):** `EVENTS_QUERY` ahora también trae `e.titleFr`/`e.descriptionFr` — salen `null` para eventos viejos, se exportan igual (el filtrado de idioma pasa en el frontend, no acá).
+- **Frontend (`site/app.js`):** dos funciones nuevas, `evTitle(ev)`/`evDescription(ev)`, que devuelven la versión francesa si `CURRENT_LANG === "fr"` **y** el campo existe; si no, caen al español — así un evento viejo sin traducción se sigue viendo (en español) en vez de dejar un hueco vacío al cambiar a modo FR. Reemplazados los 5 usos directos de `ev.title`/`ev.description` (tarjeta, hero, tooltip del mapa, detalle, similares) por estas funciones. Como el botón de idioma ya disparaba `render()` desde antes, el cambio se refleja sin tocar la lógica de filtros/estado.
+- Verificado: `py_compile` en los dos scripts Python, `node --check` en `app.js`/`i18n.js`. **Pendiente:** correr una extracción de eventos real para confirmar que el LLM efectivamente devuelve `title_fr`/`description_fr` con buena calidad (no se validó calidad de traducción, solo que el pipe end-to-end no rompe) — y decidir si en algún momento vale la pena hacer backfill de los eventos viejos (fuera de alcance de este pedido puntual).
+
+---
+
 **Tesis:** `thesis/main.tex` — outline completo en LaTeX/inglés, revisado por un agente Opus (correcciones factuales sobre este mismo decision log, capítulos 3–5 completados con prosa real anclada en runs/decisiones reales, nueva §3.7 "Evaluation Design"). Gaps pendientes: sin `references.bib`, sin postura ética explícita sobre ToS de Instagram, sin figura del pipeline ni capturas del sitio, cifra de "73–83 comunidades" sin validar contra una corrida real antes de citarla.
 
 ---

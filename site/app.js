@@ -33,6 +33,14 @@ const PREFS_KEY = "hcdu_prefs";
 
 let DATA = { events: [], accounts: [] };
 let ACCOUNTS_BY_USER = {};
+
+/* Título/descripción del evento en el idioma actual (CURRENT_LANG, ver
+   i18n.js). Los campos *Fr solo existen en eventos creados desde el
+   2026-08-24 (DD-051) — 4_enrich_events_extract.py ya no hace backfill de
+   eventos viejos, así que si faltan, caemos al español en vez de dejar un
+   hueco vacío en modo FR. */
+function evTitle(ev) { return (CURRENT_LANG === "fr" && ev.titleFr) ? ev.titleFr : (ev.title || ""); }
+function evDescription(ev) { return (CURRENT_LANG === "fr" && ev.descriptionFr) ? ev.descriptionFr : (ev.description || ""); }
 let STATE = { geo: "all", when: "upcoming", theme: "all", free: false, sort: "recommended", view: "list" };
 
 /* ── Preferencias de sesión (sin login, ver sección 3.5 de la propuesta) ── */
@@ -282,7 +290,7 @@ function eventCardEl(ev, hotnessP80) {
     </div>
     <div class="event-card-body">
       <p class="event-card-date">${fmtDate(ev.eventDate)}</p>
-      <p class="event-card-title">${escapeHtml(ev.title || "")}</p>
+      <p class="event-card-title">${escapeHtml(evTitle(ev))}</p>
       <p class="event-card-loc"><i class="ti ti-map-pin" aria-hidden="true"></i>${escapeHtml(ev.exactAddress || ev.locationName || ev.cityName || "")}</p>
       <div class="event-card-foot">
         <span class="event-card-author">@${escapeHtml((ev.sourceAuthor || "").replace("@", ""))}</span>
@@ -340,8 +348,8 @@ function render() {
         <div class="hero-img" style="background:${heroMeta.color}"><i class="ti ${heroMeta.icon}" aria-hidden="true"></i></div>
         <div class="hero-body">
           <p class="hero-eyebrow"><i class="ti ti-sparkles" aria-hidden="true"></i>${t("heroEyebrow")}</p>
-          <p class="hero-title">${escapeHtml(hero.title || "")}</p>
-          <p class="hero-desc">${escapeHtml(hero.description || "")}</p>
+          <p class="hero-title">${escapeHtml(evTitle(hero))}</p>
+          <p class="hero-desc">${escapeHtml(evDescription(hero))}</p>
           <p class="hero-meta"><span>${fmtDate(hero.eventDate)}</span><span>${escapeHtml(hero.locationName || hero.cityName || "")}</span></p>
         </div>
       </div>`;
@@ -424,7 +432,7 @@ function renderMap(filtered) {
       iconAnchor: [8, 8],
     });
     const marker = L.marker([ev.lat, ev.lon], { icon }).addTo(markersLayer);
-    marker.bindTooltip(`${escapeHtml(ev.title || "")}<br>${fmtDate(ev.eventDate)}`, { direction: "top", offset: [0, -10] });
+    marker.bindTooltip(`${escapeHtml(evTitle(ev))}<br>${fmtDate(ev.eventDate)}`, { direction: "top", offset: [0, -10] });
     marker.on("click", () => openDetail(ev));
     bounds.push([ev.lat, ev.lon]);
   });
@@ -457,8 +465,8 @@ function openDetail(ev) {
     <div class="detail-grid">
       <div>
         <p class="detail-eyebrow">${fmtDate(ev.eventDate)}</p>
-        <h1 class="detail-title">${escapeHtml(ev.title || "")}</h1>
-        <p class="detail-desc">${escapeHtml(ev.description || "")}</p>
+        <h1 class="detail-title">${escapeHtml(evTitle(ev))}</h1>
+        <p class="detail-desc">${escapeHtml(evDescription(ev))}</p>
         <div class="info-box">
           <p class="info-box-label">${t("whatWeKnow")}</p>
           ${ev.exactAddress ? `<div class="info-row"><span class="k"><i class="ti ti-map-pin" aria-hidden="true"></i>${t("address")}</span><span>${escapeHtml(ev.exactAddress)}</span></div>` : ""}
@@ -468,7 +476,7 @@ function openDetail(ev) {
         ${ev.sourcePostUrl ? `<a class="cta-link" href="${ev.sourcePostUrl}" target="_blank" rel="noopener" onclick="bumpPref(null,null,2)"><i class="ti ti-external-link" aria-hidden="true"></i>${t("viewOriginal")}</a>` : ""}
         ${similar.length ? `<div style="margin-top:20px;border-top:1px solid var(--border);padding-top:12px">
           <p class="info-box-label">${t("similarEvents")}</p>
-          <div class="similar-row">${similar.map((s) => `<div class="similar-card" data-id="${s.id}"><p>${escapeHtml(s.title || "")}</p><p class="d">${fmtDate(s.eventDate)}</p></div>`).join("")}</div>
+          <div class="similar-row">${similar.map((s) => `<div class="similar-card" data-id="${s.id}"><p>${escapeHtml(evTitle(s))}</p><p class="d">${fmtDate(s.eventDate)}</p></div>`).join("")}</div>
         </div>` : ""}
         <details class="transparency">
           <summary>${t("detectionDetail")}</summary>
