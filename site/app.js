@@ -107,7 +107,36 @@ let ACCOUNTS_BY_USER = {};
    hueco vacío en modo FR. */
 function evTitle(ev) { return (CURRENT_LANG === "fr" && ev.titleFr) ? ev.titleFr : (ev.title || ""); }
 function evDescription(ev) { return (CURRENT_LANG === "fr" && ev.descriptionFr) ? ev.descriptionFr : (ev.description || ""); }
-let STATE = { geo: "all", when: "upcoming", theme: "all", free: false, sort: "recommended", view: "list" };
+let STATE = { geo: "all", when: "upcoming", theme: "all", free: false, sort: "recommended", userLocation: null };
+
+/* ── Geolocalización opcional (DD-057): reemplaza al mapa Leaflet, que
+   Diego pidió sacar del todo tras verlo desplegado con un filtro de color
+   que no terminó de andar bien. En vez de mostrar un mapa embebido, se le
+   puede pedir al visitante su ubicación (gesto explícito, nunca automático
+   al cargar la página) para ordenar los eventos por cercanía real —
+   no se persiste en localStorage ni se manda a ningún lado, vive solo en
+   memoria mientras dura la visita. */
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+function requestLocation() {
+  if (!navigator.geolocation) return;
+  const btn = document.getElementById("geo-locate-toggle");
+  if (btn) btn.disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      STATE.userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      STATE.sort = "distance";
+      render();
+    },
+    () => { render(); }, // permiso denegado o error -- no se cambia nada, solo se re-habilita el botón
+    { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 }
+  );
+}
 
 /* ── Preferencias de sesión (sin login, ver sección 3.5 de la propuesta) ── */
 function loadPrefs() {
@@ -301,11 +330,18 @@ function renderFilterBar() {
   freeBtn.classList.toggle("active", STATE.free);
   freeBtn.onclick = () => setState({ free: !STATE.free });
 
-  const mapBtn = document.getElementById("map-toggle");
-  mapBtn.classList.toggle("active", STATE.view === "map");
-  document.getElementById("map-toggle-label").textContent = STATE.view === "map" ? t("viewList") : t("viewMap");
-  mapBtn.querySelector("i").className = "ti " + (STATE.view === "map" ? "ti-list" : "ti-map-2");
-  mapBtn.onclick = () => setState({ view: STATE.view === "map" ? "list" : "map" });
+  const geoLocateBtn = document.getElementById("geo-locate-toggle");
+  geoLocateBtn.disabled = false;
+  geoLocateBtn.classList.toggle("active", !!STATE.userLocation);
+  geoLocateBtn.onclick = () => {
+    if (STATE.userLocation) {
+      STATE.userLocation = null;
+      if (STATE.sort === "distance") STATE.sort = "recommended";
+      render();
+    } else {
+      requestLocation();
+    }
+  };
 
   // DD-055/DD-056: con 50+ categorías/tags posibles, mostrarlas todas al
   // mismo tamaño era caótico. Primer intento (DD-055) agregaba una fila
@@ -342,7 +378,13 @@ function renderFilterBar() {
   });
 
   document.getElementById("sort-select").value = STATE.sort;
-  document.getElementById("sort-select").onchange = (e) => setState({ sort: e.target.value });
+  document.getElementById("sort-select").onchange = (e) => {
+    // Elegir "Cercanía" sin haber dado ubicación todavía dispara el
+    // permiso -- el sort se aplica recién cuando (si) el navegador
+    // resuelve la posición (ver requestLocation), no antes.
+    if (e.target.value === "distance" && !STATE.userLocation) { requestLocation(); return; }
+    setState({ sort: e.target.value });
+  };
 }
 function pillEl(label, count, active, onClick, tierClass, colorAccent) {
   const b = document.createElement("button");
@@ -365,6 +407,35 @@ function setState(patch) {
   render();
 }
 
+/* Solo se muestra cuando el visitante activó "Cerca de mí" -- si no hay
+   ubicación, no se calcula ninguna distancia por defecto. */
+function distanceLabel(ev) {
+  if (!STATE.userLocation || ev.lat == null || ev.lon == null) return "";
+  const km = haversineKm(STATE.userLocation.lat, STATE.userLocation.lon, ev.lat, ev.lon);
+  return ` · ${km < 1 ? Math.round(km * 1000) + " m" : km.toFixed(1) + " km"}`;
+}
+
+/* Foto real del post original (DD-057) cuando existe, con degradación al
+   diseño de color+ícono de siempre si falta o si la URL deja de cargar --
+   son links firmados de la CDN de Instagram, capturados en el momento del
+   scrape, y pueden expirar con el tiempo. El manejo de error se hace con
+   un listener real después de insertar el HTML (attachImageFallback), no
+   con un onerror inline: mucho más simple que escapar comillas dentro de
+   un atributo HTML a mano. */
+function imageBlockHtml(ev, meta, imgClass) {
+  if (!ev.imageUrl) return `<i class="ti ${meta.icon}" aria-hidden="true"></i>`;
+  return `<img src="${escapeHtml(ev.imageUrl)}" alt="" class="${imgClass}" loading="lazy">`;
+}
+function attachImageFallback(container, meta) {
+  const img = container && container.querySelector("img");
+  if (!img) return;
+  img.onerror = () => {
+    img.remove();
+    container.style.background = meta.color;
+    container.insertAdjacentHTML("afterbegin", `<i class="ti ${meta.icon}" aria-hidden="true"></i>`);
+  };
+}
+
 /* ── Render: tarjeta de evento ───────────────────────────────────────── */
 function badgesFor(ev, hotnessP80) {
   const badges = [];
@@ -382,19 +453,20 @@ function eventCardEl(ev, hotnessP80) {
   card.onclick = () => openDetail(ev);
   const badges = badgesFor(ev, hotnessP80);
   card.innerHTML = `
-    <div class="event-card-img" style="background:${meta.color}">
-      <i class="ti ${meta.icon}" aria-hidden="true"></i>
+    <div class="event-card-img" style="${ev.imageUrl ? "" : `background:${meta.color}`}">
+      ${imageBlockHtml(ev, meta, "event-card-photo")}
       ${ev.isFree ? `<span class="badge-free">${t("free")}</span>` : ""}
     </div>
     <div class="event-card-body">
       <p class="event-card-date">${fmtDate(ev.eventDate)}</p>
       <p class="event-card-title">${escapeHtml(evTitle(ev))}</p>
-      <p class="event-card-loc"><i class="ti ti-map-pin" aria-hidden="true"></i>${escapeHtml(ev.exactAddress || ev.locationName || ev.cityName || "")}</p>
+      <p class="event-card-loc"><i class="ti ti-map-pin" aria-hidden="true"></i>${escapeHtml(ev.exactAddress || ev.locationName || ev.cityName || "")}${distanceLabel(ev)}</p>
       <div class="event-card-foot">
         <span class="event-card-author">@${escapeHtml((ev.sourceAuthor || "").replace("@", ""))}</span>
         <div class="badge-row">${badges.map((b) => `<span class="badge" title="${b.label}"><i class="ti ${b.icon}" aria-hidden="true"></i></span>`).join("")}</div>
       </div>
     </div>`;
+  attachImageFallback(card.querySelector(".event-card-img"), meta);
   return card;
 }
 function escapeHtml(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
@@ -423,15 +495,6 @@ function render() {
   const heroSection = document.getElementById("hero-section");
   const shelves = document.getElementById("shelves");
   const resultsCount = document.getElementById("results-count");
-  const mapSection = document.getElementById("map-section");
-
-  if (STATE.view === "map") {
-    heroSection.innerHTML = ""; shelves.innerHTML = ""; resultsCount.textContent = "";
-    mapSection.classList.remove("hidden");
-    renderMap(filtered);
-    return;
-  }
-  mapSection.classList.add("hidden");
 
   const withScore = filtered.map((ev) => ({ ev, score: relevance(ev, prefs) }));
 
@@ -441,6 +504,16 @@ function render() {
   let sorted;
   if (STATE.sort === "date") sorted = [...filtered].sort((a, b) => (a.eventDate || "").localeCompare(b.eventDate || ""));
   else if (STATE.sort === "popularity") sorted = [...filtered].sort((a, b) => (b.hotnessScore || 0) - (a.hotnessScore || 0));
+  else if (STATE.sort === "distance" && STATE.userLocation) {
+    const { lat, lon } = STATE.userLocation;
+    // Eventos sin lat/lon no desaparecen (a diferencia del mapa viejo, que
+    // los ocultaba sin avisar) -- se van al final con distancia infinita,
+    // siguen viéndose en la lista, solo que no ordenados por cercanía.
+    sorted = filtered
+      .map((ev) => ({ ev, d: (ev.lat != null && ev.lon != null) ? haversineKm(lat, lon, ev.lat, ev.lon) : Infinity }))
+      .sort((a, b) => a.d - b.d)
+      .map((x) => x.ev);
+  }
   else sorted = withScore.sort((a, b) => b.score - a.score).map((x) => x.ev);
 
   heroSection.innerHTML = ""; shelves.innerHTML = "";
@@ -458,7 +531,7 @@ function render() {
     const heroMeta = themeMeta([...eventThemes(hero)][0] || "");
     heroSection.innerHTML = `
       <div class="hero-card">
-        <div class="hero-img" style="background:${heroMeta.color}"><i class="ti ${heroMeta.icon}" aria-hidden="true"></i></div>
+        <div class="hero-img" style="${hero.imageUrl ? "" : `background:${heroMeta.color}`}">${imageBlockHtml(hero, heroMeta, "hero-photo")}</div>
         <div class="hero-body">
           <p class="hero-eyebrow"><i class="ti ti-sparkles" aria-hidden="true"></i>${t("heroEyebrow")}</p>
           <p class="hero-title">${escapeHtml(evTitle(hero))}</p>
@@ -467,6 +540,7 @@ function render() {
         </div>
       </div>`;
     heroSection.querySelector(".hero-card").onclick = () => openDetail(hero);
+    attachImageFallback(heroSection.querySelector(".hero-img"), heroMeta);
 
     const rest = sorted.slice(1);
     const highlights = diversify(rest, 2, 3, 8);
@@ -478,7 +552,9 @@ function render() {
 
   const gridTitle = STATE.when === "past" ? t("resultsPast")
     : STATE.sort === "recommended" ? t("resultsAll")
-    : (STATE.sort === "date" ? t("sortDate") : t("sortPopularity"));
+    : STATE.sort === "date" ? t("sortDate")
+    : STATE.sort === "distance" ? t("sortDistance")
+    : t("sortPopularity");
   shelves.appendChild(shelfEl(gridTitle, null, sorted, hotnessP80, false));
   resultsCount.textContent = t("resultsCount", sorted.length);
 }
@@ -491,66 +567,6 @@ function shelfEl(title, sub, events, hotnessP80, scroll) {
   events.forEach((ev) => list.appendChild(eventCardEl(ev, hotnessP80)));
   wrap.appendChild(list);
   return wrap;
-}
-
-/* ── Mapa (Leaflet + CartoDB Positron, ver style.css para el tinte) ────
-   Solo entran eventos que ya pasaron applyFilters() Y tienen lat/lon
-   (decisión site-existence vs. map-pin, DD-045 punto 3 — muchos eventos
-   filtrados no tienen pin confiable y por diseño no aparecen acá, solo
-   en la lista). El mapa se crea una sola vez (Leaflet no se lleva bien
-   con recrearse en cada render) y se reusa; solo se limpian los pines. */
-let mapInstance = null;
-let markersLayer = null;
-function ensureMap() {
-  if (mapInstance) return mapInstance;
-  mapInstance = L.map("map", { scrollWheelZoom: true }).setView([48.8566, 2.3522], 11);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-    subdomains: "abcd",
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>',
-  }).addTo(mapInstance);
-  markersLayer = L.layerGroup().addTo(mapInstance);
-  return mapInstance;
-}
-function renderMap(filtered) {
-  const map = ensureMap();
-  // Leaflet calcula su tamaño cuando se crea; si el contenedor estaba en
-  // display:none (venías de la vista de lista) queda con tamaño 0 hasta
-  // el próximo resize del navegador. invalidateSize() lo corrige.
-  setTimeout(() => map.invalidateSize(), 0);
-
-  markersLayer.clearLayers();
-  const withPin = filtered.filter((ev) => ev.lat != null && ev.lon != null);
-  document.getElementById("map-caption").textContent = t("mapCaption", withPin.length, filtered.length);
-
-  const mapEl = document.getElementById("map");
-  const emptyEl = document.getElementById("map-empty");
-  if (!withPin.length) {
-    mapEl.style.display = "none";
-    emptyEl.style.display = "";
-    document.getElementById("map-empty-title").textContent = t("mapEmptyTitle");
-    document.getElementById("map-empty-body").textContent = t("mapEmptyBody");
-    return;
-  }
-  mapEl.style.display = "";
-  emptyEl.style.display = "none";
-
-  const bounds = [];
-  withPin.forEach((ev) => {
-    const meta = themeMeta([...eventThemes(ev)][0] || "");
-    const icon = L.divIcon({
-      className: "",
-      html: `<span class="map-pin" style="background:${meta.color}"></span>`,
-      iconSize: [16, 16],
-      iconAnchor: [8, 8],
-    });
-    const marker = L.marker([ev.lat, ev.lon], { icon }).addTo(markersLayer);
-    marker.bindTooltip(`${escapeHtml(evTitle(ev))}<br>${fmtDate(ev.eventDate)}`, { direction: "top", offset: [0, -10] });
-    marker.on("click", () => openDetail(ev));
-    bounds.push([ev.lat, ev.lon]);
-  });
-  if (bounds.length > 1) map.fitBounds(bounds, { padding: [24, 24], maxZoom: 15 });
-  else map.setView(bounds[0], 14);
 }
 
 /* ── Detalle ─────────────────────────────────────────────────────────── */
@@ -574,7 +590,7 @@ function openDetail(ev) {
   const panel = document.getElementById("detail-panel");
   panel.innerHTML = `
     <button class="detail-close" data-close aria-label="Cerrar"><i class="ti ti-x" aria-hidden="true"></i></button>
-    <div class="detail-img" style="background:${meta.color}"><i class="ti ${meta.icon}" aria-hidden="true"></i></div>
+    <div class="detail-img" style="${ev.imageUrl ? "" : `background:${meta.color}`}">${imageBlockHtml(ev, meta, "detail-photo")}</div>
     <div class="detail-grid">
       <div>
         <p class="detail-eyebrow">${fmtDate(ev.eventDate)}</p>
@@ -613,6 +629,7 @@ function openDetail(ev) {
         </div>
       </div>
     </div>`;
+  attachImageFallback(panel.querySelector(".detail-img"), meta);
   panel.querySelectorAll(".similar-card").forEach((el) => {
     el.onclick = () => { const s = DATA.events.find((e) => e.id === el.dataset.id); if (s) openDetail(s); };
   });

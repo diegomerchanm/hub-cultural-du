@@ -2,7 +2,8 @@ const I18N = {
   es: {
     where: "Dónde", when: "Cuándo", free: "Gratis",
     categoryGroupLabel: "Categoría",
-    sortLabel: "Ordenar", sortRecommended: "Recomendado", sortDate: "Fecha", sortPopularity: "Popularidad",
+    sortLabel: "Ordenar", sortRecommended: "Recomendado", sortDate: "Fecha", sortPopularity: "Popularidad", sortDistance: "Cercanía",
+    nearMe: "Cerca de mí",
     geoAll: "Toda Île-de-France y más",
     whenToday: "Hoy", whenWeek: "Esta semana", whenMonth: "Este mes", whenUpcoming: "Próximos", whenPast: "Pasados",
     themeAll: "Todo",
@@ -27,10 +28,6 @@ const I18N = {
     reasonPosts: "Mencionado por varias publicaciones",
     reasonC: "Coincide con lo que estuviste explorando",
     followers: "seguidores", frequency: "Frecuencia", freeEvents: "Eventos gratis",
-    viewMap: "Ver mapa", viewList: "Ver lista",
-    mapCaption: (withPin, total) => `${withPin} de ${total} eventos filtrados tienen ubicación exacta y aparecen en el mapa.`,
-    mapEmptyTitle: "Ningún evento con estos filtros tiene ubicación exacta",
-    mapEmptyBody: "Probá otros filtros o volvé a la lista para verlos todos.",
     /* Categorías fijas del taxonomy del LLM (11, ver CATEGORY_META en app.js)
        — clave = ev.category tal cual viene de Neo4j (estable, no cambia con
        el idioma), valor = label visible. Agregado junto con geoLabels y
@@ -57,7 +54,8 @@ const I18N = {
   fr: {
     where: "Où", when: "Quand", free: "Gratuit",
     categoryGroupLabel: "Catégorie",
-    sortLabel: "Trier", sortRecommended: "Recommandé", sortDate: "Date", sortPopularity: "Popularité",
+    sortLabel: "Trier", sortRecommended: "Recommandé", sortDate: "Date", sortPopularity: "Popularité", sortDistance: "Proximité",
+    nearMe: "Près de moi",
     geoAll: "Toute l'Île-de-France et plus",
     whenToday: "Aujourd'hui", whenWeek: "Cette semaine", whenMonth: "Ce mois-ci", whenUpcoming: "À venir", whenPast: "Passés",
     themeAll: "Tout",
@@ -82,10 +80,6 @@ const I18N = {
     reasonPosts: "Mentionné par plusieurs publications",
     reasonC: "Correspond à ce que vous explorez",
     followers: "abonnés", frequency: "Fréquence", freeEvents: "Événements gratuits",
-    viewMap: "Voir la carte", viewList: "Voir la liste",
-    mapCaption: (withPin, total) => `${withPin} des ${total} événements filtrés ont une localisation exacte et apparaissent sur la carte.`,
-    mapEmptyTitle: "Aucun événement avec ces filtres n'a de localisation exacte",
-    mapEmptyBody: "Essayez d'autres filtres ou revenez à la liste pour tous les voir.",
     categories: {
       gastronomico: "Gastronomie", institucional: "Institutionnel", visual: "Arts visuels",
       comunitario: "Communauté", musical: "Musique", formacion: "Ateliers",

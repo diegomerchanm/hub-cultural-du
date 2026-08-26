@@ -147,7 +147,7 @@ WITH e, l
 // detección de coordenadas-fallback se hace en Python después de traer los
 // datos (_filter_fallback_coordinates), sin depender de esta propiedad.
 RETURN e.id AS id, e.title AS title, e.titleFr AS titleFr, e.category AS category, e.type AS type,
-       e.eventArtTags AS eventArtTags, e.eventArtTagsFr AS eventArtTagsFr, e.artType AS artType,
+       e.eventArtTags AS eventArtTags, e.eventArtTagsFr AS eventArtTagsFr, e.imageUrl AS imageUrl, e.artType AS artType,
        e.eventDate AS eventDate, e.locationName AS locationName,
        e.cityName AS cityName, e.exactAddress AS exactAddress,
        l.lat AS lat, l.lon AS lon,

@@ -1487,6 +1487,7 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
                 e.eventArtTagsFr     = $eventArtTagsFr,
                 e.llmReasoning       = $llmReasoning,
                 e.sourcePostUrl      = $sourcePostUrl,
+                e.imageUrl           = $imageUrl,
                 e.sourceAuthor       = $sourceAuthor,
                 e.sourcePostDate     = $sourcePostDate,
                 e.artType            = $artType,
@@ -1500,7 +1501,7 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
             "layer1Score", "embedding",
             "description", "titleFr", "descriptionFr",
             "isPublicInvitation", "isUpcoming", "priceRange", "eventArtTags", "eventArtTagsFr", "llmReasoning",
-            "sourcePostUrl", "sourceAuthor", "sourcePostDate",
+            "sourcePostUrl", "sourceAuthor", "sourcePostDate", "imageUrl",
             "artType", "institutionType", "culturalIdentity", "geoZone", "parentInstitution",
         ]})
         if event.get("locationName"):
@@ -1640,6 +1641,7 @@ def run_extraction(
                    p.timestamp     AS timestamp,
                    [(p)-[:HAS_HASHTAG]->(h:Hashtag) | h.name] AS hashtags,
                    p.url           AS url,
+                   p.displayUrl    AS displayUrl,
                    a.username      AS author,
                    a.artType             AS artType,
                    a.institutionType     AS institutionType,
@@ -2062,6 +2064,15 @@ def run_extraction(
             "eventArtTagsFr":      llm_art_tags_fr,
             "llmReasoning":        llm_reasoning or "",
             "sourcePostUrl":       post.get("url"),
+            # DD-057: la foto real del post (Apify ya la trae como
+            # p.displayUrl desde 2_build_graph.py, nunca había llegado hasta
+            # acá). Creation-only como el resto de estos campos "source*" --
+            # es la imagen de la publicación ORIGINAL que generó el evento,
+            # no algo que tenga sentido pisar al fusionar con un post nuevo.
+            # OJO: son URLs firmadas de la CDN de Instagram, pueden expirar
+            # con el tiempo -- el frontend tiene que degradar con gracia si
+            # la carga falla, no asumir que siempre van a servir.
+            "imageUrl":            post.get("displayUrl") or "",
             "sourceAuthor":        post.get("author"),
             "sourcePostDate":      post.get("timestamp"),
             # Heredados de :Account (curación manual) — sin costo LLM, se
