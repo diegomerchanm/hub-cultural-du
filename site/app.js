@@ -337,8 +337,23 @@ function eventCardEl(ev, hotnessP80) {
 }
 function escapeHtml(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 
+/* Etiquetas estáticas de index.html (Dónde/Cuándo/Ordenar/Gratis/Ver
+   mapa/opciones del <select> de orden) llevaban un atributo data-i18n
+   desde el principio, pero nada lo leía — quedaban fijas en español pase
+   lo que pase con el botón ES/FR (encontrado 2026-08-26, junto con
+   categorías/geoZone/fecha, ver DD-054). Genérico a propósito: cualquier
+   data-i18n nuevo que se agregue a futuro en index.html se traduce solo,
+   sin tocar app.js de nuevo. */
+function applyStaticI18n() {
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    const val = t(el.dataset.i18n);
+    if (val != null) el.textContent = val;
+  });
+}
+
 /* ── Render principal ────────────────────────────────────────────────── */
 function render() {
+  applyStaticI18n();
   renderFilterBar();
   const prefs = loadPrefs();
   const filtered = applyFilters(DATA.events);
