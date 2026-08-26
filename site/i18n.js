@@ -30,6 +30,28 @@ const I18N = {
     mapCaption: (withPin, total) => `${withPin} de ${total} eventos filtrados tienen ubicación exacta y aparecen en el mapa.`,
     mapEmptyTitle: "Ningún evento con estos filtros tiene ubicación exacta",
     mapEmptyBody: "Probá otros filtros o volvé a la lista para verlos todos.",
+    /* Categorías fijas del taxonomy del LLM (11, ver CATEGORY_META en app.js)
+       — clave = ev.category tal cual viene de Neo4j (estable, no cambia con
+       el idioma), valor = label visible. Agregado junto con geoLabels y
+       months para que el switch ES/FR alcance también filtros y fechas, no
+       solo el texto de interfaz (antes solo se traducía título/descripción
+       del evento, DD-051). */
+    categories: {
+      gastronomico: "Gastronomía", institucional: "Institucional", visual: "Artes visuales",
+      comunitario: "Comunidad", musical: "Música", formacion: "Talleres",
+      audiovisual: "Cine", escenico: "Teatro y danza", festival: "Festivales",
+      academico: "Charlas y conferencias", politico: "Cívico",
+    },
+    /* Zonas geo curadas a mano (load_manual_account_categorization.py,
+       columna geoZone) — "No confirmado" es un cuarto valor ad-hoc que
+       aparece en la planilla además de las tres zonas documentadas en
+       CLAUDE.md. Cualquier valor nuevo que no esté acá cae sin traducir
+       (mismo comportamiento de fallback que ya tenía GEO_LABEL). */
+    geoLabels: {
+      "Île-de-France": "Île-de-France", "Francia fuera IDF": "Francia (fuera IDF)",
+      "Fuera de Francia": "Fuera de Francia", "No confirmado": "No confirmado",
+    },
+    months: ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"],
   },
   fr: {
     where: "Où", when: "Quand", free: "Gratuit",
@@ -62,6 +84,17 @@ const I18N = {
     mapCaption: (withPin, total) => `${withPin} des ${total} événements filtrés ont une localisation exacte et apparaissent sur la carte.`,
     mapEmptyTitle: "Aucun événement avec ces filtres n'a de localisation exacte",
     mapEmptyBody: "Essayez d'autres filtres ou revenez à la liste pour tous les voir.",
+    categories: {
+      gastronomico: "Gastronomie", institucional: "Institutionnel", visual: "Arts visuels",
+      comunitario: "Communauté", musical: "Musique", formacion: "Ateliers",
+      audiovisual: "Cinéma", escenico: "Théâtre et danse", festival: "Festivals",
+      academico: "Conférences et débats", politico: "Civique",
+    },
+    geoLabels: {
+      "Île-de-France": "Île-de-France", "Francia fuera IDF": "France (hors IDF)",
+      "Fuera de Francia": "Hors de France", "No confirmado": "Non confirmé",
+    },
+    months: ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."],
   },
 };
 

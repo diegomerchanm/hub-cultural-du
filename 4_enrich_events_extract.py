@@ -598,7 +598,8 @@ def _llm_schema_hint(include_reasoning: bool) -> str:
   "description_fr": string,      // MISMO contenido que clean_description, pero traducido al FRANCÉS — mismo criterio (1-2 oraciones, sin emojis/hashtags/menciones, nombres propios sin traducir)
   "title_fr": string,             // MISMO contenido que title, pero traducido al FRANCÉS — mismo criterio (6-10 palabras, sin emojis/hashtags, nombres propios sin traducir)
   "price_range": string o null,    // precio tal como aparece en el caption, ej. "Gratis", "Entrada libre", "30€ individual / 50€ grupo", "10€ sugerido" — usa una de esas frases tipo "Gratis"/"Entrada libre" si el caption dice explícitamente que no cuesta; null si el texto no menciona nada sobre precio, no asumas
-  "art_tags": array de strings     // 1-3 etiquetas cortas (máx 3 palabras cada una) que describan la disciplina/medio artístico de ESTE evento concreto — más granular que "type", pensado como filtro clickeable. Reusá temas conocidos si aplican: "Música", "Danza", "Teatro", "Circo", "Literatura", "Cine", "Fotografía", "Artes visuales", "Moda", "Gastronomía", "Arquitectura", "Cómic" — pero si ninguno describe bien el evento, proponé uno nuevo corto. NUNCA uses paréntesis ni frases largas ni explicaciones dentro de cada tag (nada de "Multidisciplinario (música, historia)") — cada tag es una palabra o frase corta suelta, sin comas dentro del tag. Si el evento no tiene ningún componente artístico claro (p.ej. trámite consular, comunicado), devolvé una lista vacía [].{reasoning_line}
+  "art_tags": array de strings     // 1-3 etiquetas cortas (máx 3 palabras cada una) que describan la disciplina/medio artístico de ESTE evento concreto — más granular que "type", pensado como filtro clickeable. Reusá temas conocidos si aplican: "Música", "Danza", "Teatro", "Circo", "Literatura", "Cine", "Fotografía", "Artes visuales", "Moda", "Gastronomía", "Arquitectura", "Cómic" — pero si ninguno describe bien el evento, proponé uno nuevo corto. NUNCA uses paréntesis ni frases largas ni explicaciones dentro de cada tag (nada de "Multidisciplinario (música, historia)") — cada tag es una palabra o frase corta suelta, sin comas dentro del tag. Si el evento no tiene ningún componente artístico claro (p.ej. trámite consular, comunicado), devolvé una lista vacía [].
+  "art_tags_fr": array de strings  // MISMO contenido que art_tags, un tag por tag en el mismo orden, pero cada uno traducido al FRANCÉS (mismo criterio: corto, sin paréntesis/comas, nombres propios sin traducir). Misma cantidad de elementos que art_tags, lista vacía [] si art_tags también lo es.{reasoning_line}
 }}"""
 
 
@@ -645,8 +646,10 @@ def _build_llm_prompt(caption: str, anchor_date: str, include_reasoning: bool = 
         "hub es la diáspora colombiana/latinoamericana en Francia. Además, generá title_fr y "
         "description_fr: son la traducción al FRANCÉS de title/clean_description (el sitio "
         "también se muestra en francés) — mismo contenido, mismo criterio de longitud, pero en "
-        "francés. En AMBOS idiomas: mantené sin traducir los nombres propios (lugares, "
-        "instituciones, títulos de eventos) tal como aparecen en el caption.\n\n"
+        "francés. Lo mismo aplica a art_tags: generá también art_tags_fr con la traducción al "
+        "francés de cada tag, uno por uno y en el mismo orden. En TODOS los campos en francés: "
+        "mantené sin traducir los nombres propios (lugares, instituciones, títulos de "
+        "eventos) tal como aparecen en el caption.\n\n"
         f"{_llm_schema_hint(include_reasoning)}"
     )
 
@@ -1063,6 +1066,7 @@ _LLM_DEFAULTS = {
     "title_fr":             None,
     "price_range":          None,
     "art_tags":             [],
+    "art_tags_fr":          [],
     "reasoning":            None,
 }
 
@@ -1104,6 +1108,7 @@ def _extract_llm_fields(data: Optional[dict]) -> dict:
         "title_fr":             data.get("title_fr") or None,
         "price_range":          data.get("price_range") or None,
         "art_tags":             _clean_art_tags(data.get("art_tags")),
+        "art_tags_fr":          _clean_art_tags(data.get("art_tags_fr")),
         "reasoning":            data.get("reasoning") or None,
     }
 
@@ -1479,6 +1484,7 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
                 e.isUpcoming         = $isUpcoming,
                 e.priceRange         = $priceRange,
                 e.eventArtTags       = $eventArtTags,
+                e.eventArtTagsFr     = $eventArtTagsFr,
                 e.llmReasoning       = $llmReasoning,
                 e.sourcePostUrl      = $sourcePostUrl,
                 e.sourceAuthor       = $sourceAuthor,
@@ -1493,7 +1499,7 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
             "locationName", "cityName", "exactAddress", "hotnessScore", "eventScore", "confidence",
             "layer1Score", "embedding",
             "description", "titleFr", "descriptionFr",
-            "isPublicInvitation", "isUpcoming", "priceRange", "eventArtTags", "llmReasoning",
+            "isPublicInvitation", "isUpcoming", "priceRange", "eventArtTags", "eventArtTagsFr", "llmReasoning",
             "sourcePostUrl", "sourceAuthor", "sourcePostDate",
             "artType", "institutionType", "culturalIdentity", "geoZone", "parentInstitution",
         ]})
@@ -1801,6 +1807,7 @@ def run_extraction(
         llm_description_fr = llm_title_fr = None
         llm_city = llm_exact_address = None
         llm_art_tags = []
+        llm_art_tags_fr = []
         llm_penalty = 1.0
         if is_event and has_text_date:
             pid = post.get("id")
@@ -1861,6 +1868,16 @@ def run_extraction(
             llm_title_fr         = llm_out.get("title_fr")
             llm_price_range      = llm_out.get("price_range")
             llm_art_tags         = llm_out.get("art_tags") or []
+            llm_art_tags_fr      = llm_out.get("art_tags_fr") or []
+            # El LLM a veces devuelve una lista de largo distinto para
+            # art_tags_fr (p.ej. se olvida de traducir el último tag) — como
+            # el frontend empareja por posición (evTags en app.js), un
+            # desalineamiento silencioso mostraría una traducción para el tag
+            # equivocado. Se trunca al más corto de los dos en vez de
+            # confiar en que siempre vienen parejos.
+            if len(llm_art_tags_fr) != len(llm_art_tags):
+                n = min(len(llm_art_tags), len(llm_art_tags_fr))
+                llm_art_tags, llm_art_tags_fr = llm_art_tags[:n], llm_art_tags_fr[:n]
             if is_public_invitation is None or is_upcoming is None:
                 # LLM falló tras agotar reintentos — verdicto incierto, no
                 # confianza ciega (DD-033-update): penalización intermedia.
@@ -1953,6 +1970,7 @@ def run_extraction(
             "city":                 llm_city or "",
             "exact_address":        llm_exact_address or "",
             "art_tags":             ", ".join(llm_art_tags) if llm_art_tags else "",
+            "art_tags_fr":          ", ".join(llm_art_tags_fr) if llm_art_tags_fr else "",
         }
         diag_all.append(record)
         diag_cands.append(record)
@@ -2037,6 +2055,11 @@ def run_extraction(
             # cada uno — pensado como filtro de menú confiable, sin el
             # problema de parseo que tiene el artType de cuenta.
             "eventArtTags":        llm_art_tags,
+            # Traducción al francés de eventArtTags, mismo criterio que
+            # titleFr/descriptionFr arriba: creation-only, sin backfill acá
+            # (ver backfill_art_tags_fr.py para el vocabulario ya existente,
+            # DD-054). Alineado por posición con eventArtTags.
+            "eventArtTagsFr":      llm_art_tags_fr,
             "llmReasoning":        llm_reasoning or "",
             "sourcePostUrl":       post.get("url"),
             "sourceAuthor":        post.get("author"),
@@ -2105,7 +2128,7 @@ def run_extraction(
             "post_id", "author", "decision", "category", "layer1", "layer2",
             "event_score", "hotness", "loc_name", "raw_date", "top3",
             "is_public_invitation", "is_upcoming", "clean_description",
-            "title", "price_range", "city", "exact_address", "art_tags", "caption",
+            "title", "price_range", "city", "exact_address", "art_tags", "art_tags_fr", "caption",
         ]
         with open(diag_csv, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")

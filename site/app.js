@@ -27,7 +27,43 @@ const TAG_ICONS = {
 };
 const FALLBACK_TAG = { color: "#6b6a63", icon: "ti-star" };
 
+/* GEO_LABEL / categoría en español quedan como identidad canónica (así no
+   se pisan los catWeights ya guardados en localStorage de visitantes
+   existentes, ver bumpPref/loadPrefs) — la traducción para mostrar pasa
+   por geoLabel()/categoryLabel() de abajo, que leen de i18n.js según
+   CURRENT_LANG y caen a este mismo valor si no hay traducción. */
 const GEO_LABEL = { "Île-de-France": "Île-de-France", "Francia fuera IDF": "Francia (fuera IDF)", "Fuera de Francia": "Fuera de Francia" };
+function geoLabel(zone) {
+  const dict = I18N[CURRENT_LANG].geoLabels;
+  return (dict && dict[zone]) || GEO_LABEL[zone] || zone;
+}
+function categoryLabel(key) {
+  const dict = I18N[CURRENT_LANG].categories;
+  return (dict && dict[key]) || (CATEGORY_META[key] && CATEGORY_META[key].label) || key;
+}
+/* Traducción de eventArtTags (tags libres del LLM, DD-042) al francés,
+   solo disponible para eventos creados desde el 2026-08 (nueva propiedad
+   eventArtTagsFr, alineada por posición con eventArtTags — ver DD-054).
+   Se arma un diccionario global ES→FR recorriendo todos los eventos una
+   vez, para poder traducir un tag sin importar en qué evento se lo mire. */
+let TAG_FR_MAP = {};
+function buildTagFrMap() {
+  TAG_FR_MAP = {};
+  DATA.events.forEach((ev) => {
+    const tags = ev.eventArtTags || [], tagsFr = ev.eventArtTagsFr || [];
+    tags.forEach((tag, i) => { if (tagsFr[i]) TAG_FR_MAP[tag] = tagsFr[i]; });
+  });
+}
+/* Label visible de un theme (canónico en español, sea categoría fija o tag
+   libre) — categorías fijas resuelven por key vía categoryLabel(); tags
+   libres resuelven por TAG_FR_MAP si hay traducción, si no se quedan en
+   español (mismo patrón de fallback que evTitle/evDescription). */
+function themeLabel(themeEs) {
+  const catEntry = Object.entries(CATEGORY_META).find(([, v]) => v.label === themeEs);
+  if (catEntry) return categoryLabel(catEntry[0]);
+  if (CURRENT_LANG === "fr" && TAG_FR_MAP[themeEs]) return TAG_FR_MAP[themeEs];
+  return themeEs;
+}
 
 const PREFS_KEY = "hcdu_prefs";
 
@@ -138,12 +174,12 @@ function relevance(ev, prefs) {
 
 /* ── Formato ─────────────────────────────────────────────────────────── */
 const WEEKDAY_ES = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
-const MONTH_ES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
 function fmtDate(dateStr) {
   if (!dateStr) return "";
   const d = new Date(dateStr + "T00:00:00");
   if (isNaN(d)) return dateStr;
-  return `${d.getDate()} ${MONTH_ES[d.getMonth()]}`;
+  const months = I18N[CURRENT_LANG].months;
+  return `${d.getDate()} ${months[d.getMonth()]}`;
 }
 
 /* ── Filtrado ────────────────────────────────────────────────────────── */
@@ -211,7 +247,7 @@ function renderFilterBar() {
   geoEl.innerHTML = "";
   geoEl.appendChild(pillEl(t("geoAll"), upcomingEvents.length, STATE.geo === "all", () => setState({ geo: "all" })));
   Object.keys(zoneCounts).sort((a, b) => zoneCounts[b] - zoneCounts[a]).forEach((zone) => {
-    geoEl.appendChild(pillEl(GEO_LABEL[zone] || zone, zoneCounts[zone], STATE.geo === zone, () => setState({ geo: zone })));
+    geoEl.appendChild(pillEl(geoLabel(zone), zoneCounts[zone], STATE.geo === zone, () => setState({ geo: zone })));
   });
 
   // Pills de fecha, cada una con su propio conteo (independiente entre sí,
@@ -247,7 +283,7 @@ function renderFilterBar() {
   themeEl.innerHTML = "";
   themeEl.appendChild(pillEl(t("themeAll"), upcomingEvents.length, STATE.theme === "all", () => setState({ theme: "all" })));
   Object.keys(themeCounts).sort((a, b) => themeCounts[b] - themeCounts[a]).forEach((theme) => {
-    themeEl.appendChild(pillEl(theme, themeCounts[theme], STATE.theme === theme, () => setState({ theme })));
+    themeEl.appendChild(pillEl(themeLabel(theme), themeCounts[theme], STATE.theme === theme, () => setState({ theme })));
   });
 
   document.getElementById("sort-select").value = STATE.sort;
@@ -496,7 +532,7 @@ function openDetail(ev) {
         <div class="why-box"><i class="ti ti-bulb" aria-hidden="true"></i><span>${whyReason(ev, prefs)}</span></div>
         <div class="tag-row">
           ${ev.artType ? escapeHtml(ev.artType).split(",").map((s) => `<span class="tag">${s.trim()}</span>`).join("") : ""}
-          ${ev.geoZone ? `<span class="tag">${GEO_LABEL[ev.geoZone] || ev.geoZone}</span>` : ""}
+          ${ev.geoZone ? `<span class="tag">${geoLabel(ev.geoZone)}</span>` : ""}
         </div>
       </div>
     </div>`;
@@ -535,6 +571,7 @@ async function init() {
   ACCOUNTS_BY_USER = {};
   (DATA.accounts || []).forEach((a) => { ACCOUNTS_BY_USER[a.username] = a; });
   markBetweennessDecile();
+  buildTagFrMap();
   render();
 }
 init();
