@@ -64,6 +64,23 @@ function themeLabel(themeEs) {
   if (CURRENT_LANG === "fr" && TAG_FR_MAP[themeEs]) return TAG_FR_MAP[themeEs];
   return themeEs;
 }
+/* Color de un theme para el filtro (DD-055): las 11 categorías fijas usan
+   el color ya curado en CATEGORY_META; los tags libres del LLM (sin color
+   propio) reciben uno generado determinísticamente a partir del texto en
+   español (mismo tag = mismo color siempre, sin depender de random ni de
+   guardar nada — se recalcula igual en cada visita). Se devuelve como
+   borde+fondo tenue (no relleno sólido) porque con 50+ tonos distintos un
+   fondo saturado sería ilegible o rompería el contraste del texto. */
+function hashColor(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) { hash = str.charCodeAt(i) + ((hash << 5) - hash); hash |= 0; }
+  return `hsl(${Math.abs(hash) % 360}, 55%, 42%)`;
+}
+function themeColor(themeEs) {
+  const catEntry = Object.entries(CATEGORY_META).find(([, v]) => v.label === themeEs);
+  const solid = catEntry ? catEntry[1].color : hashColor(themeEs);
+  return { solid, tint: `color-mix(in srgb, ${solid} 12%, var(--card))` };
+}
 
 const PREFS_KEY = "hcdu_prefs";
 
@@ -277,21 +294,62 @@ function renderFilterBar() {
   mapBtn.querySelector("i").className = "ti " + (STATE.view === "map" ? "ti-list" : "ti-map-2");
   mapBtn.onclick = () => setState({ view: STATE.view === "map" ? "list" : "map" });
 
+  // DD-055: con 50+ categorías/tags posibles, mostrarlas todas al mismo
+  // tamaño era caótico (reportado por Diego revisando el sitio). Se separan
+  // en dos grupos por volumen: las que tienen 3+ eventos arman la nube
+  // principal con 3 tamaños (terciles dinámicos, no umbrales fijos, para
+  // no tener que retocar números a mano cuando el corpus crezca); las de
+  // 1-2 eventos van a "Otras categorías" — se siguen mostrando (Diego
+  // pidió no ocultarlas del todo), solo que chicas y agrupadas aparte.
+  const OTHER_MAX_COUNT = 2;
   const themeCounts = {};
   upcomingEvents.forEach((ev) => eventThemes(ev).forEach((th) => { themeCounts[th] = (themeCounts[th] || 0) + 1; }));
+  const themeEntries = Object.keys(themeCounts)
+    .map((theme) => ({ theme, count: themeCounts[theme] }))
+    .sort((a, b) => b.count - a.count);
+  const mainThemes = themeEntries.filter((e) => e.count > OTHER_MAX_COUNT);
+  const otherThemes = themeEntries.filter((e) => e.count <= OTHER_MAX_COUNT);
+  const tierFor = (i, n) => {
+    if (n <= 1) return "tier-lg";
+    if (i < n / 3) return "tier-lg";
+    if (i < (n / 3) * 2) return "tier-md";
+    return "tier-sm";
+  };
+
   const themeEl = document.getElementById("theme-pills");
   themeEl.innerHTML = "";
-  themeEl.appendChild(pillEl(t("themeAll"), upcomingEvents.length, STATE.theme === "all", () => setState({ theme: "all" })));
-  Object.keys(themeCounts).sort((a, b) => themeCounts[b] - themeCounts[a]).forEach((theme) => {
-    themeEl.appendChild(pillEl(themeLabel(theme), themeCounts[theme], STATE.theme === theme, () => setState({ theme })));
+  themeEl.appendChild(pillEl(t("themeAll"), upcomingEvents.length, STATE.theme === "all", () => setState({ theme: "all" }), "tier-lg"));
+  mainThemes.forEach(({ theme, count }, i) => {
+    themeEl.appendChild(pillEl(
+      themeLabel(theme), count, STATE.theme === theme, () => setState({ theme }),
+      tierFor(i, mainThemes.length), themeColor(theme)
+    ));
+  });
+
+  const otherRow = document.getElementById("theme-other-row");
+  const otherEl = document.getElementById("theme-pills-other");
+  otherEl.innerHTML = "";
+  otherRow.style.display = otherThemes.length ? "" : "none";
+  otherThemes.forEach(({ theme, count }) => {
+    otherEl.appendChild(pillEl(
+      themeLabel(theme), count, STATE.theme === theme, () => setState({ theme }),
+      "tier-xs", themeColor(theme)
+    ));
   });
 
   document.getElementById("sort-select").value = STATE.sort;
   document.getElementById("sort-select").onchange = (e) => setState({ sort: e.target.value });
 }
-function pillEl(label, count, active, onClick) {
+function pillEl(label, count, active, onClick, tierClass, colorAccent) {
   const b = document.createElement("button");
-  b.className = "pill" + (active ? " active" : "");
+  b.className = "pill" + (tierClass ? " " + tierClass : "") + (active ? " active" : "");
+  // El acento de color solo se aplica inactivo -- un estilo inline tiene
+  // más especificidad que cualquier clase, así que si lo dejáramos puesto
+  // en estado activo taparía el fondo oscuro de .pill.active sin querer.
+  if (colorAccent && !active) {
+    b.style.borderLeft = `3px solid ${colorAccent.solid}`;
+    b.style.background = colorAccent.tint;
+  }
   b.innerHTML = `<span>${label}</span>` + (count != null ? `<span class="count">${count}</span>` : "");
   b.onclick = onClick;
   return b;

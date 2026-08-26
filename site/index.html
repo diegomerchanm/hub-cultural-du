@@ -28,34 +28,39 @@
 
 <div class="filterbar-wrap">
   <div class="filterbar" id="filterbar">
-    <div class="filter-group" id="geo-group">
+    <div class="filter-row">
       <span class="filter-label"><i class="ti ti-map-pin" aria-hidden="true"></i> <span data-i18n="where">Dónde</span></span>
       <div class="pill-row" id="geo-pills"></div>
     </div>
-    <div class="filter-group" id="when-group">
+    <div class="filter-row">
       <span class="filter-label"><i class="ti ti-calendar" aria-hidden="true"></i> <span data-i18n="when">Cuándo</span></span>
       <div class="pill-row" id="when-pills"></div>
     </div>
-    <div class="filter-group">
+    <div class="filter-row filter-row-tools">
       <button id="free-toggle" class="pill">
         <i class="ti ti-tag" aria-hidden="true"></i> <span data-i18n="free">Gratis</span>
       </button>
-    </div>
-    <div class="filter-group">
       <button id="map-toggle" class="pill">
         <i class="ti ti-map-2" aria-hidden="true"></i> <span id="map-toggle-label" data-i18n="viewMap">Ver mapa</span>
       </button>
+      <div class="sort-control">
+        <label for="sort-select" data-i18n="sortLabel">Ordenar</label>
+        <select id="sort-select">
+          <option value="recommended" data-i18n="sortRecommended">Recomendado</option>
+          <option value="date" data-i18n="sortDate">Fecha</option>
+          <option value="popularity" data-i18n="sortPopularity">Popularidad</option>
+        </select>
+      </div>
     </div>
-    <div class="sort-control">
-      <label for="sort-select" data-i18n="sortLabel">Ordenar</label>
-      <select id="sort-select">
-        <option value="recommended" data-i18n="sortRecommended">Recomendado</option>
-        <option value="date" data-i18n="sortDate">Fecha</option>
-        <option value="popularity" data-i18n="sortPopularity">Popularidad</option>
-      </select>
+    <div class="filter-row">
+      <span class="filter-label"><i class="ti ti-tags" aria-hidden="true"></i> <span data-i18n="categoryGroupLabel">Categoría</span></span>
     </div>
+    <div class="theme-row" id="theme-pills"></div>
+    <div class="filter-row" id="theme-other-row">
+      <span class="filter-label filter-label-muted"><span data-i18n="otherCategoriesLabel">Otras categorías</span></span>
+    </div>
+    <div class="theme-row theme-row-other" id="theme-pills-other"></div>
   </div>
-  <div class="theme-row" id="theme-pills"></div>
 </div>
 
 <main id="app">

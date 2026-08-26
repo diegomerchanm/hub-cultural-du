@@ -1,6 +1,7 @@
 const I18N = {
   es: {
     where: "Dónde", when: "Cuándo", free: "Gratis",
+    categoryGroupLabel: "Categoría", otherCategoriesLabel: "Otras categorías",
     sortLabel: "Ordenar", sortRecommended: "Recomendado", sortDate: "Fecha", sortPopularity: "Popularidad",
     geoAll: "Toda Île-de-France y más",
     whenToday: "Hoy", whenWeek: "Esta semana", whenMonth: "Este mes", whenUpcoming: "Próximos", whenPast: "Pasados",
@@ -55,6 +56,7 @@ const I18N = {
   },
   fr: {
     where: "Où", when: "Quand", free: "Gratuit",
+    categoryGroupLabel: "Catégorie", otherCategoriesLabel: "Autres catégories",
     sortLabel: "Trier", sortRecommended: "Recommandé", sortDate: "Date", sortPopularity: "Popularité",
     geoAll: "Toute l'Île-de-France et plus",
     whenToday: "Aujourd'hui", whenWeek: "Cette semaine", whenMonth: "Ce mois-ci", whenUpcoming: "À venir", whenPast: "Passés",
