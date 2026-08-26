@@ -27,12 +27,25 @@ const TAG_ICONS = {
 };
 const FALLBACK_TAG = { color: "#6b6a63", icon: "ti-star" };
 
+/* Distintas cuentas curadas a mano escribieron la misma zona de dos
+   formas ("Francia fuera de IDF" vs "Francia (fuera de Île-de-France)"),
+   así que sin esto contaban como dos pills separados con conteos
+   partidos, y encima ninguno traducía bien porque el diccionario de abajo
+   tenía la clave mal escrita respecto al dato real (faltaba "de" — DD-056,
+   2026-08-26, encontrado al auditar site/data.json directamente: 12
+   eventos con "Francia fuera de IDF", 11 con "Francia (fuera de
+   Île-de-France)", mismo significado). Se normaliza UNA vez al cargar
+   DATA (ver init()) para que todo lo demás (conteos, filtro, prefs,
+   traducción) trabaje siempre con el valor canónico. */
+const GEO_ZONE_SYNONYMS = { "Francia (fuera de Île-de-France)": "Francia fuera de IDF" };
+function canonicalizeGeoZone(raw) { return GEO_ZONE_SYNONYMS[raw] || raw; }
+
 /* GEO_LABEL / categoría en español quedan como identidad canónica (así no
    se pisan los catWeights ya guardados en localStorage de visitantes
    existentes, ver bumpPref/loadPrefs) — la traducción para mostrar pasa
    por geoLabel()/categoryLabel() de abajo, que leen de i18n.js según
    CURRENT_LANG y caen a este mismo valor si no hay traducción. */
-const GEO_LABEL = { "Île-de-France": "Île-de-France", "Francia fuera IDF": "Francia (fuera IDF)", "Fuera de Francia": "Fuera de Francia" };
+const GEO_LABEL = { "Île-de-France": "Île-de-France", "Francia fuera de IDF": "Francia (fuera IDF)", "Fuera de Francia": "Fuera de Francia" };
 function geoLabel(zone) {
   const dict = I18N[CURRENT_LANG].geoLabels;
   return (dict && dict[zone]) || GEO_LABEL[zone] || zone;
@@ -294,21 +307,23 @@ function renderFilterBar() {
   mapBtn.querySelector("i").className = "ti " + (STATE.view === "map" ? "ti-list" : "ti-map-2");
   mapBtn.onclick = () => setState({ view: STATE.view === "map" ? "list" : "map" });
 
-  // DD-055: con 50+ categorías/tags posibles, mostrarlas todas al mismo
-  // tamaño era caótico (reportado por Diego revisando el sitio). Se separan
-  // en dos grupos por volumen: las que tienen 3+ eventos arman la nube
-  // principal con 3 tamaños (terciles dinámicos, no umbrales fijos, para
-  // no tener que retocar números a mano cuando el corpus crezca); las de
-  // 1-2 eventos van a "Otras categorías" — se siguen mostrando (Diego
-  // pidió no ocultarlas del todo), solo que chicas y agrupadas aparte.
-  const OTHER_MAX_COUNT = 2;
+  // DD-055/DD-056: con 50+ categorías/tags posibles, mostrarlas todas al
+  // mismo tamaño era caótico. Primer intento (DD-055) agregaba una fila
+  // "Otras categorías" para los tags de 1-2 eventos en vez de ocultarlos
+  // del todo -- Diego la vio desplegada y pidió sacarla directamente
+  // (seguía siendo ruido, y cada uno de esos eventos ya es encontrable por
+  // su categoría principal de todas formas). Ahora los tags con 2 eventos
+  // o menos simplemente no arman pill en el menú -- el evento sigue
+  // existiendo y filtrable por su categoría fija, solo que ese tag puntual
+  // no ensucia el menú. Los que sí entran arman la nube con 3 tamaños
+  // (terciles dinámicos sobre el volumen real, no umbrales fijos).
+  const MIN_THEME_COUNT = 3;
   const themeCounts = {};
   upcomingEvents.forEach((ev) => eventThemes(ev).forEach((th) => { themeCounts[th] = (themeCounts[th] || 0) + 1; }));
-  const themeEntries = Object.keys(themeCounts)
+  const mainThemes = Object.keys(themeCounts)
     .map((theme) => ({ theme, count: themeCounts[theme] }))
+    .filter((e) => e.count >= MIN_THEME_COUNT)
     .sort((a, b) => b.count - a.count);
-  const mainThemes = themeEntries.filter((e) => e.count > OTHER_MAX_COUNT);
-  const otherThemes = themeEntries.filter((e) => e.count <= OTHER_MAX_COUNT);
   const tierFor = (i, n) => {
     if (n <= 1) return "tier-lg";
     if (i < n / 3) return "tier-lg";
@@ -323,17 +338,6 @@ function renderFilterBar() {
     themeEl.appendChild(pillEl(
       themeLabel(theme), count, STATE.theme === theme, () => setState({ theme }),
       tierFor(i, mainThemes.length), themeColor(theme)
-    ));
-  });
-
-  const otherRow = document.getElementById("theme-other-row");
-  const otherEl = document.getElementById("theme-pills-other");
-  otherEl.innerHTML = "";
-  otherRow.style.display = otherThemes.length ? "" : "none";
-  otherThemes.forEach(({ theme, count }) => {
-    otherEl.appendChild(pillEl(
-      themeLabel(theme), count, STATE.theme === theme, () => setState({ theme }),
-      "tier-xs", themeColor(theme)
     ));
   });
 
@@ -641,6 +645,7 @@ async function init() {
   } catch (e) {
     DATA = { events: [], accounts: [] };
   }
+  DATA.events.forEach((ev) => { if (ev.geoZone) ev.geoZone = canonicalizeGeoZone(ev.geoZone); });
   ACCOUNTS_BY_USER = {};
   (DATA.accounts || []).forEach((a) => { ACCOUNTS_BY_USER[a.username] = a; });
   markBetweennessDecile();

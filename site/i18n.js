@@ -1,7 +1,7 @@
 const I18N = {
   es: {
     where: "Dónde", when: "Cuándo", free: "Gratis",
-    categoryGroupLabel: "Categoría", otherCategoriesLabel: "Otras categorías",
+    categoryGroupLabel: "Categoría",
     sortLabel: "Ordenar", sortRecommended: "Recomendado", sortDate: "Fecha", sortPopularity: "Popularidad",
     geoAll: "Toda Île-de-France y más",
     whenToday: "Hoy", whenWeek: "Esta semana", whenMonth: "Este mes", whenUpcoming: "Próximos", whenPast: "Pasados",
@@ -49,14 +49,14 @@ const I18N = {
        CLAUDE.md. Cualquier valor nuevo que no esté acá cae sin traducir
        (mismo comportamiento de fallback que ya tenía GEO_LABEL). */
     geoLabels: {
-      "Île-de-France": "Île-de-France", "Francia fuera IDF": "Francia (fuera IDF)",
+      "Île-de-France": "Île-de-France", "Francia fuera de IDF": "Francia (fuera IDF)",
       "Fuera de Francia": "Fuera de Francia", "No confirmado": "No confirmado",
     },
     months: ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"],
   },
   fr: {
     where: "Où", when: "Quand", free: "Gratuit",
-    categoryGroupLabel: "Catégorie", otherCategoriesLabel: "Autres catégories",
+    categoryGroupLabel: "Catégorie",
     sortLabel: "Trier", sortRecommended: "Recommandé", sortDate: "Date", sortPopularity: "Popularité",
     geoAll: "Toute l'Île-de-France et plus",
     whenToday: "Aujourd'hui", whenWeek: "Cette semaine", whenMonth: "Ce mois-ci", whenUpcoming: "À venir", whenPast: "Passés",
@@ -93,7 +93,7 @@ const I18N = {
       academico: "Conférences et débats", politico: "Civique",
     },
     geoLabels: {
-      "Île-de-France": "Île-de-France", "Francia fuera IDF": "France (hors IDF)",
+      "Île-de-France": "Île-de-France", "Francia fuera de IDF": "France (hors IDF)",
       "Fuera de Francia": "Hors de France", "No confirmado": "Non confirmé",
     },
     months: ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."],

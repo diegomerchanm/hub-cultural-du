@@ -93,13 +93,6 @@ a { color: inherit; }
   text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600;
   flex-shrink: 0;
 }
-/* "Otras categorías" es un separador de segundo orden -- mismo lenguaje
-   visual (chip redondeado) pero contorneado en vez de relleno, para que
-   se lea como subordinado a "Categoría" y no como una sección al mismo
-   nivel. */
-.filter-label-muted {
-  background: transparent; color: var(--sub); border: 1px solid var(--border);
-}
 .pill-row { display: flex; gap: 6px; flex-wrap: wrap; }
 .pill {
   font-family: var(--font-sans); font-size: 13px; color: var(--text);
@@ -109,16 +102,13 @@ a { color: inherit; }
 }
 /* Tamaños discretos para la nube de categorías (DD-055) -- terciles
    dinámicos calculados en JS según el volumen real de eventos por tema,
-   no umbrales fijos. tier-xs es además el tamaño de "Otras categorías".
-   Definidos ANTES de .pill.active a propósito: misma especificidad
-   (dos clases), así que el orden en la hoja de estilos decide el empate
-   y .active necesita ganarle siempre a un tier para que el texto activo
-   se siga viendo con contraste sobre el fondo oscuro. */
+   no umbrales fijos. Definidos ANTES de .pill.active a propósito: misma
+   especificidad (dos clases), así que el orden en la hoja de estilos
+   decide el empate y .active necesita ganarle siempre a un tier para que
+   el texto activo se siga viendo con contraste sobre el fondo oscuro. */
 .pill.tier-lg { font-size: 14px; font-weight: 600; padding: 7px 16px; }
 .pill.tier-md { font-size: 13px; padding: 6px 13px; }
 .pill.tier-sm { font-size: 12px; padding: 5px 11px; }
-.pill.tier-xs { font-size: 11px; padding: 4px 9px; color: var(--sub); }
-.pill.tier-xs .count { font-size: 10px; }
 .pill:hover { border-color: var(--sub); }
 .pill.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 .pill .count { color: var(--sub); font-family: var(--font-mono); font-size: 11px; }
@@ -131,7 +121,6 @@ a { color: inherit; }
 .theme-row {
   display: flex; gap: 6px; flex-wrap: wrap;
 }
-.theme-row-other { margin-bottom: 2px; }
 
 /* ── Layout ──────────────────────────────────────────────────────── */
 main { max-width: 1200px; margin: 0 auto; padding: 24px; }
