@@ -28,6 +28,8 @@ const I18N = {
     reasonPosts: "Mencionado por varias publicaciones",
     reasonC: "Coincide con lo que estuviste explorando",
     followers: "seguidores", frequency: "Frecuencia", freeEvents: "Eventos gratis",
+    tabSummary: "Resumen", tabMoreInfo: "Más info",
+    cultIdLabel: "Identidad", instTypeLabel: "Institución", parentInstitutionLabel: "Institución matriz",
     /* Categorías fijas del taxonomy del LLM (11, ver CATEGORY_META en app.js)
        — clave = ev.category tal cual viene de Neo4j (estable, no cambia con
        el idioma), valor = label visible. Agregado junto con geoLabels y
@@ -80,6 +82,8 @@ const I18N = {
     reasonPosts: "Mentionné par plusieurs publications",
     reasonC: "Correspond à ce que vous explorez",
     followers: "abonnés", frequency: "Fréquence", freeEvents: "Événements gratuits",
+    tabSummary: "Résumé", tabMoreInfo: "Plus d'infos",
+    cultIdLabel: "Identité", instTypeLabel: "Institution", parentInstitutionLabel: "Institution mère",
     categories: {
       gastronomico: "Gastronomie", institucional: "Institutionnel", visual: "Arts visuels",
       comunitario: "Communauté", musical: "Musique", formacion: "Ateliers",

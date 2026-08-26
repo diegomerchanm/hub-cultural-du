@@ -588,50 +588,63 @@ function openDetail(ev) {
   const acc = ACCOUNTS_BY_USER[ev.sourceAuthor] || {};
   const similar = (ev.similarEventIds || []).map((id) => DATA.events.find((e) => e.id === id)).filter(Boolean);
   const panel = document.getElementById("detail-panel");
+  const chips = [
+    ev.culturalIdentity ? `<span class="chip chip-identity">${t("cultIdLabel")}: ${escapeHtml(ev.culturalIdentity)}</span>` : "",
+    ev.institutionType ? `<span class="chip chip-institution">${t("instTypeLabel")}: ${escapeHtml(ev.institutionType)}</span>` : "",
+    ev.geoZone ? `<span class="chip chip-geo">${geoLabel(ev.geoZone)}</span>` : "",
+  ].filter(Boolean).join("");
   panel.innerHTML = `
     <button class="detail-close" data-close aria-label="Cerrar"><i class="ti ti-x" aria-hidden="true"></i></button>
     <div class="detail-img" style="${ev.imageUrl ? "" : `background:${meta.color}`}">${imageBlockHtml(ev, meta, "detail-photo")}</div>
-    <div class="detail-grid">
-      <div>
-        <p class="detail-eyebrow">${fmtDate(ev.eventDate)}</p>
-        <h1 class="detail-title">${escapeHtml(evTitle(ev))}</h1>
-        <p class="detail-desc">${escapeHtml(evDescription(ev))}</p>
-        <div class="info-box">
-          <p class="info-box-label">${t("whatWeKnow")}</p>
-          ${ev.exactAddress ? `<div class="info-row"><span class="k"><i class="ti ti-map-pin" aria-hidden="true"></i>${t("address")}</span><span>${escapeHtml(ev.exactAddress)}</span></div>` : ""}
-          ${ev.cityName ? `<div class="info-row"><span class="k"><i class="ti ti-building" aria-hidden="true"></i>${t("city")}</span><span>${escapeHtml(ev.cityName)}</span></div>` : ""}
-          ${ev.priceRange ? `<div class="info-row"><span class="k"><i class="ti ti-currency-euro" aria-hidden="true"></i>${t("price")}</span><span>${escapeHtml(ev.priceRange)}</span></div>` : ""}
-        </div>
-        ${ev.sourcePostUrl ? `<a class="cta-link" href="${ev.sourcePostUrl}" target="_blank" rel="noopener" onclick="bumpPref(null,null,2)"><i class="ti ti-external-link" aria-hidden="true"></i>${t("viewOriginal")}</a>` : ""}
-        ${similar.length ? `<div style="margin-top:20px;border-top:1px solid var(--border);padding-top:12px">
-          <p class="info-box-label">${t("similarEvents")}</p>
-          <div class="similar-row">${similar.map((s) => `<div class="similar-card" data-id="${s.id}"><p>${escapeHtml(evTitle(s))}</p><p class="d">${fmtDate(s.eventDate)}</p></div>`).join("")}</div>
-        </div>` : ""}
-        <details class="transparency">
-          <summary>${t("detectionDetail")}</summary>
-          <p>${t("detectionText", (ev.confidence || 0).toFixed(2), ev.postCount || 1)}</p>
-        </details>
+    <div class="detail-tabs">
+      <button class="detail-tab active" data-tab="summary">${t("tabSummary")}</button>
+      <button class="detail-tab" data-tab="more">${t("tabMoreInfo")}</button>
+    </div>
+    <div class="detail-pane" data-pane="summary">
+      <p class="detail-eyebrow">${fmtDate(ev.eventDate)}</p>
+      <h1 class="detail-title">${escapeHtml(evTitle(ev))}</h1>
+      ${chips ? `<div class="chip-row">${chips}</div>` : ""}
+      <p class="detail-desc">${escapeHtml(evDescription(ev))}</p>
+      <div class="info-box">
+        <p class="info-box-label">${t("whatWeKnow")}</p>
+        ${ev.exactAddress ? `<div class="info-row"><span class="k"><i class="ti ti-map-pin" aria-hidden="true"></i>${t("address")}</span><span>${escapeHtml(ev.exactAddress)}</span></div>` : ""}
+        ${ev.cityName ? `<div class="info-row"><span class="k"><i class="ti ti-building" aria-hidden="true"></i>${t("city")}</span><span>${escapeHtml(ev.cityName)}</span></div>` : ""}
+        ${ev.priceRange ? `<div class="info-row"><span class="k"><i class="ti ti-currency-euro" aria-hidden="true"></i>${t("price")}</span><span>${escapeHtml(ev.priceRange)}</span></div>` : ""}
       </div>
-      <div>
-        <div class="sidebar-card">
-          <div class="organizer-head">
-            <div class="avatar">${(ev.sourceAuthor || "?").slice(0, 2).toUpperCase()}</div>
-            <div><p style="margin:0;font-size:13px;font-weight:600">${escapeHtml(ev.sourceAuthor || "")}</p>
-            ${acc.followers ? `<p style="margin:0;font-size:11px;color:var(--sub)">${acc.followers.toLocaleString()} ${t("followers")}</p>` : ""}</div>
-          </div>
-          ${acc.eventFrequency ? `<p style="font-size:12px;color:var(--sub);margin:2px 0">${t("frequency")}: ${escapeHtml(acc.eventFrequency)}</p>` : ""}
-          ${acc.hasFreeEvents ? `<p style="font-size:12px;color:var(--sub);margin:2px 0">${t("freeEvents")}: ${escapeHtml(acc.hasFreeEvents)}</p>` : ""}
+      ${ev.sourcePostUrl ? `<a class="cta-link" href="${ev.sourcePostUrl}" target="_blank" rel="noopener" onclick="bumpPref(null,null,2)"><i class="ti ti-external-link" aria-hidden="true"></i>${t("viewOriginal")}</a>` : ""}
+    </div>
+    <div class="detail-pane hidden" data-pane="more">
+      <div class="sidebar-card">
+        <div class="organizer-head">
+          <div class="avatar">${(ev.sourceAuthor || "?").slice(0, 2).toUpperCase()}</div>
+          <div><p style="margin:0;font-size:13px;font-weight:600">${escapeHtml(ev.sourceAuthor || "")}</p>
+          ${acc.followers ? `<p style="margin:0;font-size:11px;color:var(--sub)">${acc.followers.toLocaleString()} ${t("followers")}</p>` : ""}</div>
         </div>
-        <div class="why-box"><i class="ti ti-bulb" aria-hidden="true"></i><span>${whyReason(ev, prefs)}</span></div>
-        <div class="tag-row">
-          ${ev.artType ? escapeHtml(ev.artType).split(",").map((s) => `<span class="tag">${s.trim()}</span>`).join("") : ""}
-          ${ev.geoZone ? `<span class="tag">${geoLabel(ev.geoZone)}</span>` : ""}
-        </div>
+        ${acc.eventFrequency ? `<p style="font-size:12px;color:var(--sub);margin:2px 0">${t("frequency")}: ${escapeHtml(acc.eventFrequency)}</p>` : ""}
+        ${acc.hasFreeEvents ? `<p style="font-size:12px;color:var(--sub);margin:2px 0">${t("freeEvents")}: ${escapeHtml(acc.hasFreeEvents)}</p>` : ""}
+        ${ev.parentInstitution ? `<p style="font-size:12px;color:var(--sub);margin:2px 0">${t("parentInstitutionLabel")}: ${escapeHtml(ev.parentInstitution)}</p>` : ""}
       </div>
+      <div class="why-box"><i class="ti ti-bulb" aria-hidden="true"></i><span>${whyReason(ev, prefs)}</span></div>
+      ${ev.artType ? `<div class="tag-row">${escapeHtml(ev.artType).split(",").map((s) => `<span class="tag">${s.trim()}</span>`).join("")}</div>` : ""}
+      ${similar.length ? `<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+        <p class="info-box-label">${t("similarEvents")}</p>
+        <div class="similar-row">${similar.map((s) => `<div class="similar-card" data-id="${s.id}"><p>${escapeHtml(evTitle(s))}</p><p class="d">${fmtDate(s.eventDate)}</p></div>`).join("")}</div>
+      </div>` : ""}
+      <details class="transparency">
+        <summary>${t("detectionDetail")}</summary>
+        <p>${t("detectionText", (ev.confidence || 0).toFixed(2), ev.postCount || 1)}</p>
+      </details>
     </div>`;
   attachImageFallback(panel.querySelector(".detail-img"), meta);
   panel.querySelectorAll(".similar-card").forEach((el) => {
     el.onclick = () => { const s = DATA.events.find((e) => e.id === el.dataset.id); if (s) openDetail(s); };
+  });
+  panel.querySelectorAll(".detail-tab").forEach((btn) => {
+    btn.onclick = () => {
+      panel.querySelectorAll(".detail-tab").forEach((b) => b.classList.toggle("active", b === btn));
+      panel.querySelectorAll(".detail-pane").forEach((p) => p.classList.toggle("hidden", p.dataset.pane !== btn.dataset.tab));
+      panel.scrollTop = 0;
+    };
   });
   document.getElementById("detail-overlay").classList.remove("hidden");
   document.querySelectorAll("[data-close]").forEach((el) => (el.onclick = closeDetail));
