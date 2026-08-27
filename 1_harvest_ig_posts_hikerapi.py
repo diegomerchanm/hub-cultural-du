@@ -138,8 +138,28 @@ def _parse_chunk_response(data) -> tuple[list, str | None]:
     return [], None
 
 
-def fetch_medias_raw(user_id: str, limit: int) -> tuple[list, int]:
-    """Devuelve (lista_de_media_cruda_de_hikerapi, requests_usados)."""
+def _media_taken_at(media: dict) -> datetime | None:
+    ts = media.get("taken_at")
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def fetch_medias_raw(user_id: str, limit: int, cutoff: datetime | None = None) -> tuple[list, int]:
+    """Devuelve (lista_de_media_cruda_de_hikerapi, requests_usados).
+
+    Si se pasa `cutoff`, corta la paginación apenas UNA página completa
+    queda más vieja que el corte — no sigue pidiendo páginas solo para
+    descartarlas después (así --max-days en 'harvest' realmente baja el
+    costo, no solo el resultado final). Asume que el feed viene ordenado
+    de más nuevo a más viejo (lo normal en Instagram y en el ejemplo de
+    la doc de HikerAPI) — no confirmado con una llamada real todavía;
+    'calibrate' es el lugar para verificarlo antes de confiar en esto a
+    escala."""
     all_items, cursor, requests_used = [], None, 0
     while len(all_items) < limit:
         params = {"user_id": user_id}
@@ -151,7 +171,22 @@ def fetch_medias_raw(user_id: str, limit: int) -> tuple[list, int]:
         batch, cursor = _parse_chunk_response(data)
         if not batch:
             break
-        all_items.extend(batch)
+
+        if cutoff is not None:
+            in_window = []
+            hit_cutoff = False
+            for item in batch:
+                taken_at = _media_taken_at(item) if isinstance(item, dict) else None
+                if taken_at is not None and taken_at < cutoff:
+                    hit_cutoff = True
+                    continue
+                in_window.append(item)
+            all_items.extend(in_window)
+            if hit_cutoff:
+                break
+        else:
+            all_items.extend(batch)
+
         if not cursor:
             break
         time.sleep(0.2)
@@ -316,11 +351,18 @@ def compare(username: str = typer.Option(..., "--username")):
 
     apify_cost_avg = _apify_cost_for(username)
 
+    def _date_range(posts, key):
+        dates = sorted(p.get(key, "")[:10] for p in posts if p.get(key))
+        return (dates[0], dates[-1]) if dates else ("?", "?")
+
+    apify_range = _date_range(apify_posts, "timestamp")
+    hiker_range = _date_range(hiker_posts, "timestamp")
+
     print(f"\n{'─'*56}")
     print(f"  REPORTE DE COMPARACIÓN — @{username}")
     print(f"{'─'*56}")
-    print(f"  Posts Apify (referencia)     : {target_n}")
-    print(f"  Posts HikerAPI (recuperados) : {len(hiker_posts)}")
+    print(f"  Posts Apify (referencia)     : {target_n}  ({apify_range[0]} a {apify_range[1]})")
+    print(f"  Posts HikerAPI (recuperados) : {len(hiker_posts)}  ({hiker_range[0]} a {hiker_range[1]})")
     print(f"  IDs en común                 : {len(overlap)} / {target_n}")
     print(f"  {'─'*54}")
     print(f"  Cobertura de campos (HikerAPI, no-vacíos/total):")
@@ -400,8 +442,12 @@ def harvest(
     print(f"\n┌─────────────────────────────────────────────────┐")
     print(f"│  🎯 Cuentas a procesar    : {len(pending):>4}                    │")
     print(f"│  📦 Tope por cuenta       : {RESULTS_LIMIT:>4} posts               │")
-    print(f"│  💰 Estimado (SIN calibrar): ${est_cost:>7.2f} USD              │")
-    print(f"│  ⚠️  Corré 'calibrate' antes si no lo hiciste     │")
+    print(f"│  📅 Ventana               : últimos {max_days:>3} días          │")
+    print(f"│  💰 Estimado (techo, SIN calibrar): ${est_cost:>7.2f} USD      │")
+    print(f"│  ⚠️  Costo real probablemente MENOR — la paginación   │")
+    print(f"│     corta apenas ve una página fuera de la ventana │")
+    print(f"│     de {max_days} días, no baja los {RESULTS_LIMIT} posts completos siempre │")
+    print(f"│  ⚠️  Corré 'calibrate' antes si no lo hiciste         │")
     print(f"└─────────────────────────────────────────────────┘\n")
 
     if not yes:
@@ -417,7 +463,10 @@ def harvest(
         print(f"🚀 @{username}...")
         try:
             user_id, reqs1 = resolve_user_id(username)
-            raw_items, reqs2 = fetch_medias_raw(user_id, RESULTS_LIMIT)
+            # cutoff acá corta la paginación apenas se detecta una página vieja
+            # (ver fetch_medias_raw) — el filtro de abajo es una red de
+            # seguridad extra, no el mecanismo principal de ahorro.
+            raw_items, reqs2 = fetch_medias_raw(user_id, RESULTS_LIMIT, cutoff=cutoff)
             total_requests += reqs1 + reqs2
 
             normalized = [normalize_media(m) for m in raw_items]
