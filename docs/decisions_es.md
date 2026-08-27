@@ -1173,9 +1173,19 @@ Costo estimado del scrape de 50 perfiles: trivial (~$0.03-0.20 según el precio 
 
 ---
 
+**DD-062 — Dos botones de acción en el detalle: "Cómo llegar" y "Agregar al calendario" (2026-08-27).** A raíz de la pregunta de Diego sobre costos de la API de mapas, aprobó agregar estos dos como enriquecimiento adicional del panel de detalle. Ninguno usa una API paga ni necesita key: ambos son esquemas de URL pública documentados por Google (Universal Maps URLs para direcciones, plantilla de Google Calendar para el evento) — un simple `<a href>`, igual de "gratis" que un link cualquiera.
+
+- `directionsUrl(ev)` (`app.js`): `https://www.google.com/maps/dir/?api=1&destination=...` — usa `lat`/`lon` si el evento los tiene (más preciso), si no cae a `exactAddress`/`locationName`/`cityName`.
+- `gcalUrl(ev)`: plantilla `https://calendar.google.com/calendar/render?action=TEMPLATE&...`. Como `eventDate` en este proyecto es solo fecha (sin hora — la extracción actual no la captura con confianza suficiente, ver limitaciones ya documentadas), se arma como evento de día completo; Google Calendar exige la fecha de fin *exclusiva*, por eso `gcalUrl` suma un día a la fecha de inicio antes de formatear. `details` incluye la descripción del evento más el link al post original si existe, `location` reusa el mismo texto de dirección que el resto del panel.
+- Ambos links devuelven `null` (no se renderiza el botón) si el evento no tiene el dato mínimo necesario (`eventDate` para calendario, algo de ubicación para direcciones) — mismo patrón defensivo que `mapEmbedHtml`.
+- Se agrupó junto con el link "Ver publicación original" existente en un nuevo `<div class="action-row">` (antes ese link no tenía contenedor propio), después del mapa.
+- Verificado: `node --check` en `app.js`/`i18n.js`, balance de llaves en `style.css` (110/110), smoke test en Node de `directionsUrl`/`gcalUrl` con casos de lat/lon, solo dirección, sin ubicación, y sin fecha.
+
+---
+
 **Tesis:** `thesis/main.tex` — outline completo en LaTeX/inglés, revisado por un agente Opus (correcciones factuales sobre este mismo decision log, capítulos 3–5 completados con prosa real anclada en runs/decisiones reales, nueva §3.7 "Evaluation Design"; actualizado 2026-08-25/26 para incorporar DD-047 a DD-053 — cascada de 4 proveedores LLM, staging review humano, eventos bilingües, deploy manual de Cloudflare Workers). Gaps pendientes: sin `references.bib`, sin postura ética explícita sobre ToS de Instagram, sin figura del pipeline ni capturas del sitio, cifra de "73–83 comunidades" sin validar contra una corrida real antes de citarla, y todavía no incorpora DD-054 (traducción ES/FR de categorías/geo/fecha/tags).
 
 ---
 
-*Última actualización: 2026-08-27 (noche)*
+*Última actualización: 2026-08-27 (noche, 2)*
 *Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos, resolución de DD-035 (exposiciones en curso), normalización de dígitos Unicode estilizados si se confirma que es frecuente, validación de los fixes DD-038/DD-039 en corridas reales, y si la muestra de "conflicto geográfico" (DD-041) revela falsos positivos del gazetteer. También pendiente: limpieza de basura preexistente en eventos legacy (fecha `1492-11-01`, emoji como `locationName`, texto no-geográfico como `locationName`). Validación en vivo de DD-042 (`eventArtTags`) contra output real del LLM, y decisión sobre si vale la pena un backfill de los eventos existentes. Los 8 puntos de DD-045 son ahora el punchlist activo — arrancar por el 1 y el 2 (ya diagnosticados, sin trabajo de investigación adicional).*

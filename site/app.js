@@ -486,6 +486,39 @@ function mapEmbedHtml(ev) {
   const src = `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}`;
   return `<div class="detail-map"><iframe src="${src}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen title="${escapeHtml(t("mapTitle"))}"></iframe></div>`;
 }
+/* "Cómo llegar" -- esquema de URL pública de Google Maps (Universal Maps
+   URLs), no una API paga: no hace falta key ni facturación, es el mismo
+   link que arma el botón "Cómo llegar" de Google Maps normal. Prioriza
+   lat/lon (ya geocodificado, más preciso) sobre la dirección de texto. */
+function directionsUrl(ev) {
+  const dest = (ev.lat != null && ev.lon != null)
+    ? `${ev.lat},${ev.lon}`
+    : (ev.exactAddress || ev.locationName || ev.cityName || "");
+  return dest ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}` : null;
+}
+
+/* "Agregar a Google Calendar" -- URL de plantilla documentada de Google
+   Calendar, tampoco es una API paga, es un link. Como eventDate es solo
+   fecha (sin hora, no la tenemos con confianza suficiente en la extracción
+   actual), se arma como evento de todo el día: Google Calendar espera la
+   fecha de fin EXCLUSIVA, por eso se suma un día. */
+function gcalUrl(ev) {
+  if (!ev.eventDate) return null;
+  const start = new Date(ev.eventDate + "T00:00:00");
+  if (isNaN(start)) return null;
+  const end = new Date(start); end.setDate(end.getDate() + 1);
+  const ymd = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const details = evDescription(ev) + (ev.sourcePostUrl ? `\n\n${ev.sourcePostUrl}` : "");
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: evTitle(ev),
+    dates: `${ymd(start)}/${ymd(end)}`,
+    details,
+    location: ev.exactAddress || ev.locationName || ev.cityName || "",
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
 function detailMediaHtml(ev, meta) {
   if (hasPhotoPermission(ev)) {
     return { kind: "photo", html: `<img src="${escapeHtml(ev.imageUrl)}" alt="" class="detail-photo" loading="lazy">` };
@@ -685,7 +718,11 @@ function openDetail(ev) {
         ${ev.priceRange ? `<div class="info-row"><span class="k"><i class="ti ti-currency-euro" aria-hidden="true"></i>${t("price")}</span><span>${escapeHtml(ev.priceRange)}</span></div>` : ""}
       </div>
       ${mapEmbedHtml(ev)}
-      ${ev.sourcePostUrl ? `<a class="cta-link" href="${ev.sourcePostUrl}" target="_blank" rel="noopener" onclick="bumpPref(null,null,2)"><i class="ti ti-external-link" aria-hidden="true"></i>${t("viewOriginal")}</a>` : ""}
+      <div class="action-row">
+        ${directionsUrl(ev) ? `<a class="cta-link" href="${directionsUrl(ev)}" target="_blank" rel="noopener"><i class="ti ti-directions" aria-hidden="true"></i>${t("directions")}</a>` : ""}
+        ${gcalUrl(ev) ? `<a class="cta-link" href="${gcalUrl(ev)}" target="_blank" rel="noopener"><i class="ti ti-calendar-plus" aria-hidden="true"></i>${t("addToCalendar")}</a>` : ""}
+        ${ev.sourcePostUrl ? `<a class="cta-link" href="${ev.sourcePostUrl}" target="_blank" rel="noopener" onclick="bumpPref(null,null,2)"><i class="ti ti-external-link" aria-hidden="true"></i>${t("viewOriginal")}</a>` : ""}
+      </div>
       ${media.kind === "embed" ? `<div class="detail-embed">${media.html}</div>` : ""}
     </div>
     <div class="detail-pane hidden" data-pane="more">

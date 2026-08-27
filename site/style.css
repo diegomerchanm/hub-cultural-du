@@ -231,6 +231,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 .info-row .k { color: var(--sub); display: flex; align-items: center; gap: 6px; }
 .detail-map { margin: 0 0 16px; border-radius: var(--radius-card); overflow: hidden; border: 1px solid var(--border); }
 .detail-map iframe { display: block; width: 100%; height: 200px; border: 0; }
+.action-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
 .cta-link {
   display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 8px 14px;
   border-radius: var(--radius); border: 1px solid var(--text); text-decoration: none; color: var(--text);
