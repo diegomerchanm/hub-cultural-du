@@ -200,14 +200,15 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 }
 .detail-img { height: 160px; border-radius: var(--radius-card); display: flex; align-items: center; justify-content: center; margin-bottom: 16px; overflow: hidden; }
 .detail-img i { font-size: 40px; opacity: 0.5; color: #fff; }
-.detail-img-embed {
-  height: auto; min-height: 60px; display: block; background: none;
-}
-.detail-img-embed .instagram-media {
+/* DD-060 (ajuste 2026-08-27): el embed de Instagram ya no va en .detail-img
+   (arriba), sino después de nuestra info -- ver .detail-embed más abajo,
+   usado dentro de .detail-pane[data-pane=summary]. */
+.detail-embed { margin-top: 16px; }
+.detail-embed .instagram-media {
   margin: 0 auto !important; max-width: 100% !important; min-width: 0 !important;
   border-radius: var(--radius-card); border: 1px solid var(--border) !important;
 }
-.detail-img-embed a { font-size: 13px; color: var(--sub); text-decoration: none; }
+.detail-embed a { font-size: 13px; color: var(--sub); text-decoration: none; }
 .detail-photo { width: 100%; height: 100%; object-fit: cover; display: block; }
 .detail-tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
 .detail-tab {
@@ -228,6 +229,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 .info-box-label { font-size: 12px; color: var(--sub); margin: 0 0 8px; }
 .info-row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
 .info-row .k { color: var(--sub); display: flex; align-items: center; gap: 6px; }
+.detail-map { margin: 0 0 16px; border-radius: var(--radius-card); overflow: hidden; border: 1px solid var(--border); }
+.detail-map iframe { display: block; width: 100%; height: 200px; border: 0; }
 .cta-link {
   display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 8px 14px;
   border-radius: var(--radius); border: 1px solid var(--text); text-decoration: none; color: var(--text);

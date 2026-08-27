@@ -466,6 +466,26 @@ function loadInstagramEmbedScript() {
   });
   return igEmbedScriptPromise;
 }
+/* Mapa embebido de Google (Maps Embed API), solo en el panel de detalle.
+   Requiere una API key (gratis, uso ilimitado según docs de Google 2026,
+   pero necesita un proyecto de Google Cloud con facturación activada) --
+   la key vive en site/config.js, fuera de este archivo, para que Diego
+   pueda pegarla sin tocar código. Si no hay key configurada, o el evento
+   no tiene ni coordenadas ni dirección, no se renderiza nada (silencioso,
+   no rompe el resto del panel). Restringir la key por HTTP referrer al
+   dominio del sitio en la consola de Google Cloud -- es una key de
+   frontend, siempre queda visible en el HTML, la restricción es lo que
+   evita el uso indebido, no el secreto. */
+function mapEmbedHtml(ev) {
+  const key = window.GOOGLE_MAPS_EMBED_KEY;
+  if (!key || key === "YOUR_KEY_HERE") return "";
+  const q = (ev.lat != null && ev.lon != null)
+    ? `${ev.lat},${ev.lon}`
+    : [ev.exactAddress, ev.locationName, ev.cityName].filter(Boolean).join(", ");
+  if (!q) return "";
+  const src = `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}`;
+  return `<div class="detail-map"><iframe src="${src}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen title="${escapeHtml(t("mapTitle"))}"></iframe></div>`;
+}
 function detailMediaHtml(ev, meta) {
   if (hasPhotoPermission(ev)) {
     return { kind: "photo", html: `<img src="${escapeHtml(ev.imageUrl)}" alt="" class="detail-photo" loading="lazy">` };
@@ -640,9 +660,15 @@ function openDetail(ev) {
     ev.geoZone ? `<span class="chip chip-geo">${geoLabel(ev.geoZone)}</span>` : "",
   ].filter(Boolean).join("");
   const media = detailMediaHtml(ev, meta);
+  // El embed de Instagram va abajo, después de nuestra info (pedido de Diego,
+  // 2026-08-27): arriba del todo siempre va el ícono+color de siempre (igual
+  // que el caso "sin foto"), y el <blockquote> real se inserta al final del
+  // tab "Resumen", después del link "Ver original". La foto real (cuando hay
+  // permiso) sigue arriba, ahí sí funciona como imagen destacada.
+  const topMedia = media.kind === "embed" ? { kind: "icon", html: `<i class="ti ${meta.icon}" aria-hidden="true"></i>` } : media;
   panel.innerHTML = `
     <button class="detail-close" data-close aria-label="Cerrar"><i class="ti ti-x" aria-hidden="true"></i></button>
-    <div class="detail-img ${media.kind === "embed" ? "detail-img-embed" : ""}" style="${media.kind === "icon" ? `background:${meta.color}` : ""}">${media.html}</div>
+    <div class="detail-img" style="${topMedia.kind === "icon" ? `background:${meta.color}` : ""}">${topMedia.html}</div>
     <div class="detail-tabs">
       <button class="detail-tab active" data-tab="summary">${t("tabSummary")}</button>
       <button class="detail-tab" data-tab="more">${t("tabMoreInfo")}</button>
@@ -658,7 +684,9 @@ function openDetail(ev) {
         ${ev.cityName ? `<div class="info-row"><span class="k"><i class="ti ti-building" aria-hidden="true"></i>${t("city")}</span><span>${escapeHtml(ev.cityName)}</span></div>` : ""}
         ${ev.priceRange ? `<div class="info-row"><span class="k"><i class="ti ti-currency-euro" aria-hidden="true"></i>${t("price")}</span><span>${escapeHtml(ev.priceRange)}</span></div>` : ""}
       </div>
+      ${mapEmbedHtml(ev)}
       ${ev.sourcePostUrl ? `<a class="cta-link" href="${ev.sourcePostUrl}" target="_blank" rel="noopener" onclick="bumpPref(null,null,2)"><i class="ti ti-external-link" aria-hidden="true"></i>${t("viewOriginal")}</a>` : ""}
+      ${media.kind === "embed" ? `<div class="detail-embed">${media.html}</div>` : ""}
     </div>
     <div class="detail-pane hidden" data-pane="more">
       <div class="sidebar-card">
