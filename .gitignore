@@ -12,6 +12,7 @@ data_processed/
 data_processed/runs/
 ref_embeddings.npz
 site/.wrangler/
+.pipeline_runs/
 thesis/*.aux
 thesis/*.log
 thesis/*.out
