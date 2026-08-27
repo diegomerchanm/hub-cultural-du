@@ -519,6 +519,38 @@ function gcalUrl(ev) {
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
+/* Compartir un evento puntual (2026-08-27, pedido de Diego). El sitio no
+   tenía links propios por evento -- abrir un evento nunca cambiaba la URL,
+   así que compartir hasta ahora solo podía compartir el home. eventShareUrl
+   arma un link con ?evento=<id> sobre la misma página (sin ruta nueva en
+   Cloudflare Workers, es un query string sobre "/"); openDetail/closeDetail
+   lo empujan a la barra de direcciones con history.pushState (sin recargar
+   la página) y lo retiran al cerrar. init() revisa ese parámetro al cargar
+   para poder abrir un evento directo desde un link compartido. */
+function eventShareUrl(ev) {
+  return `${location.origin}${location.pathname}?evento=${encodeURIComponent(ev.id)}`;
+}
+async function shareEvent(ev, btn) {
+  const url = eventShareUrl(ev);
+  if (navigator.share) {
+    try { await navigator.share({ title: evTitle(ev), text: evDescription(ev).slice(0, 140), url }); }
+    catch (e) { /* el visitante canceló el panel nativo de compartir -- no es un error */ }
+    return;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try { await navigator.clipboard.writeText(url); flashShareFeedback(btn); }
+    catch (e) { /* portapapeles bloqueado por el navegador -- el link sigue visible en la barra de direcciones */ }
+  }
+}
+function flashShareFeedback(btn) {
+  const label = btn && btn.querySelector(".share-label");
+  if (!label) return;
+  const original = label.textContent;
+  label.textContent = t("linkCopied");
+  btn.disabled = true;
+  setTimeout(() => { label.textContent = original; btn.disabled = false; }, 1500);
+}
+
 function detailMediaHtml(ev, meta) {
   if (hasPhotoPermission(ev)) {
     return { kind: "photo", html: `<img src="${escapeHtml(ev.imageUrl)}" alt="" class="detail-photo" loading="lazy">` };
@@ -680,7 +712,8 @@ function whyReason(ev, prefs) {
   if (top === "T") return t("reasonT");
   return t("reasonC");
 }
-function openDetail(ev) {
+function openDetail(ev, opts = {}) {
+  const { updateHistory = true } = opts;
   const prefs = loadPrefs();
   bumpPref([...eventThemes(ev)][0], ev.geoZone, 1);
   const meta = themeMeta([...eventThemes(ev)][0] || "");
@@ -719,6 +752,7 @@ function openDetail(ev) {
       </div>
       ${mapEmbedHtml(ev)}
       <div class="action-row">
+        <button type="button" class="cta-link share-btn"><i class="ti ti-share-3" aria-hidden="true"></i><span class="share-label">${t("share")}</span></button>
         ${directionsUrl(ev) ? `<a class="cta-link" href="${directionsUrl(ev)}" target="_blank" rel="noopener"><i class="ti ti-directions" aria-hidden="true"></i>${t("directions")}</a>` : ""}
         ${gcalUrl(ev) ? `<a class="cta-link" href="${gcalUrl(ev)}" target="_blank" rel="noopener"><i class="ti ti-calendar-plus" aria-hidden="true"></i>${t("addToCalendar")}</a>` : ""}
         ${ev.sourcePostUrl ? `<a class="cta-link" href="${ev.sourcePostUrl}" target="_blank" rel="noopener" onclick="bumpPref(null,null,2)"><i class="ti ti-external-link" aria-hidden="true"></i>${t("viewOriginal")}</a>` : ""}
@@ -754,6 +788,8 @@ function openDetail(ev) {
       if (window.instgrm && window.instgrm.Embeds) window.instgrm.Embeds.process();
     });
   }
+  const shareBtn = panel.querySelector(".share-btn");
+  if (shareBtn) shareBtn.onclick = () => shareEvent(ev, shareBtn);
   panel.querySelectorAll(".similar-card").forEach((el) => {
     el.onclick = () => { const s = DATA.events.find((e) => e.id === el.dataset.id); if (s) openDetail(s); };
   });
@@ -766,8 +802,28 @@ function openDetail(ev) {
   });
   document.getElementById("detail-overlay").classList.remove("hidden");
   document.querySelectorAll("[data-close]").forEach((el) => (el.onclick = closeDetail));
+  if (updateHistory) {
+    const url = eventShareUrl(ev);
+    if (location.href !== url) history.pushState({ eventId: ev.id }, "", url);
+  }
 }
-function closeDetail() { document.getElementById("detail-overlay").classList.add("hidden"); }
+function closeDetail(opts = {}) {
+  const { updateHistory = true } = opts;
+  document.getElementById("detail-overlay").classList.add("hidden");
+  if (updateHistory && new URLSearchParams(location.search).get("evento")) {
+    history.pushState(null, "", location.pathname);
+  }
+}
+/* Atrás/adelante del navegador sobre un link de evento (?evento=id): no
+   volvemos a pushear historial acá (updateHistory: false), la URL ya la
+   cambió el propio navegador al navegar -- solo hay que reflejarla en el
+   panel. */
+window.addEventListener("popstate", () => {
+  const id = new URLSearchParams(location.search).get("evento");
+  const ev = id && DATA.events ? DATA.events.find((e) => e.id === id) : null;
+  if (ev) openDetail(ev, { updateHistory: false });
+  else closeDetail({ updateHistory: false });
+});
 
 /* ── Init ────────────────────────────────────────────────────────────── */
 function markBetweennessDecile() {
@@ -799,5 +855,12 @@ async function init() {
   markBetweennessDecile();
   buildTagFrMap();
   render();
+  // Link compartido (?evento=id): abrir ese evento directo al cargar. No
+  // pushea historial de nuevo -- la URL ya viene así desde afuera.
+  const sharedId = new URLSearchParams(location.search).get("evento");
+  if (sharedId) {
+    const ev = DATA.events.find((e) => e.id === sharedId);
+    if (ev) openDetail(ev, { updateHistory: false });
+  }
 }
 init();
