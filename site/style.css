@@ -200,6 +200,14 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 }
 .detail-img { height: 160px; border-radius: var(--radius-card); display: flex; align-items: center; justify-content: center; margin-bottom: 16px; overflow: hidden; }
 .detail-img i { font-size: 40px; opacity: 0.5; color: #fff; }
+.detail-img-embed {
+  height: auto; min-height: 60px; display: block; background: none;
+}
+.detail-img-embed .instagram-media {
+  margin: 0 auto !important; max-width: 100% !important; min-width: 0 !important;
+  border-radius: var(--radius-card); border: 1px solid var(--border) !important;
+}
+.detail-img-embed a { font-size: 13px; color: var(--sub); text-decoration: none; }
 .detail-photo { width: 100%; height: 100%; object-fit: cover; display: block; }
 .detail-tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
 .detail-tab {

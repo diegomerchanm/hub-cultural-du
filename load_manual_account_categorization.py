@@ -56,7 +56,20 @@ COLUMN_MAP = {
     11: "eventFormat",               # Curso / evento único / requisitos
     12: "culturalIdentity",          # Identidad cultural (si aplica)
     13: "geoZone",                   # Île-de-France / Francia fuera IDF / Fuera de Francia
+    14: "photoPermissionRaw",        # Permiso para mostrar sus fotos en el sitio (Sí/No, vacío = sin dato)
 }
+
+
+def _is_yes(raw) -> bool | None:
+    """Normaliza la columna 14 (texto libre en la planilla, ej. 'Sí',
+    'si', 'Sí, ya la contactamos') a True/False/None. None = sin dato
+    todavía (cuenta sin contactar aún) — en el sitio se trata igual que
+    False (default seguro: sin permiso explícito, no se muestra la foto
+    real), pero se guarda distinto para poder filtrar después quién
+    falta contactar."""
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    return raw.strip().lower().startswith(("s", "y"))  # sí / si / yes
 
 
 def handle_rows():
@@ -117,6 +130,7 @@ def load_rows(xlsx_path: str):
         raw_followers = ws.cell(row=r, column=7).value
         props["manualFollowersLabel"] = raw_followers
         props["manualFollowersCount"] = parse_followers(raw_followers or "")
+        props["photoPermission"] = _is_yes(props.pop("photoPermissionRaw", None))
         out.append(props)
     return out
 
@@ -138,6 +152,7 @@ SET a.artType                = row.artType,
     a.geoZone                 = row.geoZone,
     a.manualFollowersLabel    = row.manualFollowersLabel,
     a.manualFollowersCount    = row.manualFollowersCount,
+    a.photoPermission         = row.photoPermission,
     a.manualDataCuratedAt     = $curatedAt,
     a.manualDataSource        = $source
 RETURN count(a) AS n

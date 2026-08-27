@@ -158,6 +158,7 @@ RETURN e.id AS id, e.title AS title, e.titleFr AS titleFr, e.category AS categor
        e.sourcePostDate AS sourcePostDate,
        e.culturalIdentity AS culturalIdentity, e.geoZone AS geoZone,
        e.parentInstitution AS parentInstitution, e.institutionType AS institutionType,
+       e.photoPermission AS photoPermission,
        e.embedding AS embedding
 """
 

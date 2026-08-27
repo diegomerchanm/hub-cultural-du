@@ -422,8 +422,17 @@ function distanceLabel(ev) {
    un listener real después de insertar el HTML (attachImageFallback), no
    con un onerror inline: mucho más simple que escapar comillas dentro de
    un atributo HTML a mano. */
+/* DD-060: la foto real solo se muestra si la cuenta autorizó explícitamente
+   (columna "Permiso de foto" de la planilla curada, load_manual_account_
+   categorization.py). Sin autorización explícita (incluye null = cuenta
+   sin contactar todavía), nunca se muestra ev.imageUrl en tarjetas/hero —
+   ahí cae al ícono+color de siempre. En el panel de detalle hay un tercer
+   estado (embed oficial de Instagram) manejado aparte, ver detailMediaHtml. */
+function hasPhotoPermission(ev) {
+  return ev.photoPermission === true && !!ev.imageUrl;
+}
 function imageBlockHtml(ev, meta, imgClass) {
-  if (!ev.imageUrl) return `<i class="ti ${meta.icon}" aria-hidden="true"></i>`;
+  if (!hasPhotoPermission(ev)) return `<i class="ti ${meta.icon}" aria-hidden="true"></i>`;
   return `<img src="${escapeHtml(ev.imageUrl)}" alt="" class="${imgClass}" loading="lazy">`;
 }
 function attachImageFallback(container, meta) {
@@ -434,6 +443,43 @@ function attachImageFallback(container, meta) {
     container.style.background = meta.color;
     container.insertAdjacentHTML("afterbegin", `<i class="ti ${meta.icon}" aria-hidden="true"></i>`);
   };
+}
+
+/* DD-060: embed oficial de Instagram (oEmbed/blockquote), usado SOLO en el
+   panel de detalle cuando la cuenta no autorizó mostrar su foto real. A
+   diferencia de copiar/alojar la imagen, esto renderiza el post en vivo
+   desde los servidores de Instagram — no hay archivo nuestro de por medio.
+   El <blockquote> ya trae un <a> real al post como contenido de reserva,
+   así que si el script no carga o Instagram no lo procesa, igual queda un
+   link funcional en vez de una caja rota. */
+let igEmbedScriptPromise = null;
+function loadInstagramEmbedScript() {
+  if (igEmbedScriptPromise) return igEmbedScriptPromise;
+  igEmbedScriptPromise = new Promise((resolve) => {
+    if (window.instgrm) return resolve();
+    const s = document.createElement("script");
+    s.src = "https://www.instagram.com/embed.js";
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => resolve(); // degrada en silencio -- el link dentro del blockquote sigue sirviendo
+    document.body.appendChild(s);
+  });
+  return igEmbedScriptPromise;
+}
+function detailMediaHtml(ev, meta) {
+  if (hasPhotoPermission(ev)) {
+    return { kind: "photo", html: `<img src="${escapeHtml(ev.imageUrl)}" alt="" class="detail-photo" loading="lazy">` };
+  }
+  if (ev.sourcePostUrl) {
+    const url = escapeHtml(ev.sourcePostUrl);
+    return {
+      kind: "embed",
+      html: `<blockquote class="instagram-media" data-instgrm-permalink="${url}" data-instgrm-version="14">
+        <a href="${url}" target="_blank" rel="noopener">${t("viewOriginal")}</a>
+      </blockquote>`,
+    };
+  }
+  return { kind: "icon", html: `<i class="ti ${meta.icon}" aria-hidden="true"></i>` };
 }
 
 /* ── Render: tarjeta de evento ───────────────────────────────────────── */
@@ -453,7 +499,7 @@ function eventCardEl(ev, hotnessP80) {
   card.onclick = () => openDetail(ev);
   const badges = badgesFor(ev, hotnessP80);
   card.innerHTML = `
-    <div class="event-card-img" style="${ev.imageUrl ? "" : `background:${meta.color}`}">
+    <div class="event-card-img" style="${hasPhotoPermission(ev) ? "" : `background:${meta.color}`}">
       ${imageBlockHtml(ev, meta, "event-card-photo")}
       ${ev.isFree ? `<span class="badge-free">${t("free")}</span>` : ""}
     </div>
@@ -531,7 +577,7 @@ function render() {
     const heroMeta = themeMeta([...eventThemes(hero)][0] || "");
     heroSection.innerHTML = `
       <div class="hero-card">
-        <div class="hero-img" style="${hero.imageUrl ? "" : `background:${heroMeta.color}`}">${imageBlockHtml(hero, heroMeta, "hero-photo")}</div>
+        <div class="hero-img" style="${hasPhotoPermission(hero) ? "" : `background:${heroMeta.color}`}">${imageBlockHtml(hero, heroMeta, "hero-photo")}</div>
         <div class="hero-body">
           <p class="hero-eyebrow"><i class="ti ti-sparkles" aria-hidden="true"></i>${t("heroEyebrow")}</p>
           <p class="hero-title">${escapeHtml(evTitle(hero))}</p>
@@ -593,9 +639,10 @@ function openDetail(ev) {
     ev.institutionType ? `<span class="chip chip-institution">${t("instTypeLabel")}: ${escapeHtml(ev.institutionType)}</span>` : "",
     ev.geoZone ? `<span class="chip chip-geo">${geoLabel(ev.geoZone)}</span>` : "",
   ].filter(Boolean).join("");
+  const media = detailMediaHtml(ev, meta);
   panel.innerHTML = `
     <button class="detail-close" data-close aria-label="Cerrar"><i class="ti ti-x" aria-hidden="true"></i></button>
-    <div class="detail-img" style="${ev.imageUrl ? "" : `background:${meta.color}`}">${imageBlockHtml(ev, meta, "detail-photo")}</div>
+    <div class="detail-img ${media.kind === "embed" ? "detail-img-embed" : ""}" style="${media.kind === "icon" ? `background:${meta.color}` : ""}">${media.html}</div>
     <div class="detail-tabs">
       <button class="detail-tab active" data-tab="summary">${t("tabSummary")}</button>
       <button class="detail-tab" data-tab="more">${t("tabMoreInfo")}</button>
@@ -635,7 +682,13 @@ function openDetail(ev) {
         <p>${t("detectionText", (ev.confidence || 0).toFixed(2), ev.postCount || 1)}</p>
       </details>
     </div>`;
-  attachImageFallback(panel.querySelector(".detail-img"), meta);
+  if (media.kind === "photo") {
+    attachImageFallback(panel.querySelector(".detail-img"), meta);
+  } else if (media.kind === "embed") {
+    loadInstagramEmbedScript().then(() => {
+      if (window.instgrm && window.instgrm.Embeds) window.instgrm.Embeds.process();
+    });
+  }
   panel.querySelectorAll(".similar-card").forEach((el) => {
     el.onclick = () => { const s = DATA.events.find((e) => e.id === el.dataset.id); if (s) openDetail(s); };
   });

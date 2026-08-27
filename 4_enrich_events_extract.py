@@ -1494,7 +1494,8 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
                 e.institutionType    = $institutionType,
                 e.culturalIdentity   = $culturalIdentity,
                 e.geoZone            = $geoZone,
-                e.parentInstitution  = $parentInstitution
+                e.parentInstitution  = $parentInstitution,
+                e.photoPermission    = $photoPermission
         """, **{k: event[k] for k in [
             "id", "title", "type", "category", "rawDate", "eventDate",
             "locationName", "cityName", "exactAddress", "hotnessScore", "eventScore", "confidence",
@@ -1502,7 +1503,7 @@ def upsert_event(session, event: dict, post: dict, existing_id: Optional[str]):
             "description", "titleFr", "descriptionFr",
             "isPublicInvitation", "isUpcoming", "priceRange", "eventArtTags", "eventArtTagsFr", "llmReasoning",
             "sourcePostUrl", "sourceAuthor", "sourcePostDate", "imageUrl",
-            "artType", "institutionType", "culturalIdentity", "geoZone", "parentInstitution",
+            "artType", "institutionType", "culturalIdentity", "geoZone", "parentInstitution", "photoPermission",
         ]})
         if event.get("locationName"):
             session.run("""
@@ -1648,6 +1649,7 @@ def run_extraction(
                    a.culturalIdentity    AS culturalIdentity,
                    a.geoZone             AS geoZone,
                    a.parentInstitution   AS parentInstitution,
+                   a.photoPermission     AS photoPermission,
                    collect(DISTINCT [(p)-[:TAGS_USER]->(tu) | tu.username])[0] AS taggedUsers,
                    collect(DISTINCT [(p)-[:MENTIONS]->(m)   | m.username])[0]  AS mentions,
                    [(p)-[:TAGGED_AT]->(loc:Location) | loc.name][0]            AS taggedLocation
@@ -2083,6 +2085,11 @@ def run_extraction(
             "culturalIdentity":   post.get("culturalIdentity"),
             "geoZone":            post.get("geoZone"),
             "parentInstitution":  post.get("parentInstitution"),
+            # DD-060: True solo si la cuenta autorizó explícitamente mostrar
+            # sus fotos (columna 14 de la planilla curada, "Sí"/"No"). None
+            # (sin contactar) y False (dijo que no) se tratan igual en el
+            # sitio -- default seguro es NO mostrar la foto real.
+            "photoPermission":    post.get("photoPermission"),
         }
 
         existing_id = find_similar_event(candidate, cache, sim_threshold, date_window)
