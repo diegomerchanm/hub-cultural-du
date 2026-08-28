@@ -164,7 +164,22 @@ def canonical_city(raw):
 
 
 def event_location_text(ev) -> str:
-    return ev.get("exactAddress") or ev.get("locationName") or canonical_city(ev.get("cityName")) or ""
+    # Fallback en cadena hasta "Francia" a secas (2026-08-27, encontrado con
+    # el Rich Results Test de Google: "location" es obligatorio para que un
+    # Event sea válido -- sin este fallback, 6 de los primeros 32 eventos
+    # probados quedaban marcados como error crítico por no tener NINGÚN dato
+    # de ubicación, el mismo 41% sin geoZone ni cityName ya documentado en
+    # DD-066). "Francia" es verdadero -- sabemos que el evento es ahí, no
+    # inventa precisión que no tenemos -- y esto es un fallback del
+    # generador, no una limpieza del origen de datos (que Diego pidió
+    # postergar), así que entra en el alcance de esta etapa.
+    return (
+        ev.get("exactAddress")
+        or ev.get("locationName")
+        or canonical_city(ev.get("cityName"))
+        or ev.get("geoZone")
+        or "Francia"
+    )
 
 
 def event_url(ev) -> str:
