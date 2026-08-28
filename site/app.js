@@ -40,6 +40,51 @@ const FALLBACK_TAG = { color: "#6b6a63", icon: "ti-star" };
 const GEO_ZONE_SYNONYMS = { "Francia (fuera de Île-de-France)": "Francia fuera de IDF" };
 function canonicalizeGeoZone(raw) { return GEO_ZONE_SYNONYMS[raw] || raw; }
 
+/* Mismo problema que geoZone arriba, pero en cityName (2026-08-27, Etapa 1
+   de la conversación sobre arquitectura de URLs/SEO -- encontrado auditando
+   site/data.json: 100 valores distintos de cityName, con la misma ciudad
+   escrita de formas distintas -- "Paris"/"París" (91+75, el caso grande),
+   "Marseille"/"Marsella", "Boulogne-Billancourt"/"Boulogne Billancourt",
+   "Montreal"/"Montréal", "Ciudad de México"/"Mexico City",
+   "Cartagena"/"Cartagena de Indias", "Venice"/"Venecia", y una entrada con
+   el string literal "null" en vez de estar vacía de verdad (bug de datos,
+   no de sinónimos, pero mismo lugar para arreglarlo). Canónico = ortografía
+   francesa para ciudades de Francia (coherente con que ahí es donde vive el
+   proyecto y con futuro SEO en francés); para las demás, la forma que ya
+   predominaba en el dato real. Aplicado UNA vez al cargar DATA (ver init()),
+   mismo patrón que canonicalizeGeoZone. Ojo: esto es un parche defensivo en
+   el frontend, no una limpieza de la fuente (Neo4j/planilla) -- si aparecen
+   más variantes van a necesitar una entrada nueva acá o, mejor, revisar el
+   dato en origen (misma nota que ya dejó DD-056 para geoZone, sigue
+   pendiente para los dos campos). */
+const CITY_SYNONYMS = {
+  "París": "Paris",
+  "Boulogne Billancourt": "Boulogne-Billancourt",
+  "Montréal": "Montreal",
+  "Marsella": "Marseille",
+  "Mexico City": "Ciudad de México",
+  "Cartagena de Indias": "Cartagena",
+  "Venecia": "Venice",
+  "null": null,
+};
+function canonicalizeCityName(raw) {
+  if (!raw) return raw;
+  return CITY_SYNONYMS.hasOwnProperty(raw) ? CITY_SYNONYMS[raw] : raw;
+}
+/* Traducción de display para ES (no toca el valor canónico, mismo patrón
+   que geoLabel/categoryLabel) -- solo las ciudades de Francia donde el
+   nombre en español diverge lo suficiente como para notarse; para el resto
+   (Bogotá, Medellín, Nueva York, etc.) el canónico ya sirve en los dos
+   idiomas. Deliberadamente NO se usa en mapEmbedHtml/directionsUrl/gcalUrl
+   -- esas funciones arman queries para Google, más confiable pasarle
+   siempre la ortografía canónica/francesa que la traducida. */
+const CITY_LABEL_ES = { "Paris": "París", "Marseille": "Marsella" };
+function cityLabel(city) {
+  if (!city) return city;
+  if (CURRENT_LANG === "es" && CITY_LABEL_ES[city]) return CITY_LABEL_ES[city];
+  return city;
+}
+
 /* GEO_LABEL / categoría en español quedan como identidad canónica (así no
    se pisan los catWeights ya guardados en localStorage de visitantes
    existentes, ver bumpPref/loadPrefs) — la traducción para mostrar pasa
@@ -272,8 +317,11 @@ function matchesSearch(ev, query) {
   const q = normalizeSearch(query);
   if (!q) return true;
   const tags = Array.isArray(ev.eventArtTags) ? ev.eventArtTags : [ev.eventArtTags];
+  // CITY_LABEL_ES directo (no cityLabel(), que solo devuelve la variante ES
+  // cuando CURRENT_LANG === "es" -- acá conviene que "marsella" encuentre
+  // Marseille sin importar en qué idioma esté el sitio en ese momento).
   const haystack = [
-    evTitle(ev), evDescription(ev), ev.locationName, ev.cityName, ev.exactAddress,
+    evTitle(ev), evDescription(ev), ev.locationName, ev.cityName, CITY_LABEL_ES[ev.cityName], ev.exactAddress,
     ev.sourceAuthor, ev.artType, ...tags,
   ].filter(Boolean).join(" ");
   return normalizeSearch(haystack).includes(q);
@@ -643,7 +691,7 @@ function eventCardEl(ev, hotnessP80) {
     <div class="event-card-body">
       <p class="event-card-date">${fmtDate(ev.eventDate)}</p>
       <p class="event-card-title">${escapeHtml(evTitle(ev))}</p>
-      <p class="event-card-loc"><i class="ti ti-map-pin" aria-hidden="true"></i>${escapeHtml(ev.exactAddress || ev.locationName || ev.cityName || "")}${distanceLabel(ev)}</p>
+      <p class="event-card-loc"><i class="ti ti-map-pin" aria-hidden="true"></i>${escapeHtml(ev.exactAddress || ev.locationName || cityLabel(ev.cityName) || "")}${distanceLabel(ev)}</p>
       <div class="event-card-foot">
         <span class="event-card-author">@${escapeHtml((ev.sourceAuthor || "").replace("@", ""))}</span>
         <div class="badge-row">${badges.map((b) => `<span class="badge" title="${b.label}"><i class="ti ${b.icon}" aria-hidden="true"></i></span>`).join("")}</div>
@@ -723,7 +771,7 @@ function render() {
           <p class="hero-eyebrow"><i class="ti ti-sparkles" aria-hidden="true"></i>${t("heroEyebrow")}</p>
           <p class="hero-title">${escapeHtml(evTitle(hero))}</p>
           <p class="hero-desc">${escapeHtml(evDescription(hero))}</p>
-          <p class="hero-meta"><span>${fmtDate(hero.eventDate)}</span><span>${escapeHtml(hero.locationName || hero.cityName || "")}</span></p>
+          <p class="hero-meta"><span>${fmtDate(hero.eventDate)}</span><span>${escapeHtml(hero.locationName || cityLabel(hero.cityName) || "")}</span></p>
         </div>
       </div>`;
     heroSection.querySelector(".hero-card").onclick = () => openDetail(hero);
@@ -803,7 +851,7 @@ function openDetail(ev, opts = {}) {
       <div class="info-box">
         <p class="info-box-label">${t("whatWeKnow")}</p>
         ${ev.exactAddress ? `<div class="info-row"><span class="k"><i class="ti ti-map-pin" aria-hidden="true"></i>${t("address")}</span><span>${escapeHtml(ev.exactAddress)}</span></div>` : ""}
-        ${ev.cityName ? `<div class="info-row"><span class="k"><i class="ti ti-building" aria-hidden="true"></i>${t("city")}</span><span>${escapeHtml(ev.cityName)}</span></div>` : ""}
+        ${ev.cityName ? `<div class="info-row"><span class="k"><i class="ti ti-building" aria-hidden="true"></i>${t("city")}</span><span>${escapeHtml(cityLabel(ev.cityName))}</span></div>` : ""}
         ${ev.priceRange ? `<div class="info-row"><span class="k"><i class="ti ti-currency-euro" aria-hidden="true"></i>${t("price")}</span><span>${escapeHtml(ev.priceRange)}</span></div>` : ""}
       </div>
       ${mapEmbedHtml(ev)}
@@ -905,7 +953,10 @@ async function init() {
   } catch (e) {
     DATA = { events: [], accounts: [] };
   }
-  DATA.events.forEach((ev) => { if (ev.geoZone) ev.geoZone = canonicalizeGeoZone(ev.geoZone); });
+  DATA.events.forEach((ev) => {
+    if (ev.geoZone) ev.geoZone = canonicalizeGeoZone(ev.geoZone);
+    if (ev.cityName) ev.cityName = canonicalizeCityName(ev.cityName);
+  });
   ACCOUNTS_BY_USER = {};
   (DATA.accounts || []).forEach((a) => { ACCOUNTS_BY_USER[a.username] = a; });
   markBetweennessDecile();
