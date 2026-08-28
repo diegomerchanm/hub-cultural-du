@@ -43,6 +43,8 @@ python 4_enrich_events_extract.py           # Phase 5-A: detect events → :Even
 python 4_enrich_events_resolve.py           # Phase 5-B: dedup existing :Event nodes
 python backfill_art_tags_fr.py --dry-run    # One-time: preview French translations for eventArtTags vocabulary created before this existed
 python backfill_art_tags_fr.py              #   write eventArtTagsFr onto affected :Event nodes (idempotent, safe to re-run)
+python backfill_geo_zone.py --dry-run       # One-time: preview geoZone inherited from already-curated accounts onto pre-existing events (Piece A, DD-070)
+python backfill_geo_zone.py                 #   write it (idempotent, safe to re-run)
 python 4_enrich_locations.py                # Phase 6: geocode :Location + hierarchy
 python cleanup_legacy_accounts.py --dry-run # Phase 7: preview deletion of non-curated accounts (exact counts, rolls back)
 python cleanup_legacy_accounts.py           #   delete for real (asks for typed confirmation first)

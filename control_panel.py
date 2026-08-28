@@ -95,6 +95,8 @@ SCRIPT_REGISTRY = [
      "label": "Dedup de eventos existentes"},
     {"phase": "5. Eventos", "path": "backfill_art_tags_fr.py",
      "label": "Backfill: traducir vocabulario de eventArtTags"},
+    {"phase": "5. Eventos", "path": "backfill_geo_zone.py",
+     "label": "Backfill: heredar geoZone de cuentas ya curadas (Pieza A, DD-070)"},
     {"phase": "5. Eventos", "path": "backfill_event_images.py",
      "label": "Backfill: imageUrl en eventos existentes (DD-057)"},
     {"phase": "6. Geo", "path": "4_enrich_locations.py",
