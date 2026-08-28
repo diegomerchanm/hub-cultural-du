@@ -50,7 +50,7 @@ Uso:
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 import typer
@@ -65,6 +65,14 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 app = typer.Typer()
 
 DEFAULT_OUT = "site/data.json"
+
+# Retención del export (DD-071, 2026-08-28): eventos pasados hace más de
+# PAST_RETENTION_DAYS días dejan de exportarse a site/data.json — Neo4j los
+# conserva para siempre (nunca se borra un :Event, ver CLAUDE.md), esto es
+# solo el filtro de qué se manda al navegador de cada visitante. De 743
+# eventos con fecha parseable, 530 (71%) ya estaban a más de 30 días de hoy
+# el 2026-08-28 — ese es el peso muerto que este corte elimina del JSON.
+PAST_RETENTION_DAYS = 30
 
 # ── Ranking (ver docs/dashboard_redesign_proposal.md sección 3) ─────────────
 # P: multiplicadores que NO dependen de tiempo/sesión, se precalculan acá.
@@ -117,6 +125,15 @@ WHERE NOT 'Rejected' IN labels(e)
   AND e.isPublicInvitation = true
   AND e.isUpcoming = true
   AND e.eventDate IS NOT NULL AND e.eventDate <> ''
+  // Retención (DD-071): eventos pasados hace más de PAST_RETENTION_DAYS no se
+  // exportan — comparación de string sobre los primeros 10 caracteres de
+  // eventDate (mismo patrón string-compare ya usado en 4_enrich_events_extract.py
+  // para --max-post-age-days, DD-048): eventDate es 'YYYY-MM-DD' en la
+  // práctica (confirmado: 743/751 eventos parsean con date.fromisoformat en
+  // los primeros 10 chars), y ISO ordena lexicográficamente igual que
+  // cronológicamente. $cutoffDate ya incluye todos los eventos futuros
+  // (siempre son >= cutoff).
+  AND substring(e.eventDate, 0, 10) >= $cutoffDate
   // Cuentas fuera de alcance (exclude_accounts.py, ver DD-045 y
   // config/excluded_accounts.json) — geográficamente fuera del proyecto,
   // tageadas con outOfScope=true en vez de borradas. src puede ser NULL si
@@ -347,13 +364,21 @@ def _filter_fallback_coordinates(events: list[dict], min_distinct_names: int = 3
 def main(
     out: str = typer.Option(DEFAULT_OUT, "--out", help="Ruta del JSON de salida"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Solo imprime conteos, no escribe el archivo"),
+    past_days: int = typer.Option(
+        PAST_RETENTION_DAYS, "--past-days",
+        help="Retención: no exportar eventos pasados hace más de N días (DD-071). "
+             "Los eventos futuros siempre se exportan sin importar este valor.",
+    ),
 ):
+    cutoff_date = (datetime.utcnow().date() - timedelta(days=past_days)).isoformat()
+    print(f"🗓️  Retención: se excluyen eventos pasados antes de {cutoff_date} (--past-days {past_days})\n")
+
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
     driver.verify_connectivity()
     print("✅ Conexión Neo4j OK\n")
 
     with driver.session() as session:
-        events = [dict(r) for r in session.run(EVENTS_QUERY)]
+        events = [dict(r) for r in session.run(EVENTS_QUERY, cutoffDate=cutoff_date)]
         accounts = [dict(r) for r in session.run(ACCOUNTS_QUERY)]
     driver.close()
 

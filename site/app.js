@@ -27,6 +27,16 @@ const TAG_ICONS = {
 };
 const FALLBACK_TAG = { color: "#6b6a63", icon: "ti-star" };
 
+// Retención (DD-071, 2026-08-28): "Pasados" solo muestra hasta
+// PAST_RETENTION_DAYS días atrás -- refuerzo en el cliente del mismo corte
+// que ya aplica 5_export_dashboard_data.py (--past-days, default 30) al
+// generar data.json. Doble capa a propósito: aunque el JSON ya venga
+// recortado, el front no debería depender solo de eso para cumplir la regla
+// de producto ("en pasados solo lo reciente", pedido de Diego). Debe
+// coincidir con PAST_RETENTION_DAYS del script Python -- si uno cambia, el
+// otro también.
+const PAST_RETENTION_DAYS = 30;
+
 /* Distintas cuentas curadas a mano escribieron la misma zona de dos
    formas ("Francia fuera de IDF" vs "Francia (fuera de Île-de-France)"),
    así que sin esto contaban como dos pills separados con conteos
@@ -345,6 +355,10 @@ function applyFilters(events) {
       // "Pasados" es un bucket sin clasificar por tema a propósito
       // (decisión de producto 2026-08-15, DD-045) — se salta el filtro de
       // tema más abajo con la condición STATE.when !== "past".
+      const d = daysUntil(ev.eventDate);
+      if (d === null || d < -PAST_RETENTION_DAYS) return false;
+      // DD-071: refuerzo de retención en cliente — ver comentario junto a
+      // PAST_RETENTION_DAYS más arriba.
     } else if (STATE.when !== "upcoming") {
       const bucket = whenBucket(ev.eventDate);
       if (bucket === "past" || bucket === null) return false;
