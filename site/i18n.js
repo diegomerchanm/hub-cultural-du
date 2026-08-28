@@ -1,11 +1,12 @@
 const I18N = {
   es: {
     where: "Dónde", when: "Cuándo", free: "Gratis",
+    searchLabel: "Buscar", searchPlaceholder: "Título, lugar, cuenta…",
     categoryGroupLabel: "Categoría",
     sortLabel: "Ordenar", sortRecommended: "Recomendado", sortDate: "Fecha", sortPopularity: "Popularidad", sortDistance: "Cercanía",
     nearMe: "Cerca de mí",
     geoAll: "Toda Île-de-France y más",
-    whenToday: "Hoy", whenWeek: "Esta semana", whenMonth: "Este mes", whenUpcoming: "Próximos", whenPast: "Pasados",
+    whenToday: "Hoy", whenWeekend: "Este finde", whenWeek: "Esta semana", whenMonth: "Este mes", whenUpcoming: "Próximos", whenPast: "Pasados",
     themeAll: "Todo",
     heroEyebrow: "Destacado de la semana",
     shelfHighlights: "Destacados", shelfHighlightsSub: "Los mejor puntuados en tu zona y fecha elegidas",
@@ -60,11 +61,12 @@ const I18N = {
   },
   fr: {
     where: "Où", when: "Quand", free: "Gratuit",
+    searchLabel: "Rechercher", searchPlaceholder: "Titre, lieu, compte…",
     categoryGroupLabel: "Catégorie",
     sortLabel: "Trier", sortRecommended: "Recommandé", sortDate: "Date", sortPopularity: "Popularité", sortDistance: "Proximité",
     nearMe: "Près de moi",
     geoAll: "Toute l'Île-de-France et plus",
-    whenToday: "Aujourd'hui", whenWeek: "Cette semaine", whenMonth: "Ce mois-ci", whenUpcoming: "À venir", whenPast: "Passés",
+    whenToday: "Aujourd'hui", whenWeekend: "Ce week-end", whenWeek: "Cette semaine", whenMonth: "Ce mois-ci", whenUpcoming: "À venir", whenPast: "Passés",
     themeAll: "Tout",
     heroEyebrow: "À la une cette semaine",
     shelfHighlights: "À la une", shelfHighlightsSub: "Les mieux notés dans votre zone et date choisies",

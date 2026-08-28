@@ -113,6 +113,12 @@ a { color: inherit; }
 .pill.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 .pill .count { color: var(--sub); font-family: var(--font-mono); font-size: 11px; }
 .pill.active .count { color: var(--bg); opacity: 0.7; }
+.search-input {
+  flex: 1 1 240px; min-width: 160px; font-family: var(--font-sans); font-size: 13px;
+  padding: 7px 12px; border-radius: 20px; border: 1px solid var(--border);
+  background: var(--card); color: var(--text);
+}
+.search-input:focus { outline: none; border-color: var(--sub); }
 .sort-control { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--sub); }
 .sort-control select {
   font-family: var(--font-sans); font-size: 13px; padding: 5px 8px;

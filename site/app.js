@@ -107,7 +107,7 @@ let ACCOUNTS_BY_USER = {};
    hueco vacío en modo FR. */
 function evTitle(ev) { return (CURRENT_LANG === "fr" && ev.titleFr) ? ev.titleFr : (ev.title || ""); }
 function evDescription(ev) { return (CURRENT_LANG === "fr" && ev.descriptionFr) ? ev.descriptionFr : (ev.description || ""); }
-let STATE = { geo: "all", when: "upcoming", theme: "all", free: false, sort: "recommended", userLocation: null };
+let STATE = { geo: "all", when: "upcoming", theme: "all", free: false, sort: "recommended", userLocation: null, search: "" };
 
 /* ── Geolocalización opcional (DD-057): reemplaza al mapa Leaflet, que
    Diego pidió sacar del todo tras verlo desplegado con un filtro de color
@@ -205,6 +205,23 @@ function whenBucket(dateStr) {
   if (d >= 0 && d <= 6) return "week";
   return d >= 0 ? "later" : "past";
 }
+/* "Este finde" (2026-08-27, pedido de Diego): sábado y domingo más próximos,
+   nunca en el pasado. Si hoy es sábado, el finde es hoy+mañana; si es
+   domingo, el finde ya empezó y termina hoy (no incluye el sábado que ya
+   pasó); cualquier otro día, el finde es el próximo sábado y domingo.
+   Función aparte de whenBucket() a propósito -- whenBucket() devuelve UN
+   bucket mutuamente excluyente por evento y ya lo usan las pills de
+   hoy/semana, agregarle "weekend" ahí rompería esa exclusividad (un evento
+   de sábado ya cuenta como "week" también, y así debe seguir contando). */
+function isWeekendEvent(dateStr) {
+  const d = daysUntil(dateStr);
+  if (d === null || d < 0) return false;
+  const dow = new Date().getDay(); // 0=dom..6=sáb, día de HOY
+  if (dow === 0) return d === 0;
+  if (dow === 6) return d === 0 || d === 1;
+  const satIn = 6 - dow;
+  return d === satIn || d === satIn + 1;
+}
 
 /* ── C: contexto de sesión (catMatch + geoMatch), 0.5 neutro sin señal ── */
 function computeC(ev, prefs) {
@@ -241,6 +258,27 @@ function fmtDate(dateStr) {
   return `${d.getDate()} ${months[d.getMonth()]}`;
 }
 
+/* ── Buscador (2026-08-27, pedido de Diego) ─────────────────────────────
+   Cliente-side sobre DATA.events, ya está todo cargado -- sin backend, sin
+   índice, solo un .includes() sobre un puñado de campos. normalizeSearch()
+   saca acentos (NFD + strip de diacríticos) para que "musica" encuentre
+   "música" y "cine frances" encuentre "cine francés" -- útil en un sitio
+   bilingüe ES/FR donde el visitante puede escribir sin tildes. */
+function normalizeSearch(s) {
+  return (s || "").toString().normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+function matchesSearch(ev, query) {
+  if (!query) return true;
+  const q = normalizeSearch(query);
+  if (!q) return true;
+  const tags = Array.isArray(ev.eventArtTags) ? ev.eventArtTags : [ev.eventArtTags];
+  const haystack = [
+    evTitle(ev), evDescription(ev), ev.locationName, ev.cityName, ev.exactAddress,
+    ev.sourceAuthor, ev.artType, ...tags,
+  ].filter(Boolean).join(" ");
+  return normalizeSearch(haystack).includes(q);
+}
+
 /* ── Filtrado ────────────────────────────────────────────────────────── */
 // DD-045 (punto 4): "por venir" y "pasados" son dos universos separados.
 // isUpcoming() es la misma regla que ya usaba la rama "upcoming" — se
@@ -263,6 +301,7 @@ function applyFilters(events) {
       const bucket = whenBucket(ev.eventDate);
       if (bucket === "past" || bucket === null) return false;
       if (STATE.when === "today" && bucket !== "today") return false;
+      if (STATE.when === "weekend" && !isWeekendEvent(ev.eventDate)) return false;
       if (STATE.when === "week" && !(bucket === "today" || bucket === "week")) return false;
       if (STATE.when === "month") {
         const d = daysUntil(ev.eventDate);
@@ -273,6 +312,7 @@ function applyFilters(events) {
     }
     if (STATE.when !== "past" && STATE.theme !== "all" && !eventThemes(ev).has(STATE.theme)) return false;
     if (STATE.free && !ev.isFree) return false;
+    if (!matchesSearch(ev, STATE.search)) return false;
     return true;
   });
 }
@@ -314,17 +354,29 @@ function renderFilterBar() {
   const whenEl = document.getElementById("when-pills");
   whenEl.innerHTML = "";
   const todayN = DATA.events.filter((ev) => whenBucket(ev.eventDate) === "today").length;
+  const weekendN = DATA.events.filter((ev) => isWeekendEvent(ev.eventDate)).length;
   const weekN = DATA.events.filter((ev) => { const b = whenBucket(ev.eventDate); return b === "today" || b === "week"; }).length;
   const monthN = DATA.events.filter((ev) => { const d = daysUntil(ev.eventDate); return d !== null && d >= 0 && d <= 31; }).length;
   const upcomingN = upcomingEvents.length;
   const pastN = DATA.events.length - upcomingN;
   [
     ["today", t("whenToday"), todayN],
+    ["weekend", t("whenWeekend"), weekendN],
     ["week", t("whenWeek"), weekN],
     ["month", t("whenMonth"), monthN],
     ["upcoming", t("whenUpcoming"), upcomingN],
     ["past", t("whenPast"), pastN],
   ].forEach(([key, label, n]) => whenEl.appendChild(pillEl(label, n, STATE.when === key, () => setState({ when: key }))));
+
+  // Buscador (2026-08-27): input estático de index.html, no se reconstruye
+  // en cada render -- solo se sincroniza el valor (no-op si ya coincide, no
+  // pisa lo que el visitante está tirando) y se cablea el handler, mismo
+  // patrón que free-toggle/geo-locate-toggle de acá abajo.
+  const searchInput = document.getElementById("search-input");
+  if (searchInput) {
+    if (searchInput.value !== STATE.search) searchInput.value = STATE.search;
+    searchInput.oninput = () => setState({ search: searchInput.value });
+  }
 
   const freeBtn = document.getElementById("free-toggle");
   freeBtn.classList.toggle("active", STATE.free);
@@ -613,6 +665,10 @@ function applyStaticI18n() {
   document.querySelectorAll("[data-i18n]").forEach((el) => {
     const val = t(el.dataset.i18n);
     if (val != null) el.textContent = val;
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+    const val = t(el.dataset.i18nPlaceholder);
+    if (val != null) el.placeholder = val;
   });
 }
 
