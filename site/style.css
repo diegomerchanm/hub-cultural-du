@@ -59,12 +59,49 @@ a { color: inherit; }
   font-size: 15px;
 }
 .brand-name { font-size: 16px; font-weight: 600; }
+/* DD-074: envuelve el dropdown de ubicación + el toggle ES/FR -- antes
+   .topnav-inner tenía solo 2 hijos (brand, topnav-actions) con
+   justify-content:space-between; agregar un tercer hijo ahí directo los
+   hubiera repartido a los 3 con espacios iguales en vez de agrupar estos
+   dos a la derecha. */
+.topnav-right { display: flex; align-items: center; gap: 10px; }
 .topnav-actions { display: flex; gap: 2px; border: 1px solid var(--border); border-radius: 20px; overflow: hidden; }
 .lang-btn {
   border: none; background: transparent; padding: 5px 12px;
   font-family: var(--font-mono); font-size: 12px; cursor: pointer; color: var(--sub);
 }
 .lang-btn.active { background: var(--text); color: var(--bg); }
+
+/* ── Menú desplegable de ubicación (DD-074) ─────────────────────────── */
+.geo-dropdown { position: relative; }
+.geo-dropdown-btn {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 12px; color: var(--text);
+  background: var(--card); border: 1px solid var(--border); border-radius: 20px;
+  padding: 6px 12px; cursor: pointer;
+}
+.geo-dropdown-btn[aria-expanded="true"] { background: var(--text); color: var(--bg); }
+.geo-dropdown-menu {
+  position: absolute; top: calc(100% + 6px); right: 0;
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  min-width: 240px; padding: 6px; z-index: 30;
+}
+.geo-dropdown-menu[hidden] { display: none; }
+.geo-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; text-align: left; padding: 7px 10px; border-radius: 6px;
+  border: none; background: transparent; cursor: pointer;
+  font-family: var(--font-sans); font-size: 13px; color: var(--text);
+}
+.geo-item:hover { background: var(--bg); }
+.geo-item.active { font-weight: 600; background: var(--bg); }
+.geo-item .n { color: var(--sub); font-size: 12px; }
+/* Indentación = nivel de la jerarquía país→zona→ciudad -- lista plana, no
+   un árbol desplegable de verdad, la indentación sola ya comunica la
+   relación (Diego pidió "lista plana con jerarquía visual"). */
+.geo-item.indent-1 { padding-left: 24px; }
+.geo-item.indent-2 { padding-left: 38px; }
 
 /* ── Filter bar ──────────────────────────────────────────────────────
    Jerarquía visual (2026-08-26, ver DD-055): cada grupo (Dónde/Cuándo/
@@ -85,7 +122,6 @@ a { color: inherit; }
   display: flex; flex-direction: column; gap: 10px;
 }
 .filter-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.filter-row-tools { gap: 12px; }
 .filter-label {
   font-family: var(--font-mono); font-size: 11px; color: var(--bg);
   background: var(--text); border-radius: 20px; padding: 4px 10px;
@@ -94,14 +130,6 @@ a { color: inherit; }
   flex-shrink: 0;
 }
 .pill-row { display: flex; gap: 6px; flex-wrap: wrap; }
-/* DD-073: subniveles del menú país→zona→ciudad -- indentados y sin el
-   filter-label a la izquierda (el filter-row-sub que los envuelve no tiene
-   uno, ver index.html) para que se lea como "parte de" la fila de arriba en
-   vez de un filtro nuevo e independiente. Vacíos (innerHTML = "") cuando el
-   nivel padre no está seleccionado -- sin display:none explícito porque un
-   div vacío ya no ocupa espacio visible. */
-.filter-row-sub { padding-left: 22px; }
-.pill-row-sub .pill { font-size: 12px; padding: 3px 10px; }
 .pill {
   font-family: var(--font-sans); font-size: 13px; color: var(--text);
   background: var(--card); border: 1px solid var(--border);
@@ -127,7 +155,12 @@ a { color: inherit; }
   background: var(--card); color: var(--text);
 }
 .search-input:focus { outline: none; border-color: var(--sub); }
-.sort-control { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--sub); }
+/* DD-074: sin margin-left:auto -- ese empuje a la derecha, en la fila
+   dedicada de antes ("Gratis"/"Cerca de mí" a la izquierda, "Ordenar" pegado
+   al borde derecho), era exactamente el espacio vacío que Diego reportó.
+   Ahora esta fila comparte espacio con los pills de "Cuándo" -- Ordenar va
+   inline después de los toggles, sin forzar nada al extremo. */
+.sort-control { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--sub); }
 .sort-control select {
   font-family: var(--font-sans); font-size: 13px; padding: 5px 8px;
   border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); color: var(--text);

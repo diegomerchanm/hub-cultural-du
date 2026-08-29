@@ -5,7 +5,12 @@ const I18N = {
     categoryGroupLabel: "Categoría",
     sortLabel: "Ordenar", sortRecommended: "Recomendado", sortDate: "Fecha", sortPopularity: "Popularidad", sortDistance: "Cercanía",
     nearMe: "Cerca de mí",
-    geoAll: "Toda Île-de-France y más",
+    // DD-074: antes del menú en cascada (DD-073) "geoAll" describía un
+    // combo específico ("Toda Île-de-France y más") que dejó de tener
+    // sentido en cuanto el menú pasó a tener niveles país/zona/ciudad --
+    // ahora es literalmente "sin filtro de ubicación", en cualquier nivel
+    // del menú (raíz, o el "todas" de un sub-nivel).
+    geoAll: "Todos",
     whenToday: "Hoy", whenWeekend: "Este finde", whenWeek: "Esta semana", whenMonth: "Este mes", whenUpcoming: "Próximos", whenPast: "Pasados",
     themeAll: "Todo",
     heroEyebrow: "Destacado de la semana",
@@ -56,6 +61,13 @@ const I18N = {
     geoLabels: {
       "Île-de-France": "Île-de-France", "Francia fuera de IDF": "Francia (fuera IDF)",
       "Fuera de Francia": "Fuera de Francia", "No confirmado": "No confirmado",
+      // DD-074: mismas claves que GEO_FILTERS en app.js (menú país→zona→
+      // ciudad, DD-073) -- son slugs agregados, no valores reales de
+      // geoZone (por eso conviven sin pisarse con las de arriba), así que
+      // necesitan su propia entrada acá.
+      "francia": "Francia", "fuera-de-francia": "Fuera de Francia",
+      "ile-de-france": "Île-de-France", "fuera-de-ile-de-france": "Francia (fuera de IDF)",
+      "paris": "Paris",
     },
     months: ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"],
   },
@@ -65,7 +77,7 @@ const I18N = {
     categoryGroupLabel: "Catégorie",
     sortLabel: "Trier", sortRecommended: "Recommandé", sortDate: "Date", sortPopularity: "Popularité", sortDistance: "Proximité",
     nearMe: "Près de moi",
-    geoAll: "Toute l'Île-de-France et plus",
+    geoAll: "Tous",
     whenToday: "Aujourd'hui", whenWeekend: "Ce week-end", whenWeek: "Cette semaine", whenMonth: "Ce mois-ci", whenUpcoming: "À venir", whenPast: "Passés",
     themeAll: "Tout",
     heroEyebrow: "À la une cette semaine",
@@ -105,6 +117,9 @@ const I18N = {
     geoLabels: {
       "Île-de-France": "Île-de-France", "Francia fuera de IDF": "France (hors IDF)",
       "Fuera de Francia": "Hors de France", "No confirmado": "Non confirmé",
+      "francia": "France", "fuera-de-francia": "Hors de France",
+      "ile-de-france": "Île-de-France", "fuera-de-ile-de-france": "France (hors IDF)",
+      "paris": "Paris",
     },
     months: ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."],
   },

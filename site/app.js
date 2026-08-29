@@ -163,6 +163,9 @@ let ACCOUNTS_BY_USER = {};
 function evTitle(ev) { return (CURRENT_LANG === "fr" && ev.titleFr) ? ev.titleFr : (ev.title || ""); }
 function evDescription(ev) { return (CURRENT_LANG === "fr" && ev.descriptionFr) ? ev.descriptionFr : (ev.description || ""); }
 let STATE = { geo: "all", when: "upcoming", theme: "all", free: false, sort: "recommended", userLocation: null, search: "" };
+// DD-074: índice del hero elegido al azar para esta visita -- ver el
+// comentario junto a su uso en render(). null hasta el primer render.
+let heroPickIndex = null;
 
 /* ── Geolocalización opcional (DD-057): reemplaza al mapa Leaflet, que
    Diego pidió sacar del todo tras verlo desplegado con un filtro de color
@@ -364,16 +367,20 @@ function isUpcoming(ev) {
    ver también ROUTE_TO_GEO en applyInitialFiltersFromUrl) -- "all" y
    "fuera-de-francia" no tienen ruta propia todavía (esta última queda para
    cuando exista una estructura por país, ver DD-072). */
+// DD-074: las etiquetas NO viven acá -- se retiraron los `label` fijos en
+// español (bug reportado por Diego: no traducían a francés) y se muestran
+// siempre vía geoLabel(key), que ya lee de I18N[CURRENT_LANG].geoLabels
+// (mismas claves agregadas ahí, ver i18n.js).
 const GEO_FILTERS = {
-  "francia": { label: "Francia", parent: null,
+  "francia": { parent: null,
     match: (ev) => ev.geoZone === "Île-de-France" || ev.geoZone === "Francia fuera de IDF" },
-  "fuera-de-francia": { label: "Fuera de Francia", parent: null,
+  "fuera-de-francia": { parent: null,
     match: (ev) => ev.geoZone === "Fuera de Francia" },
-  "ile-de-france": { label: "Île-de-France", parent: "francia",
+  "ile-de-france": { parent: "francia",
     match: (ev) => ev.geoZone === "Île-de-France" },
-  "fuera-de-ile-de-france": { label: "Francia fuera de Île-de-France", parent: "francia",
+  "fuera-de-ile-de-france": { parent: "francia",
     match: (ev) => ev.geoZone === "Francia fuera de IDF" },
-  "paris": { label: "Paris", parent: "ile-de-france",
+  "paris": { parent: "ile-de-france",
     match: (ev) => ev.geoZone === "Île-de-France" && ev.cityName === "Paris" },
 };
 const GEO_TO_ROUTE = {
@@ -396,6 +403,16 @@ function geoIsActiveBranch(key) {
     cur = GEO_FILTERS[cur] && GEO_FILTERS[cur].parent;
   }
   return false;
+}
+/* DD-074: hoisteada a nivel de módulo (antes vivía como closure adentro de
+   renderFilterBar()) porque ahora también la usa renderGeoDropdown() --
+   clickear una opción del dropdown de ubicación navega a la URL bonita
+   correspondiente (DD-073) igual que antes hacían los pills. */
+function setGeo(key) {
+  const route = GEO_TO_ROUTE[key];
+  if (route && location.pathname !== route) history.pushState(null, "", route + location.search);
+  else if (!route && Object.values(GEO_TO_ROUTE).includes(location.pathname)) history.pushState(null, "", "/" + location.search);
+  setState({ geo: key });
 }
 
 function applyFilters(events) {
@@ -453,40 +470,14 @@ function renderFilterBar() {
   // eso una categoría podía mostrar "Cine: 6" con los 6 ya pasados.
   const upcomingEvents = DATA.events.filter(isUpcoming);
 
-  // DD-073: 3 filas en cascada (país → zona → ciudad) en vez de una lista
-  // plana de geoZone. `countFor` sobre upcomingEvents, mismo criterio que ya
-  // usaba zoneCounts antes. `setGeo` centraliza el pushState de la URL
-  // bonita (DD-073) -- clickear un pill de geo navega a /fr/... cuando
-  // existe ruta, o vuelve a "/" para "all"/"fuera-de-francia" (que todavía
-  // no tienen ruta propia, ver GEO_TO_ROUTE).
-  const countFor = (key) => upcomingEvents.filter((ev) => geoMatches(ev, key)).length;
-  const setGeo = (key) => {
-    const route = GEO_TO_ROUTE[key];
-    if (route && location.pathname !== route) history.pushState(null, "", route + location.search);
-    else if (!route && Object.values(GEO_TO_ROUTE).includes(location.pathname)) history.pushState(null, "", "/" + location.search);
-    setState({ geo: key });
-  };
-
-  const geoEl = document.getElementById("geo-pills");
-  geoEl.innerHTML = "";
-  geoEl.appendChild(pillEl(t("geoAll"), upcomingEvents.length, STATE.geo === "all", () => setGeo("all")));
-  geoEl.appendChild(pillEl(GEO_FILTERS.francia.label, countFor("francia"), geoIsActiveBranch("francia"), () => setGeo("francia")));
-  geoEl.appendChild(pillEl(GEO_FILTERS["fuera-de-francia"].label, countFor("fuera-de-francia"), STATE.geo === "fuera-de-francia", () => setGeo("fuera-de-francia")));
-
-  const subEl = document.getElementById("geo-subpills");
-  subEl.innerHTML = "";
-  if (geoIsActiveBranch("francia")) {
-    subEl.appendChild(pillEl(t("geoAll"), countFor("francia"), STATE.geo === "francia", () => setGeo("francia")));
-    subEl.appendChild(pillEl(GEO_FILTERS["ile-de-france"].label, countFor("ile-de-france"), geoIsActiveBranch("ile-de-france"), () => setGeo("ile-de-france")));
-    subEl.appendChild(pillEl(GEO_FILTERS["fuera-de-ile-de-france"].label, countFor("fuera-de-ile-de-france"), STATE.geo === "fuera-de-ile-de-france", () => setGeo("fuera-de-ile-de-france")));
-  }
-
-  const subsubEl = document.getElementById("geo-subsubpills");
-  subsubEl.innerHTML = "";
-  if (geoIsActiveBranch("ile-de-france")) {
-    subsubEl.appendChild(pillEl(t("geoAll"), countFor("ile-de-france"), STATE.geo === "ile-de-france", () => setGeo("ile-de-france")));
-    subsubEl.appendChild(pillEl(GEO_FILTERS.paris.label, countFor("paris"), STATE.geo === "paris", () => setGeo("paris")));
-  }
+  // DD-074: el filtro de geo dejó de vivir en el filterbar como pills en
+  // cascada (DD-073) -- ahora es un menú desplegable en el header (junto a
+  // ES/FR), ver renderGeoDropdown(). Acá solo queda el scoping que sí sigue
+  // siendo parte del filterbar: las categorías de abajo se calculan sobre
+  // los eventos que además pasan el geo activo (DD-074, punto 6 de Diego:
+  // "las categorías también están por debajo del nivel de país y ciudad").
+  renderGeoDropdown(upcomingEvents);
+  const geoScopedUpcoming = STATE.geo === "all" ? upcomingEvents : upcomingEvents.filter((ev) => geoMatches(ev, STATE.geo));
 
   // Pills de fecha, cada una con su propio conteo (independiente entre sí,
   // sobre el dataset completo) — "Pasados" es el complemento de "por venir".
@@ -544,9 +535,14 @@ function renderFilterBar() {
   // existiendo y filtrable por su categoría fija, solo que ese tag puntual
   // no ensucia el menú. Los que sí entran arman la nube con 3 tamaños
   // (terciles dinámicos sobre el volumen real, no umbrales fijos).
+  // DD-074: scopeado por geo -- `geoScopedUpcoming` en vez de
+  // `upcomingEvents` (ver arriba). Si hay un país/ciudad elegido, las
+  // categorías y sus conteos reflejan solo lo que hay ahí, no el catálogo
+  // completo -- pedido explícito de Diego ("las categorías también están
+  // por debajo del nivel de país y ciudad").
   const MIN_THEME_COUNT = 3;
   const themeCounts = {};
-  upcomingEvents.forEach((ev) => eventThemes(ev).forEach((th) => { themeCounts[th] = (themeCounts[th] || 0) + 1; }));
+  geoScopedUpcoming.forEach((ev) => eventThemes(ev).forEach((th) => { themeCounts[th] = (themeCounts[th] || 0) + 1; }));
   const mainThemes = Object.keys(themeCounts)
     .map((theme) => ({ theme, count: themeCounts[theme] }))
     .filter((e) => e.count >= MIN_THEME_COUNT)
@@ -560,7 +556,7 @@ function renderFilterBar() {
 
   const themeEl = document.getElementById("theme-pills");
   themeEl.innerHTML = "";
-  themeEl.appendChild(pillEl(t("themeAll"), upcomingEvents.length, STATE.theme === "all", () => setState({ theme: "all" }), "tier-lg"));
+  themeEl.appendChild(pillEl(t("themeAll"), geoScopedUpcoming.length, STATE.theme === "all", () => setState({ theme: "all" }), "tier-lg"));
   mainThemes.forEach(({ theme, count }, i) => {
     themeEl.appendChild(pillEl(
       themeLabel(theme), count, STATE.theme === theme, () => setState({ theme }),
@@ -577,6 +573,63 @@ function renderFilterBar() {
     setState({ sort: e.target.value });
   };
 }
+
+/* ── Menú desplegable de ubicación (2026-08-29, DD-074) ──────────────────
+   Reemplaza las 3 filas de pills en cascada de DD-073 -- Diego pidió que
+   "Dónde" deje de ocupar espacio en el filterbar y se vuelva un menú
+   desplegable en el header, junto a ES/FR. Lista plana con indentación
+   visual para marcar la jerarquía (país → zona → ciudad), en vez de un
+   selector de 2 pasos -- un solo click alcanza para cualquier nivel. */
+const GEO_MENU_ITEMS = [
+  { key: "all", indent: 0 },
+  { key: "francia", indent: 0 },
+  { key: "ile-de-france", indent: 1 },
+  { key: "paris", indent: 2 },
+  { key: "fuera-de-ile-de-france", indent: 1 },
+  { key: "fuera-de-francia", indent: 0 },
+];
+function renderGeoDropdown(upcomingEvents) {
+  const countFor = (key) => (key === "all" ? upcomingEvents.length : upcomingEvents.filter((ev) => geoMatches(ev, key)).length);
+  const labelFor = (key) => (key === "all" ? t("geoAll") : geoLabel(key));
+
+  const label = document.getElementById("geo-dropdown-label");
+  if (label) label.textContent = labelFor(STATE.geo);
+
+  const menu = document.getElementById("geo-dropdown-menu");
+  if (!menu) return;
+  menu.innerHTML = GEO_MENU_ITEMS.map(({ key, indent }) => {
+    const active = STATE.geo === key;
+    return `<button type="button" class="geo-item indent-${indent}${active ? " active" : ""}" data-geo="${key}">
+      <span>${escapeHtml(labelFor(key))}</span><span class="n">${countFor(key)}</span>
+    </button>`;
+  }).join("");
+  menu.querySelectorAll(".geo-item").forEach((itemBtn) => {
+    itemBtn.onclick = () => { setGeo(itemBtn.dataset.geo); closeGeoDropdown(); };
+  });
+}
+function closeGeoDropdown() {
+  const menu = document.getElementById("geo-dropdown-menu");
+  const btn = document.getElementById("geo-dropdown-btn");
+  if (menu) menu.hidden = true;
+  if (btn) btn.setAttribute("aria-expanded", "false");
+}
+function toggleGeoDropdown() {
+  const menu = document.getElementById("geo-dropdown-menu");
+  const btn = document.getElementById("geo-dropdown-btn");
+  if (!menu || !btn) return;
+  const willOpen = menu.hidden;
+  menu.hidden = !willOpen;
+  btn.setAttribute("aria-expanded", String(willOpen));
+}
+// Cerrar con click afuera o Escape -- registrado una sola vez a nivel de
+// documento (no en cada render), ya que el botón/menú son elementos
+// estáticos de index.html, nunca se recrean.
+document.addEventListener("click", (e) => {
+  const dropdown = document.getElementById("geo-dropdown");
+  if (dropdown && !dropdown.contains(e.target)) closeGeoDropdown();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeGeoDropdown(); });
+
 function pillEl(label, count, active, onClick, tierClass, colorAccent) {
   const b = document.createElement("button");
   b.className = "pill" + (tierClass ? " " + tierClass : "") + (active ? " active" : "");
@@ -853,7 +906,24 @@ function render() {
   // "Pasados" (DD-045): sin héroe ni destacados — es una lista plana, sin
   // clasificación, a propósito.
   if (STATE.sort === "recommended" && STATE.when !== "past") {
-    const hero = sorted[0];
+    // DD-074: rotación del hero -- antes era siempre `sorted[0]` (el mejor
+    // score), así que cualquier evento que dominara el ranking por un
+    // margen amplio quedaba de destacado sesión tras sesión (reportado por
+    // Diego: siempre la misma exposición). Ahora se elige al azar entre los
+    // primeros HERO_POOL_SIZE candidatos -- variedad real sin degradar la
+    // calidad (todos son igual de "recomendables", están todos arriba del
+    // ranking). `heroPickIndex` se fija UNA vez por visita (primera vez que
+    // se llama render(), típicamente desde init()) y se reutiliza en los
+    // renders siguientes de la misma carga de página -- si eligiera de
+    // nuevo en cada re-render, el destacado saltaría cada vez que el
+    // visitante toca un filtro, que se sentiría como un bug, no una
+    // "rotación". Un `location.reload()` (o simplemente volver a entrar)
+    // arranca una visita nueva y sortea de nuevo.
+    const HERO_POOL_SIZE = 8;
+    const poolSize = Math.min(HERO_POOL_SIZE, sorted.length);
+    if (heroPickIndex === null) heroPickIndex = Math.floor(Math.random() * poolSize);
+    const heroIdx = Math.min(heroPickIndex, sorted.length - 1);
+    const hero = sorted[heroIdx];
     const heroMeta = themeMeta([...eventThemes(hero)][0] || "");
     heroSection.innerHTML = `
       <div class="hero-card">
@@ -868,7 +938,7 @@ function render() {
     heroSection.querySelector(".hero-card").onclick = () => openDetail(hero);
     attachImageFallback(heroSection.querySelector(".hero-img"), heroMeta);
 
-    const rest = sorted.slice(1);
+    const rest = sorted.filter((_, i) => i !== heroIdx);
     const highlights = diversify(rest, 2, 3, 8);
     if (highlights.length) shelves.appendChild(shelfEl(t("shelfHighlights"), t("shelfHighlightsSub"), highlights, hotnessP80, true));
 
@@ -1055,6 +1125,13 @@ function initLangButtons() {
     };
   });
 }
+// DD-074: wireado una sola vez (no en cada render, a diferencia del
+// contenido del menú -- ver renderGeoDropdown()) porque el botón en sí es
+// estático, nunca se recrea.
+function initGeoDropdownButton() {
+  const btn = document.getElementById("geo-dropdown-btn");
+  if (btn) btn.onclick = (e) => { e.stopPropagation(); toggleGeoDropdown(); };
+}
 /* Deep-link de filtros iniciales (2026-08-29, Etapa 3, DD-072): las páginas
    estáticas de /categoria/ y /francia/ (6_generate_seo_pages.py) enlazan de
    vuelta al sitio interactivo con ?tema=/?geo=/?buscar= para que "ver estos
@@ -1101,6 +1178,7 @@ function applyInitialFiltersFromUrl() {
 
 async function init() {
   initLangButtons();
+  initGeoDropdownButton();
   document.getElementById("shelves").innerHTML = `<p style="color:var(--sub);font-size:13px">${t("loading")}</p>`;
   try {
     const res = await fetch("data.json", { cache: "no-store" });

@@ -26,9 +26,25 @@
       <span class="brand-mark"><i class="ti ti-map-2" aria-hidden="true"></i></span>
       <span class="brand-name">Hub Cultural</span>
     </a>
-    <div class="topnav-actions">
-      <button id="lang-es" class="lang-btn active" data-lang="es">ES</button>
-      <button id="lang-fr" class="lang-btn" data-lang="fr">FR</button>
+    <div class="topnav-right">
+      <!-- DD-074: reemplaza las 3 filas de pills de geo del filterbar
+           (DD-073) -- Diego pidió que "Dónde" no ocupe espacio del menú de
+           filtros y se vuelva un desplegable acá, junto a ES/FR. Contenido
+           armado por renderGeoDropdown() en app.js; vacío hasta el primer
+           render (no hay parpadeo de contenido sin traducir porque el
+           label recién se llena ahí). -->
+      <div class="geo-dropdown" id="geo-dropdown">
+        <button id="geo-dropdown-btn" class="geo-dropdown-btn" type="button" aria-haspopup="true" aria-expanded="false">
+          <i class="ti ti-map-pin" aria-hidden="true"></i>
+          <span id="geo-dropdown-label"></span>
+          <i class="ti ti-chevron-down" aria-hidden="true"></i>
+        </button>
+        <div class="geo-dropdown-menu" id="geo-dropdown-menu" hidden></div>
+      </div>
+      <div class="topnav-actions">
+        <button id="lang-es" class="lang-btn active" data-lang="es">ES</button>
+        <button id="lang-fr" class="lang-btn" data-lang="fr">FR</button>
+      </div>
     </div>
   </div>
 </header>
@@ -39,24 +55,13 @@
       <span class="filter-label"><i class="ti ti-search" aria-hidden="true"></i> <span data-i18n="searchLabel">Buscar</span></span>
       <input type="search" id="search-input" class="search-input" data-i18n-placeholder="searchPlaceholder" placeholder="Título, lugar, cuenta…">
     </div>
-    <div class="filter-row">
-      <span class="filter-label"><i class="ti ti-map-pin" aria-hidden="true"></i> <span data-i18n="where">Dónde</span></span>
-      <div class="pill-row" id="geo-pills"></div>
-    </div>
-    <!-- DD-073: subniveles del menú país→zona→ciudad -- vacíos y sin
-         mostrar nada hasta que renderFilterBar() les meta contenido, solo
-         cuando el nivel padre correspondiente está seleccionado. -->
-    <div class="filter-row filter-row-sub" id="geo-subrow">
-      <div class="pill-row pill-row-sub" id="geo-subpills"></div>
-    </div>
-    <div class="filter-row filter-row-sub" id="geo-subsubrow">
-      <div class="pill-row pill-row-sub" id="geo-subsubpills"></div>
-    </div>
+    <!-- DD-074: Gratis/Cerca de mí/Ordenar ya no tienen fila propia --
+         antes dejaban una línea con mucho espacio vacío (el "Ordenar"
+         empujado a la derecha con margin-left:auto). Ahora comparten fila
+         con "Cuándo", sin ese empuje forzado. -->
     <div class="filter-row">
       <span class="filter-label"><i class="ti ti-calendar" aria-hidden="true"></i> <span data-i18n="when">Cuándo</span></span>
       <div class="pill-row" id="when-pills"></div>
-    </div>
-    <div class="filter-row filter-row-tools">
       <button id="free-toggle" class="pill">
         <i class="ti ti-tag" aria-hidden="true"></i> <span data-i18n="free">Gratis</span>
       </button>
