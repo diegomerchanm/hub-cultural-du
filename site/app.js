@@ -958,6 +958,33 @@ function initLangButtons() {
     };
   });
 }
+/* Deep-link de filtros iniciales (2026-08-29, Etapa 3, DD-072): las páginas
+   estáticas de /categoria/ y /francia/ (6_generate_seo_pages.py) enlazan de
+   vuelta al sitio interactivo con ?tema=/?geo=/?buscar= para que "ver estos
+   eventos en el sitio interactivo" aterrice ya filtrado, en vez de mandar al
+   visitante a la home sin filtro y que tenga que reencontrar el mismo
+   recorte a mano. Mismo espíritu que ?evento=<id> (DD-063) pero para una
+   LISTA de eventos, no uno solo -- por eso esta función muta STATE
+   directo (Object.assign implícito vía asignación) en vez de pasar por
+   setState(): un link entrante no debería contar como una interacción real
+   para bumpPref()/catWeights (pensados para reflejar clicks genuinos del
+   visitante durante la sesión, no de dónde vino el link de entrada), y
+   tampoco hace falta pushState -- es el estado inicial de la carga, no una
+   navegación nueva que deba quedar en el historial. */
+const GEO_SLUG_TO_ZONE = {
+  "ile-de-france": "Île-de-France",
+  "fuera-de-ile-de-france": "Francia fuera de IDF",
+};
+function applyInitialFiltersFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const geoSlug = params.get("geo");
+  if (geoSlug && GEO_SLUG_TO_ZONE[geoSlug]) STATE.geo = GEO_SLUG_TO_ZONE[geoSlug];
+  const tema = params.get("tema");
+  if (tema && CATEGORY_META[tema]) STATE.theme = tema;
+  const buscar = params.get("buscar");
+  if (buscar) STATE.search = buscar;
+}
+
 async function init() {
   initLangButtons();
   document.getElementById("shelves").innerHTML = `<p style="color:var(--sub);font-size:13px">${t("loading")}</p>`;
@@ -975,6 +1002,7 @@ async function init() {
   (DATA.accounts || []).forEach((a) => { ACCOUNTS_BY_USER[a.username] = a; });
   markBetweennessDecile();
   buildTagFrMap();
+  applyInitialFiltersFromUrl();
   render();
   // Link compartido (?evento=id): abrir ese evento directo al cargar. No
   // pushea historial de nuevo -- la URL ya viene así desde afuera.

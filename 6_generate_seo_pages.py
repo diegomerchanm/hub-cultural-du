@@ -47,6 +47,25 @@ También genera site/categoria/index.html (hub que linkea a cada categoría)
 y site/sitemap.xml. site/robots.txt es estático, no lo genera este script
 (ver el archivo directamente).
 
+Etapa 3 (agregado 2026-08-29, DD-072): páginas por zona geográfica dentro de
+Francia -- site/francia/index.html (hub), site/francia/ile-de-france/,
+site/francia/fuera-de-ile-de-france/, y site/francia/ile-de-france/paris/
+(subpágina anidada, único caso con volumen real a nivel ciudad). Basado en
+`geoZone`/`cityName` del propio :Event (extraídos por el LLM al crear el
+evento), NO en la jerarquía :City/:Country que arma 4_enrich_locations.py vía
+Nominatim -- esa jerarquía solo decide si el evento tiene pin de mapa (DD-045:
+"aparecer en el sitio y tener pin en el mapa son dos cosas independientes"),
+nunca si aparece en estas páginas. Por eso un fallo del geocodificador (visto
+el 2026-08-28: 0/276 Location geocodificadas en una corrida real de Diego,
+causa no confirmada) no bloquea esta etapa. Deliberadamente SIN página para
+"Fuera de Francia" (16 eventos del catálogo vivo, dispersos en ciudades sin
+volumen individual -- Madrid 4, el resto 1 cada una) -- decisión explícita de
+Diego: en vez de forzar un pooling genérico ahí, prefiere que una entrega
+futura arme una estructura propia por país (ej. /es/madrid/, /de/berlin/)
+cuando haga falta. Ver docs/decisions_es.md DD-072 para el análisis completo
+de por qué un menú tipo Meetup con ciudades no calzaba con los datos reales
+(solo Paris tiene volumen; Marseille/Madrid/Montpellier rondan 3-4).
+
 No necesita Neo4j -- lee directo site/data.json, que ya tiene todo lo
 necesario (mismo espíritu que otros scripts client-side del proyecto).
 
@@ -163,6 +182,32 @@ def canonical_city(raw):
     return CITY_SYNONYMS.get(raw, raw)
 
 
+# Mismo diccionario que GEO_ZONE_SYNONYMS en site/app.js (DD-056/DD-072) --
+# duplicado por el mismo motivo que CITY_SYNONYMS arriba. Sin esto, esta
+# página estática contaría "Île-de-France" y "Francia (fuera de Île-de-
+# France)"/"Francia fuera de IDF" como zonas distintas cuando son la misma.
+GEO_ZONE_SYNONYMS = {"Francia (fuera de Île-de-France)": "Francia fuera de IDF"}
+
+
+def canonical_geo_zone(raw):
+    if not raw:
+        return raw
+    return GEO_ZONE_SYNONYMS.get(raw, raw)
+
+
+# Etapa 3 (DD-072): solo estas dos zonas tienen página propia -- "Fuera de
+# Francia" y "No confirmado" quedan fuera de las páginas de geo a propósito
+# (ver docstring del módulo). Cada tupla es (slug de URL, label para
+# mostrar, valor canónico de geoZone contra el que se filtra) -- separados
+# porque el valor de geoZone en los datos ("Francia fuera de IDF") no es un
+# buen título de página ("Francia fuera de Île-de-France" lee mejor).
+FRANCIA_ZONES = [
+    ("ile-de-france", "Île-de-France", "Île-de-France"),
+    ("fuera-de-ile-de-france", "Francia fuera de Île-de-France", "Francia fuera de IDF"),
+]
+PARIS_LABEL = "Paris"
+
+
 def event_location_text(ev) -> str:
     # Fallback en cadena hasta "Francia" a secas (2026-08-27, encontrado con
     # el Rich Results Test de Google: "location" es obligatorio para que un
@@ -228,33 +273,97 @@ def event_html(ev) -> str:
   </article>"""
 
 
-def render_category_page(slug: str, label: str, events: list, note: str = "") -> str:
+def render_listing_page(*, canonical: str, breadcrumb_html: str, h1: str,
+                         meta_description: str, events: list, note: str,
+                         live_query: str) -> str:
+    """Template compartido por páginas de categoría (DD-067) y de geo
+    (DD-072) -- misma estructura (HTML semántico + JSON-LD @graph), lo único
+    que cambia entre una y otra es breadcrumb/título/descripción/link de
+    vuelta al sitio interactivo. `live_query` (ej. "?tema=visual",
+    "?geo=ile-de-france", "?buscar=Paris") es el deep-link nuevo de DD-072
+    (ver GEO_SLUG_TO_ZONE/applyInitialFiltersFromUrl en site/app.js) --
+    string vacío cae al link genérico a "/" sin filtro (caso de "Otros",
+    donde no hay un único tema/zona que aplicarle al link)."""
     jsonld = {"@context": "https://schema.org", "@graph": [event_jsonld(ev) for ev in events]}
     events_html = "\n".join(event_html(ev) for ev in events)
-    canonical = f"{BASE_URL}/categoria/{slug}/"
     note_html = f'<p class="subtitle">{escape(note)}</p>' if note else ""
+    live_link = f"/{live_query}" if live_query else "/"
+    live_link_text = "Ver estos eventos, con filtros y mapa, en el sitio interactivo →" if live_query else "Ver el sitio completo, con filtros y mapa →"
     return f"""<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{escape(label)} en Francia — Hub Cultural</title>
-<meta name="description" content="{len(events)} eventos próximos de {escape(label.lower())} de la diáspora latinoamericana en Francia: fechas, lugares y precios.">
+<title>{escape(h1)} — Hub Cultural</title>
+<meta name="description" content="{escape(meta_description)}">
 <link rel="canonical" href="{canonical}">
 <style>{PAGE_CSS}</style>
 </head>
 <body>
 <header><a class="brand" href="/">🗺️ Hub Cultural</a></header>
-<nav class="crumb"><a href="/">Inicio</a> › <a href="/categoria/">Categorías</a> › {escape(label)}</nav>
-<h1>{escape(label)} — eventos de la diáspora latinoamericana en Francia</h1>
+<nav class="crumb">{breadcrumb_html}</nav>
+<h1>{escape(h1)}</h1>
 <p class="subtitle">{len(events)} eventos próximos detectados automáticamente a partir de Instagram.</p>
 {note_html}
 {events_html}
 <footer>
   <p>{FOOTER_TEXT}</p>
-  <p><a href="/">Ver el sitio completo, con filtros y mapa →</a></p>
+  <p><a href="{live_link}">{live_link_text}</a></p>
 </footer>
 <script type="application/ld+json">{json.dumps(jsonld, ensure_ascii=False)}</script>
+</body>
+</html>
+"""
+
+
+def render_category_page(slug: str, label: str, events: list, note: str = "") -> str:
+    live_query = f"?tema={slug}" if slug != OTROS_SLUG else ""
+    return render_listing_page(
+        canonical=f"{BASE_URL}/categoria/{slug}/",
+        breadcrumb_html=f'<a href="/">Inicio</a> › <a href="/categoria/">Categorías</a> › {escape(label)}',
+        h1=f"{label} — eventos de la diáspora latinoamericana en Francia",
+        meta_description=f"{len(events)} eventos próximos de {label.lower()} de la diáspora latinoamericana en Francia: fechas, lugares y precios.",
+        events=events, note=note, live_query=live_query,
+    )
+
+
+def render_geo_page(*, path: str, label: str, events: list, breadcrumb_html: str,
+                     live_query: str, note: str = "") -> str:
+    return render_listing_page(
+        canonical=f"{BASE_URL}/francia/{path}/",
+        breadcrumb_html=breadcrumb_html,
+        h1=f"{label} — eventos de la diáspora latinoamericana",
+        meta_description=f"{len(events)} eventos próximos de la diáspora latinoamericana en {label}: fechas, lugares y precios.",
+        events=events, note=note, live_query=live_query,
+    )
+
+
+def render_francia_hub_page(entries: list) -> str:
+    """entries: lista de (slug, label, n) -- mismas dos zonas de
+    FRANCIA_ZONES, nunca incluye Paris (subpágina anidada de
+    ile-de-france, no un tercer link al mismo nivel)."""
+    links = "\n".join(
+        f'  <a href="/francia/{slug}/">{escape(label)} <span style="color:#6b6a63">({n})</span></a>'
+        for slug, label, n in entries
+    )
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Francia — eventos por zona — Hub Cultural</title>
+<meta name="description" content="Eventos culturales de la diáspora latinoamericana en Francia, organizados por zona geográfica.">
+<link rel="canonical" href="{BASE_URL}/francia/">
+<style>{PAGE_CSS}</style>
+</head>
+<body>
+<header><a class="brand" href="/">🗺️ Hub Cultural</a></header>
+<nav class="crumb"><a href="/">Inicio</a> › Francia</nav>
+<h1>Francia — eventos por zona</h1>
+<div class="cat-grid">
+{links}
+</div>
+<footer><p>{FOOTER_TEXT}</p></footer>
 </body>
 </html>
 """
@@ -291,25 +400,42 @@ def render_hub_page(entries: list) -> str:
 INDEX_FILE = SITE_DIR / "index.html"
 LINKS_START = "<!-- SEO_CATEGORY_LINKS_START -->"
 LINKS_END = "<!-- SEO_CATEGORY_LINKS_END -->"
+GEO_LINKS_START = "<!-- SEO_GEO_LINKS_START -->"
+GEO_LINKS_END = "<!-- SEO_GEO_LINKS_END -->"
+
+
+def _update_marked_block(start_marker: str, end_marker: str, links_html: str, warn_label: str):
+    """Reescribe un bloque marcado de index.html entre `start_marker`/
+    `end_marker` -- mismo mecanismo para categorías (DD-067) y geo (DD-072),
+    en bloques SEPARADOS a propósito (no un solo bloque compartido) para que
+    cada uno se pueda regenerar independiente sin pisar al otro. index.html
+    no ejecuta JS al servirse, así que estos <a href> reales son la única
+    forma de que un crawler descubra estas páginas siguiendo links -- sin
+    esto, solo serían alcanzables si alguien ya conoce la URL exacta (o vía
+    sitemap.xml, que no todos los crawlers de IA consultan)."""
+    html = INDEX_FILE.read_text(encoding="utf-8")
+    if start_marker not in html or end_marker not in html:
+        print(f"⚠️  No encontré los marcadores {warn_label} en index.html -- no actualicé esos links.")
+        return
+    before, rest = html.split(start_marker, 1)
+    _, after = rest.split(end_marker, 1)
+    INDEX_FILE.write_text(f"{before}{start_marker}{links_html}{end_marker}{after}", encoding="utf-8")
 
 
 def update_index_links(entries: list):
-    """Reescribe el bloque de links estáticos en index.html (entre los
-    marcadores) con las categorías que sí tienen página. index.html no
-    ejecuta JS al servirse, así que estos <a href> reales son la única
-    forma de que un crawler descubra /categoria/<slug>/ siguiendo links --
-    sin esto, esas páginas solo serían alcanzables si alguien ya conoce la
-    URL exacta (o vía sitemap.xml, que no todos los crawlers de IA
-    consultan)."""
-    html = INDEX_FILE.read_text(encoding="utf-8")
-    if LINKS_START not in html or LINKS_END not in html:
-        print("⚠️  No encontré los marcadores SEO_CATEGORY_LINKS en index.html -- no actualicé los links del footer.")
-        return
+    """Categorías -- ver docstring de _update_marked_block."""
     links = " · ".join(f'<a href="/categoria/{slug}/">{escape(label)}</a>' for slug, label, _ in entries)
     links = f'<a href="/categoria/">Categorías</a> · {links}' if links else '<a href="/categoria/">Categorías</a>'
-    before, rest = html.split(LINKS_START, 1)
-    _, after = rest.split(LINKS_END, 1)
-    INDEX_FILE.write_text(f"{before}{LINKS_START}{links}{LINKS_END}{after}", encoding="utf-8")
+    _update_marked_block(LINKS_START, LINKS_END, links, "SEO_CATEGORY_LINKS")
+
+
+def update_index_geo_links(entries: list):
+    """Zonas de Francia (DD-072) -- ver docstring de _update_marked_block.
+    `entries` son (slug, label, n) de FRANCIA_ZONES más, si tiene página,
+    Paris con su slug anidado "ile-de-france/paris"."""
+    links = " · ".join(f'<a href="/francia/{slug}/">{escape(label)}</a>' for slug, label, _ in entries)
+    links = f'<a href="/francia/">Francia</a> · {links}' if links else '<a href="/francia/">Francia</a>'
+    _update_marked_block(GEO_LINKS_START, GEO_LINKS_END, links, "SEO_GEO_LINKS")
 
 
 def render_sitemap(urls: list) -> str:
@@ -345,7 +471,8 @@ def main(
         raise typer.Exit(f"No existe {DATA_FILE} -- corré primero 5_export_dashboard_data.py")
 
     events = load_events()
-    upcoming = [ev for ev in events if is_upcoming(ev) and ev.get("category")]
+    upcoming_all = [ev for ev in events if is_upcoming(ev)]
+    upcoming = [ev for ev in upcoming_all if ev.get("category")]
 
     by_category = {}
     for ev in upcoming:
@@ -380,7 +507,58 @@ def main(
             print(f"⏭️  {OTROS_SLUG:<14} {len(otros_events):>3} eventos combinados — todavía por debajo del mínimo, sin página")
 
     hub_entries = [(slug, label, len(evs)) for slug, label, evs, _ in pages]
-    sitemap_urls = [f"{BASE_URL}/", f"{BASE_URL}/categoria/"] + [f"{BASE_URL}/categoria/{slug}/" for slug, *_ in pages]
+
+    # ── Etapa 3 (DD-072): páginas de geo, en paralelo a las de categoría ──
+    # `upcoming_all` (sin requisito de category) porque geo es un eje
+    # independiente -- un evento sin category igual puede tener geoZone.
+    print()
+    idf_events, fuera_events = [], []
+    for ev in upcoming_all:
+        zone = canonical_geo_zone(ev.get("geoZone"))
+        if zone == "Île-de-France":
+            idf_events.append(ev)
+        elif zone == "Francia fuera de IDF":
+            fuera_events.append(ev)
+        # "Fuera de Francia" / "No confirmado" / sin geoZone: fuera de
+        # alcance de estas páginas a propósito, ver docstring del módulo.
+    idf_events.sort(key=lambda e: e.get("eventDate") or "")
+    fuera_events.sort(key=lambda e: e.get("eventDate") or "")
+    paris_events = sorted(
+        (ev for ev in idf_events if canonical_city(ev.get("cityName")) == PARIS_LABEL),
+        key=lambda e: e.get("eventDate") or "",
+    )
+
+    zone_events = {"ile-de-france": idf_events, "fuera-de-ile-de-france": fuera_events}
+    geo_pages = []  # (path, label, events, breadcrumb_html, live_query, note)
+    for slug, label, _geo_value in FRANCIA_ZONES:
+        evs = zone_events[slug]
+        n = len(evs)
+        if n < min_events:
+            print(f"⏭️  francia/{slug:<24} {n:>3} eventos — por debajo del mínimo ({min_events}), sin página")
+            continue
+        print(f"✅ francia/{slug:<24} {n:>3} eventos — {'(dry-run, no escribe)' if dry_run else 'generando página'}")
+        breadcrumb = f'<a href="/">Inicio</a> › <a href="/francia/">Francia</a> › {escape(label)}'
+        geo_pages.append((slug, label, evs, breadcrumb, f"?geo={slug}", ""))
+
+    n_paris = len(paris_events)
+    if n_paris >= min_events and "ile-de-france" in {p[0] for p in geo_pages}:
+        print(f"✅ francia/ile-de-france/paris     {n_paris:>3} eventos — {'(dry-run, no escribe)' if dry_run else 'generando página'}")
+        paris_breadcrumb = (
+            '<a href="/">Inicio</a> › <a href="/francia/">Francia</a> › '
+            '<a href="/francia/ile-de-france/">Île-de-France</a> › Paris'
+        )
+        paris_note = "Subconjunto de Île-de-France específicamente en París — ver también todos los eventos de la región completa en la página de Île-de-France."
+        geo_pages.append(("ile-de-france/paris", PARIS_LABEL, paris_events, paris_breadcrumb, "?buscar=Paris", paris_note))
+    elif n_paris:
+        print(f"⏭️  francia/ile-de-france/paris     {n_paris:>3} eventos — por debajo del mínimo ({min_events}) o sin página de Île-de-France, sin página")
+
+    geo_hub_entries = [(slug, label, len(evs)) for slug, label, evs, _, _, _ in geo_pages if slug in zone_events]
+
+    sitemap_urls = (
+        [f"{BASE_URL}/", f"{BASE_URL}/categoria/"] + [f"{BASE_URL}/categoria/{slug}/" for slug, *_ in pages]
+        + [f"{BASE_URL}/francia/"] + [f"{BASE_URL}/francia/{path}/" for path, *_ in geo_pages]
+    )
+
     written = 0
     if not dry_run:
         for slug, label, evs, note in pages:
@@ -388,17 +566,28 @@ def main(
             out_dir.mkdir(parents=True, exist_ok=True)
             (out_dir / "index.html").write_text(render_category_page(slug, label, evs, note), encoding="utf-8")
             written += 1
+        for path, label, evs, breadcrumb, live_query, note in geo_pages:
+            out_dir = SITE_DIR / "francia" / path
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "index.html").write_text(
+                render_geo_page(path=path, label=label, events=evs, breadcrumb_html=breadcrumb, live_query=live_query, note=note),
+                encoding="utf-8",
+            )
+            written += 1
 
     if dry_run:
-        print(f"\n[dry-run] Generaría {len(pages)} páginas de categoría + hub + sitemap. Nada escrito.")
+        print(f"\n[dry-run] Generaría {len(pages)} páginas de categoría + {len(geo_pages)} páginas de geo + hubs + sitemap. Nada escrito.")
         return
 
     (SITE_DIR / "categoria").mkdir(exist_ok=True)
     (SITE_DIR / "categoria" / "index.html").write_text(render_hub_page(hub_entries), encoding="utf-8")
+    (SITE_DIR / "francia").mkdir(exist_ok=True)
+    (SITE_DIR / "francia" / "index.html").write_text(render_francia_hub_page(geo_hub_entries), encoding="utf-8")
     (SITE_DIR / "sitemap.xml").write_text(render_sitemap(sitemap_urls), encoding="utf-8")
     update_index_links(hub_entries)
+    update_index_geo_links([(path, label, len(evs)) for path, label, evs, _, _, _ in geo_pages])
 
-    print(f"\n✅ {written} páginas de categoría + hub (site/categoria/index.html) + sitemap.xml (site/sitemap.xml) + links actualizados en index.html")
+    print(f"\n✅ {written} páginas ({len(pages)} categoría + {len(geo_pages)} geo) + hubs (categoria/, francia/) + sitemap.xml + links actualizados en index.html")
 
 
 if __name__ == "__main__":
