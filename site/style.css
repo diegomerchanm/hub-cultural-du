@@ -121,13 +121,19 @@ a { color: inherit; }
   background: var(--card); border: 1px solid var(--border); border-radius: 3px;
   padding: 6px 10px; cursor: pointer;
 }
-.menu-dropdown-btn i:first-child { color: var(--accent, var(--sub)); font-size: 13px; }
-.menu-dropdown-btn i:last-child { font-size: 12px; color: var(--sub); }
+/* DD-075 fix: íconos como SVG en línea (no dependen de la fuente Tabler
+   cargada por CDN, que en la práctica se vio fallando incluso en el ícono
+   del logo -- ver comentario en index.html). stroke="currentColor" en el
+   SVG hereda el `color` de estas reglas sin necesitar seleccionar el
+   propio <svg>. */
+.menu-icon-lead { width: 14px; height: 14px; flex-shrink: 0; color: var(--accent, var(--sub)); }
+.menu-icon-chevron { width: 12px; height: 12px; flex-shrink: 0; color: var(--sub); }
 .accent-when .menu-dropdown-btn { --accent: var(--accent-when); border-color: color-mix(in srgb, var(--accent-when) 45%, var(--border)); }
 .accent-theme .menu-dropdown-btn { --accent: var(--accent-theme); border-color: color-mix(in srgb, var(--accent-theme) 45%, var(--border)); }
 .accent-geo .menu-dropdown-btn { --accent: var(--accent-geo); border-color: color-mix(in srgb, var(--accent-geo) 45%, var(--border)); }
 .menu-dropdown-btn[aria-expanded="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
-.menu-dropdown-btn[aria-expanded="true"] i { color: var(--bg); }
+.menu-dropdown-btn[aria-expanded="true"] .menu-icon-lead,
+.menu-dropdown-btn[aria-expanded="true"] .menu-icon-chevron { color: var(--bg); }
 .menu-dropdown-menu {
   position: absolute; top: calc(100% + 6px); left: 0;
   background: var(--card); border: 1px solid var(--border); border-radius: 6px;
@@ -167,6 +173,7 @@ a { color: inherit; }
   border: 1px solid var(--border); border-radius: 3px;
   background: var(--card); color: var(--sub); cursor: pointer;
 }
+.icon-toggle svg { width: 16px; height: 16px; }
 .icon-toggle:hover { border-color: var(--sub); color: var(--text); }
 .icon-toggle.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 .icon-toggle:disabled { opacity: 0.5; cursor: default; }

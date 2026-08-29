@@ -50,38 +50,49 @@
   <div class="filterbar" id="filterbar">
     <input type="search" id="search-input" class="search-input" data-i18n-placeholder="searchPlaceholder" placeholder="Título, lugar, cuenta…">
 
+    <!-- DD-075 fix (2026-08-29): Diego reportó que estos dropdowns no se veían
+         como tales -- sin ícono a la izquierda ni flecha a la derecha, a
+         diferencia del <select> de "Ordenar" (que sí trae flecha nativa del
+         navegador). Causa: la fuente de íconos Tabler (cargada desde jsdelivr,
+         ver <head>) no estaba renderizando ese ícono -- se notó porque hasta
+         el ícono del logo (.brand-mark, "ti-map-2") aparecía en blanco en la
+         captura de Diego, algo previo a este cambio y ajeno al filterbar.
+         En vez de depender de esa fuente externa para una señal de UI crítica
+         (que algo ES un desplegable), estos íconos pasan a ser SVG en línea
+         (menu-icon-lead / menu-icon-chevron) -- sin red, sin fuente, sin
+         punto de falla externo, siempre visibles. -->
     <div class="menu-dropdown accent-when" id="when-dropdown">
       <button id="when-dropdown-btn" class="menu-dropdown-btn" type="button" aria-haspopup="true" aria-expanded="false">
-        <i class="ti ti-calendar" aria-hidden="true"></i>
+        <svg class="menu-icon-lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2"/><line x1="16" y1="3" x2="16" y2="7"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="4" y1="11" x2="20" y2="11"/></svg>
         <span id="when-dropdown-label"></span>
-        <i class="ti ti-chevron-down" aria-hidden="true"></i>
+        <svg class="menu-icon-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="menu-dropdown-menu" id="when-dropdown-menu" hidden></div>
     </div>
 
     <div class="menu-dropdown accent-theme" id="theme-dropdown">
       <button id="theme-dropdown-btn" class="menu-dropdown-btn" type="button" aria-haspopup="true" aria-expanded="false">
-        <i class="ti ti-tags" aria-hidden="true"></i>
+        <svg class="menu-icon-lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.6 2.6a2 2 0 0 0-1.4-.6H5a2 2 0 0 0-2 2v6.2c0 .5.2 1 .6 1.4l9 9a2 2 0 0 0 2.8 0l6.2-6.2a2 2 0 0 0 0-2.8z"/><circle cx="7.5" cy="7.5" r="1.3" fill="currentColor" stroke="none"/></svg>
         <span id="theme-dropdown-label"></span>
-        <i class="ti ti-chevron-down" aria-hidden="true"></i>
+        <svg class="menu-icon-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="menu-dropdown-menu" id="theme-dropdown-menu" hidden></div>
     </div>
 
     <div class="menu-dropdown accent-geo" id="geo-dropdown">
       <button id="geo-dropdown-btn" class="menu-dropdown-btn" type="button" aria-haspopup="true" aria-expanded="false">
-        <i class="ti ti-map-pin" aria-hidden="true"></i>
+        <svg class="menu-icon-lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.5-7-11a7 7 0 0 1 14 0c0 4.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.3"/></svg>
         <span id="geo-dropdown-label"></span>
-        <i class="ti ti-chevron-down" aria-hidden="true"></i>
+        <svg class="menu-icon-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       <div class="menu-dropdown-menu" id="geo-dropdown-menu" hidden></div>
     </div>
 
     <button id="free-toggle" class="icon-toggle" data-i18n-title="free" title="Gratis" aria-label="Gratis">
-      <i class="ti ti-tag" aria-hidden="true"></i>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.6 2.6a2 2 0 0 0-1.4-.6H5a2 2 0 0 0-2 2v6.2c0 .5.2 1 .6 1.4l9 9a2 2 0 0 0 2.8 0l6.2-6.2a2 2 0 0 0 0-2.8z"/><circle cx="7.5" cy="7.5" r="1.3" fill="currentColor" stroke="none"/></svg>
     </button>
     <button id="geo-locate-toggle" class="icon-toggle" data-i18n-title="nearMe" title="Cerca de mí" aria-label="Cerca de mí">
-      <i class="ti ti-crosshair" aria-hidden="true"></i>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/></svg>
     </button>
     <select id="sort-select" class="sort-select-compact" data-i18n-title="sortLabel" title="Ordenar" aria-label="Ordenar">
       <option value="recommended" data-i18n="sortRecommended">Recomendado</option>
