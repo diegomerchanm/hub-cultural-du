@@ -26,7 +26,7 @@ const CATEGORY_META = {
   escenico:      { label: "Teatro y danza",          color: "#be5587", icon: "ti-masks-theater" },
   festival:      { label: "Festivales",              color: "#ddaf31", icon: "ti-confetti" },
   academico:     { label: "Charlas y conferencias",  color: "#6b9c3a", icon: "ti-microphone-2" },
-  politico:      { label: "Cívico",                  color: "#98937b", icon: "ti-ballot" },
+  politico:      { label: "Cívico",                  color: "#98937b", icon: "ti-flag" },
 };
 const TAG_ICONS = {
   "Literatura": "ti-book", "Circo": "ti-balloon", "Fotografía": "ti-camera",
@@ -547,6 +547,24 @@ function closeAllDropdowns(exceptId) {
     if (btn) btn.setAttribute("aria-expanded", "false");
   });
 }
+/* DD-075 fix: el panel es position:fixed (ver style.css -- position:absolute
+   quedaba recortado/invisible por el overflow-x:auto de .filterbar, probado
+   en un navegador real: el botón se marcaba "activo" pero el panel nunca
+   aparecía). Fixed no se ancla solo al padre relative como absolute, así
+   que hay que calcular top/left a mano contra la posición real del botón
+   en pantalla cada vez que se abre. */
+function positionDropdownMenu(btn, menu) {
+  const rect = btn.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 6}px`;
+  menu.style.left = `${rect.left}px`;
+  // Si el panel se sale por el borde derecho del viewport (dropdowns hacia
+  // el final de la fila, en pantallas angostas), alinear su borde derecho
+  // al del botón en vez de su izquierdo.
+  const menuRect = menu.getBoundingClientRect();
+  if (menuRect.right > window.innerWidth - 8) {
+    menu.style.left = `${Math.max(8, rect.right - menuRect.width)}px`;
+  }
+}
 function toggleDropdown(id) {
   const menu = document.getElementById(`${id}-dropdown-menu`);
   const btn = document.getElementById(`${id}-dropdown-btn`);
@@ -555,6 +573,7 @@ function toggleDropdown(id) {
   closeAllDropdowns(id);
   menu.hidden = !willOpen;
   btn.setAttribute("aria-expanded", String(willOpen));
+  if (willOpen) positionDropdownMenu(btn, menu);
 }
 // Cerrar con click afuera o Escape -- registrado una sola vez a nivel de
 // documento (no en cada render), ya que los botones/menús son elementos
@@ -567,6 +586,15 @@ document.addEventListener("click", (e) => {
   if (!insideAny) closeAllDropdowns();
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAllDropdowns(); });
+/* Con el panel en position:fixed, ya no sigue al botón si la fila scrollea
+   horizontal (.filterbar, overflow-x:auto) o si la página scrollea antes de
+   que el filterbar quede "pegado" (position:sticky). En vez de recalcular
+   la posición en cada evento de scroll, simplemente se cierra -- mismo
+   patrón ya usado para click-afuera/Escape. `capture: true` porque el
+   scroll de un contenedor interno (como .filterbar) no burbujea, solo se
+   puede escuchar en la fase de captura desde un ancestro. */
+document.addEventListener("scroll", () => closeAllDropdowns(), true);
+window.addEventListener("resize", () => closeAllDropdowns());
 // DD-074: wireado una sola vez (no en cada render, a diferencia del
 // contenido del menú -- ver render*Dropdown() de abajo) porque los botones
 // en sí son estáticos, nunca se recrean.

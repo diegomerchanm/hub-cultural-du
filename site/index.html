@@ -15,7 +15,16 @@
 <meta name="description" content="Eventos culturales de la diáspora latinoamericana en Francia — música, cine, arte, literatura y más.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2/dist/tabler-icons.min.css">
+<!-- DD-075 fix (2026-08-29): la URL con /dist/ da 404 -- confirmado con
+     fetch() real contra jsdelivr, "Couldn't find the requested file
+     /dist/tabler-icons.min.css in @tabler/icons-webfont". Esto rompía TODOS
+     los íconos ti-* del sitio (logo, tarjetas, panel de detalle) desde
+     siempre, no algo nuevo de este cambio -- Diego lo notó al ver el círculo
+     de color sin ícono en el panel de detalle. Ruta real del paquete: sin
+     /dist/, verificada sirviendo 200 con las 36 clases ti-* que usa el
+     sitio (la única que faltaba, ti-ballot, no existe en absoluto en la v2
+     real -- reemplazada por ti-flag en CATEGORY_META.politico). -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2/tabler-icons.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
