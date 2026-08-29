@@ -26,62 +26,69 @@
       <span class="brand-mark"><i class="ti ti-map-2" aria-hidden="true"></i></span>
       <span class="brand-name">Hub Cultural</span>
     </a>
-    <div class="topnav-right">
-      <!-- DD-074: reemplaza las 3 filas de pills de geo del filterbar
-           (DD-073) -- Diego pidió que "Dónde" no ocupe espacio del menú de
-           filtros y se vuelva un desplegable acá, junto a ES/FR. Contenido
-           armado por renderGeoDropdown() en app.js; vacío hasta el primer
-           render (no hay parpadeo de contenido sin traducir porque el
-           label recién se llena ahí). -->
-      <div class="geo-dropdown" id="geo-dropdown">
-        <button id="geo-dropdown-btn" class="geo-dropdown-btn" type="button" aria-haspopup="true" aria-expanded="false">
-          <i class="ti ti-map-pin" aria-hidden="true"></i>
-          <span id="geo-dropdown-label"></span>
-          <i class="ti ti-chevron-down" aria-hidden="true"></i>
-        </button>
-        <div class="geo-dropdown-menu" id="geo-dropdown-menu" hidden></div>
-      </div>
-      <div class="topnav-actions">
-        <button id="lang-es" class="lang-btn active" data-lang="es">ES</button>
-        <button id="lang-fr" class="lang-btn" data-lang="fr">FR</button>
-      </div>
+    <div class="topnav-actions">
+      <button id="lang-es" class="lang-btn active" data-lang="es">ES</button>
+      <button id="lang-fr" class="lang-btn" data-lang="fr">FR</button>
     </div>
   </div>
 </header>
 
+<!-- DD-075 (2026-08-29): rediseño completo del filterbar -- Diego probó el
+     sitio en celular y el menú de antes (varias filas apiladas: Cuándo,
+     Categoría con su nube de pills de colores, Gratis/Cerca de mí/Ordenar)
+     ocupaba ~70% del alto de pantalla. Referencia que dio: Meetup, donde el
+     menú "no es estático, solo aparece arriba" -- una sola fila compacta,
+     no un panel que empuja todo el contenido hacia abajo. Cuándo y
+     Categoría pasan a ser dropdowns (mismo patrón ya usado para Dónde
+     desde DD-074, que se muda de vuelta acá para quedar junto a sus
+     hermanos en la misma fila) -- Gratis/Cerca de mí se comprimen a
+     botones de solo ícono, y Ordenar a un <select> angosto. Toda la fila
+     tiene overflow-x:auto (ver style.css) como red de seguridad en
+     pantallas muy angostas -- scrollea horizontal en vez de romper a una
+     segunda línea, manteniendo el alto de una sola fila siempre. -->
 <div class="filterbar-wrap">
   <div class="filterbar" id="filterbar">
-    <div class="filter-row">
-      <span class="filter-label"><i class="ti ti-search" aria-hidden="true"></i> <span data-i18n="searchLabel">Buscar</span></span>
-      <input type="search" id="search-input" class="search-input" data-i18n-placeholder="searchPlaceholder" placeholder="Título, lugar, cuenta…">
-    </div>
-    <!-- DD-074: Gratis/Cerca de mí/Ordenar ya no tienen fila propia --
-         antes dejaban una línea con mucho espacio vacío (el "Ordenar"
-         empujado a la derecha con margin-left:auto). Ahora comparten fila
-         con "Cuándo", sin ese empuje forzado. -->
-    <div class="filter-row">
-      <span class="filter-label"><i class="ti ti-calendar" aria-hidden="true"></i> <span data-i18n="when">Cuándo</span></span>
-      <div class="pill-row" id="when-pills"></div>
-      <button id="free-toggle" class="pill">
-        <i class="ti ti-tag" aria-hidden="true"></i> <span data-i18n="free">Gratis</span>
+    <input type="search" id="search-input" class="search-input" data-i18n-placeholder="searchPlaceholder" placeholder="Título, lugar, cuenta…">
+
+    <div class="menu-dropdown accent-when" id="when-dropdown">
+      <button id="when-dropdown-btn" class="menu-dropdown-btn" type="button" aria-haspopup="true" aria-expanded="false">
+        <i class="ti ti-calendar" aria-hidden="true"></i>
+        <span id="when-dropdown-label"></span>
+        <i class="ti ti-chevron-down" aria-hidden="true"></i>
       </button>
-      <button id="geo-locate-toggle" class="pill">
-        <i class="ti ti-crosshair" aria-hidden="true"></i> <span data-i18n="nearMe">Cerca de mí</span>
+      <div class="menu-dropdown-menu" id="when-dropdown-menu" hidden></div>
+    </div>
+
+    <div class="menu-dropdown accent-theme" id="theme-dropdown">
+      <button id="theme-dropdown-btn" class="menu-dropdown-btn" type="button" aria-haspopup="true" aria-expanded="false">
+        <i class="ti ti-tags" aria-hidden="true"></i>
+        <span id="theme-dropdown-label"></span>
+        <i class="ti ti-chevron-down" aria-hidden="true"></i>
       </button>
-      <div class="sort-control">
-        <label for="sort-select" data-i18n="sortLabel">Ordenar</label>
-        <select id="sort-select">
-          <option value="recommended" data-i18n="sortRecommended">Recomendado</option>
-          <option value="date" data-i18n="sortDate">Fecha</option>
-          <option value="popularity" data-i18n="sortPopularity">Popularidad</option>
-          <option value="distance" data-i18n="sortDistance">Cercanía</option>
-        </select>
-      </div>
+      <div class="menu-dropdown-menu" id="theme-dropdown-menu" hidden></div>
     </div>
-    <div class="filter-row">
-      <span class="filter-label"><i class="ti ti-tags" aria-hidden="true"></i> <span data-i18n="categoryGroupLabel">Categoría</span></span>
+
+    <div class="menu-dropdown accent-geo" id="geo-dropdown">
+      <button id="geo-dropdown-btn" class="menu-dropdown-btn" type="button" aria-haspopup="true" aria-expanded="false">
+        <i class="ti ti-map-pin" aria-hidden="true"></i>
+        <span id="geo-dropdown-label"></span>
+        <i class="ti ti-chevron-down" aria-hidden="true"></i>
+      </button>
+      <div class="menu-dropdown-menu" id="geo-dropdown-menu" hidden></div>
     </div>
-    <div class="theme-row" id="theme-pills"></div>
+
+    <button id="free-toggle" class="icon-toggle" data-i18n-title="free" title="Gratis" aria-label="Gratis">
+      <i class="ti ti-tag" aria-hidden="true"></i>
+    </button>
+    <button id="geo-locate-toggle" class="icon-toggle" data-i18n-title="nearMe" title="Cerca de mí" aria-label="Cerca de mí">
+      <i class="ti ti-crosshair" aria-hidden="true"></i>
+    </button>
+    <select id="sort-select" class="sort-select-compact" data-i18n-title="sortLabel" title="Ordenar" aria-label="Ordenar">
+      <option value="recommended" data-i18n="sortRecommended">Recomendado</option>
+      <option value="date" data-i18n="sortDate">Fecha</option>
+      <option value="popularity" data-i18n="sortPopularity">Popularidad</option>
+      <option value="distance" data-i18n="sortDistance">Cercanía</option>
+    </select>
   </div>
 </div>
 

@@ -6,18 +6,27 @@
    de localStorage de cada visitante- ver docs/dashboard_redesign_proposal.md
    sección 3). Sin backend, sin dependencia de Neo4j en producción. */
 
+// DD-075 (2026-08-29): paleta recalculada vía HSL (+saturación ~30-40%,
+// misma luminosidad, para no romper el contraste de texto que ya dependía
+// de estos valores) -- pedido de Diego ("misma paleta, tonos un poco más
+// vivos") al rediseñar el menú a dropdowns. "escenico" tenía el mismo gris
+// apagado que "politico" (compartían color porque ninguno tenía una
+// identidad propia definida) -- como Teatro y danza es una categoría real y
+// activa (15 eventos en la última corrida, a diferencia de político con 0),
+// se le dio un tono propio (rosa/magenta) en vez de simplemente vivificar
+// el mismo gris para los dos.
 const CATEGORY_META = {
-  gastronomico:  { label: "Gastronomía",            color: "#b0384a", icon: "ti-tools-kitchen-2" },
-  institucional: { label: "Institucional",           color: "#2f5aa8", icon: "ti-building-bank" },
-  visual:        { label: "Artes visuales",          color: "#7b5ea7", icon: "ti-palette" },
-  comunitario:   { label: "Comunidad",               color: "#4a8c6f", icon: "ti-users" },
-  musical:       { label: "Música",                  color: "#a5603a", icon: "ti-music" },
-  formacion:     { label: "Talleres",                color: "#c49a2c", icon: "ti-school" },
-  audiovisual:   { label: "Cine",                    color: "#5f6b8c", icon: "ti-movie" },
-  escenico:      { label: "Teatro y danza",          color: "#8f8d84", icon: "ti-masks-theater" },
-  festival:      { label: "Festivales",              color: "#e0b02e", icon: "ti-confetti" },
-  academico:     { label: "Charlas y conferencias",  color: "#6b8c4a", icon: "ti-microphone-2" },
-  politico:      { label: "Cívico",                  color: "#8f8d84", icon: "ti-ballot" },
+  gastronomico:  { label: "Gastronomía",            color: "#c8203a", icon: "ti-tools-kitchen-2" },
+  institucional: { label: "Institucional",           color: "#1e55b9", icon: "ti-building-bank" },
+  visual:        { label: "Artes visuales",          color: "#774cb9", icon: "ti-palette" },
+  comunitario:   { label: "Comunidad",               color: "#3a9c71", icon: "ti-users" },
+  musical:       { label: "Música",                  color: "#bc5923", icon: "ti-music" },
+  formacion:     { label: "Talleres",                color: "#ce9f22", icon: "ti-school" },
+  audiovisual:   { label: "Cine",                    color: "#51659a", icon: "ti-movie" },
+  escenico:      { label: "Teatro y danza",          color: "#be5587", icon: "ti-masks-theater" },
+  festival:      { label: "Festivales",              color: "#ddaf31", icon: "ti-confetti" },
+  academico:     { label: "Charlas y conferencias",  color: "#6b9c3a", icon: "ti-microphone-2" },
+  politico:      { label: "Cívico",                  color: "#98937b", icon: "ti-ballot" },
 };
 const TAG_ICONS = {
   "Literatura": "ti-book", "Circo": "ti-balloon", "Fotografía": "ti-camera",
@@ -477,26 +486,9 @@ function renderFilterBar() {
   // los eventos que además pasan el geo activo (DD-074, punto 6 de Diego:
   // "las categorías también están por debajo del nivel de país y ciudad").
   renderGeoDropdown(upcomingEvents);
+  renderWhenDropdown(upcomingEvents);
   const geoScopedUpcoming = STATE.geo === "all" ? upcomingEvents : upcomingEvents.filter((ev) => geoMatches(ev, STATE.geo));
-
-  // Pills de fecha, cada una con su propio conteo (independiente entre sí,
-  // sobre el dataset completo) — "Pasados" es el complemento de "por venir".
-  const whenEl = document.getElementById("when-pills");
-  whenEl.innerHTML = "";
-  const todayN = DATA.events.filter((ev) => whenBucket(ev.eventDate) === "today").length;
-  const weekendN = DATA.events.filter((ev) => isWeekendEvent(ev.eventDate)).length;
-  const weekN = DATA.events.filter((ev) => { const b = whenBucket(ev.eventDate); return b === "today" || b === "week"; }).length;
-  const monthN = DATA.events.filter((ev) => { const d = daysUntil(ev.eventDate); return d !== null && d >= 0 && d <= 31; }).length;
-  const upcomingN = upcomingEvents.length;
-  const pastN = DATA.events.length - upcomingN;
-  [
-    ["today", t("whenToday"), todayN],
-    ["weekend", t("whenWeekend"), weekendN],
-    ["week", t("whenWeek"), weekN],
-    ["month", t("whenMonth"), monthN],
-    ["upcoming", t("whenUpcoming"), upcomingN],
-    ["past", t("whenPast"), pastN],
-  ].forEach(([key, label, n]) => whenEl.appendChild(pillEl(label, n, STATE.when === key, () => setState({ when: key }))));
+  renderThemeDropdown(geoScopedUpcoming);
 
   // Buscador (2026-08-27): input estático de index.html, no se reconstruye
   // en cada render -- solo se sincroniza el valor (no-op si ya coincide, no
@@ -525,45 +517,6 @@ function renderFilterBar() {
     }
   };
 
-  // DD-055/DD-056: con 50+ categorías/tags posibles, mostrarlas todas al
-  // mismo tamaño era caótico. Primer intento (DD-055) agregaba una fila
-  // "Otras categorías" para los tags de 1-2 eventos en vez de ocultarlos
-  // del todo -- Diego la vio desplegada y pidió sacarla directamente
-  // (seguía siendo ruido, y cada uno de esos eventos ya es encontrable por
-  // su categoría principal de todas formas). Ahora los tags con 2 eventos
-  // o menos simplemente no arman pill en el menú -- el evento sigue
-  // existiendo y filtrable por su categoría fija, solo que ese tag puntual
-  // no ensucia el menú. Los que sí entran arman la nube con 3 tamaños
-  // (terciles dinámicos sobre el volumen real, no umbrales fijos).
-  // DD-074: scopeado por geo -- `geoScopedUpcoming` en vez de
-  // `upcomingEvents` (ver arriba). Si hay un país/ciudad elegido, las
-  // categorías y sus conteos reflejan solo lo que hay ahí, no el catálogo
-  // completo -- pedido explícito de Diego ("las categorías también están
-  // por debajo del nivel de país y ciudad").
-  const MIN_THEME_COUNT = 3;
-  const themeCounts = {};
-  geoScopedUpcoming.forEach((ev) => eventThemes(ev).forEach((th) => { themeCounts[th] = (themeCounts[th] || 0) + 1; }));
-  const mainThemes = Object.keys(themeCounts)
-    .map((theme) => ({ theme, count: themeCounts[theme] }))
-    .filter((e) => e.count >= MIN_THEME_COUNT)
-    .sort((a, b) => b.count - a.count);
-  const tierFor = (i, n) => {
-    if (n <= 1) return "tier-lg";
-    if (i < n / 3) return "tier-lg";
-    if (i < (n / 3) * 2) return "tier-md";
-    return "tier-sm";
-  };
-
-  const themeEl = document.getElementById("theme-pills");
-  themeEl.innerHTML = "";
-  themeEl.appendChild(pillEl(t("themeAll"), geoScopedUpcoming.length, STATE.theme === "all", () => setState({ theme: "all" }), "tier-lg"));
-  mainThemes.forEach(({ theme, count }, i) => {
-    themeEl.appendChild(pillEl(
-      themeLabel(theme), count, STATE.theme === theme, () => setState({ theme }),
-      tierFor(i, mainThemes.length), themeColor(theme)
-    ));
-  });
-
   document.getElementById("sort-select").value = STATE.sort;
   document.getElementById("sort-select").onchange = (e) => {
     // Elegir "Cercanía" sin haber dado ubicación todavía dispara el
@@ -574,12 +527,59 @@ function renderFilterBar() {
   };
 }
 
-/* ── Menú desplegable de ubicación (2026-08-29, DD-074) ──────────────────
-   Reemplaza las 3 filas de pills en cascada de DD-073 -- Diego pidió que
-   "Dónde" deje de ocupar espacio en el filterbar y se vuelva un menú
-   desplegable en el header, junto a ES/FR. Lista plana con indentación
-   visual para marcar la jerarquía (país → zona → ciudad), en vez de un
-   selector de 2 pasos -- un solo click alcanza para cualquier nivel. */
+/* ── Menús desplegables del filterbar (2026-08-29, DD-074/DD-075) ────────
+   DD-074 introdujo el patrón (solo para "Dónde"): Diego pidió que dejara de
+   ocupar espacio en el filterbar y se volviera un menú desplegable junto a
+   ES/FR. DD-075 lo generaliza a los tres filtros (Cuándo/Categoría/Dónde)
+   y los mueve a una sola fila en el filterbar -- probado en celular, el
+   menú de antes (filas apiladas) ocupaba ~70% del alto de pantalla;
+   referencia dada: Meetup, "el menú no es estático, solo aparece arriba".
+   Los tres comparten la misma mecánica de apertura/cierre (closeAllDropdowns/
+   toggleDropdown) -- lo único que cambia entre ellos es qué contenido arma
+   cada render*Dropdown(). */
+const DROPDOWN_IDS = ["when", "theme", "geo"];
+function closeAllDropdowns(exceptId) {
+  DROPDOWN_IDS.forEach((id) => {
+    if (id === exceptId) return;
+    const menu = document.getElementById(`${id}-dropdown-menu`);
+    const btn = document.getElementById(`${id}-dropdown-btn`);
+    if (menu) menu.hidden = true;
+    if (btn) btn.setAttribute("aria-expanded", "false");
+  });
+}
+function toggleDropdown(id) {
+  const menu = document.getElementById(`${id}-dropdown-menu`);
+  const btn = document.getElementById(`${id}-dropdown-btn`);
+  if (!menu || !btn) return;
+  const willOpen = menu.hidden;
+  closeAllDropdowns(id);
+  menu.hidden = !willOpen;
+  btn.setAttribute("aria-expanded", String(willOpen));
+}
+// Cerrar con click afuera o Escape -- registrado una sola vez a nivel de
+// documento (no en cada render), ya que los botones/menús son elementos
+// estáticos de index.html, nunca se recrean.
+document.addEventListener("click", (e) => {
+  const insideAny = DROPDOWN_IDS.some((id) => {
+    const dropdown = document.getElementById(`${id}-dropdown`);
+    return dropdown && dropdown.contains(e.target);
+  });
+  if (!insideAny) closeAllDropdowns();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAllDropdowns(); });
+// DD-074: wireado una sola vez (no en cada render, a diferencia del
+// contenido del menú -- ver render*Dropdown() de abajo) porque los botones
+// en sí son estáticos, nunca se recrean.
+function initDropdownButtons() {
+  DROPDOWN_IDS.forEach((id) => {
+    const btn = document.getElementById(`${id}-dropdown-btn`);
+    if (btn) btn.onclick = (e) => { e.stopPropagation(); toggleDropdown(id); };
+  });
+}
+
+/* Dónde (DD-074, generalizado DD-075): lista plana con indentación visual
+   para marcar la jerarquía (país → zona → ciudad), en vez de un selector de
+   2 pasos -- un solo click alcanza para cualquier nivel. */
 const GEO_MENU_ITEMS = [
   { key: "all", indent: 0 },
   { key: "francia", indent: 0 },
@@ -599,51 +599,94 @@ function renderGeoDropdown(upcomingEvents) {
   if (!menu) return;
   menu.innerHTML = GEO_MENU_ITEMS.map(({ key, indent }) => {
     const active = STATE.geo === key;
-    return `<button type="button" class="geo-item indent-${indent}${active ? " active" : ""}" data-geo="${key}">
+    return `<button type="button" class="menu-item indent-${indent}${active ? " active" : ""}" data-geo="${key}">
       <span>${escapeHtml(labelFor(key))}</span><span class="n">${countFor(key)}</span>
     </button>`;
   }).join("");
-  menu.querySelectorAll(".geo-item").forEach((itemBtn) => {
-    itemBtn.onclick = () => { setGeo(itemBtn.dataset.geo); closeGeoDropdown(); };
+  menu.querySelectorAll(".menu-item").forEach((itemBtn) => {
+    itemBtn.onclick = () => { setGeo(itemBtn.dataset.geo); closeAllDropdowns(); };
   });
 }
-function closeGeoDropdown() {
-  const menu = document.getElementById("geo-dropdown-menu");
-  const btn = document.getElementById("geo-dropdown-btn");
-  if (menu) menu.hidden = true;
-  if (btn) btn.setAttribute("aria-expanded", "false");
-}
-function toggleGeoDropdown() {
-  const menu = document.getElementById("geo-dropdown-menu");
-  const btn = document.getElementById("geo-dropdown-btn");
-  if (!menu || !btn) return;
-  const willOpen = menu.hidden;
-  menu.hidden = !willOpen;
-  btn.setAttribute("aria-expanded", String(willOpen));
-}
-// Cerrar con click afuera o Escape -- registrado una sola vez a nivel de
-// documento (no en cada render), ya que el botón/menú son elementos
-// estáticos de index.html, nunca se recrean.
-document.addEventListener("click", (e) => {
-  const dropdown = document.getElementById("geo-dropdown");
-  if (dropdown && !dropdown.contains(e.target)) closeGeoDropdown();
-});
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeGeoDropdown(); });
 
-function pillEl(label, count, active, onClick, tierClass, colorAccent) {
-  const b = document.createElement("button");
-  b.className = "pill" + (tierClass ? " " + tierClass : "") + (active ? " active" : "");
-  // El acento de color solo se aplica inactivo -- un estilo inline tiene
-  // más especificidad que cualquier clase, así que si lo dejáramos puesto
-  // en estado activo taparía el fondo oscuro de .pill.active sin querer.
-  if (colorAccent && !active) {
-    b.style.borderLeft = `3px solid ${colorAccent.solid}`;
-    b.style.background = colorAccent.tint;
-  }
-  b.innerHTML = `<span>${label}</span>` + (count != null ? `<span class="count">${count}</span>` : "");
-  b.onclick = onClick;
-  return b;
+/* Cuándo (DD-075, nuevo dropdown -- antes era una fila de pills). Mismas
+   opciones/conteos que ya existían, solo cambia el contenedor visual: cada
+   pill se vuelve un ítem de lista de selección única (STATE.when). */
+function renderWhenDropdown(upcomingEvents) {
+  const todayN = DATA.events.filter((ev) => whenBucket(ev.eventDate) === "today").length;
+  const weekendN = DATA.events.filter((ev) => isWeekendEvent(ev.eventDate)).length;
+  const weekN = DATA.events.filter((ev) => { const b = whenBucket(ev.eventDate); return b === "today" || b === "week"; }).length;
+  const monthN = DATA.events.filter((ev) => { const d = daysUntil(ev.eventDate); return d !== null && d >= 0 && d <= 31; }).length;
+  const upcomingN = upcomingEvents.length;
+  const pastN = DATA.events.length - upcomingN;
+  const items = [
+    ["today", t("whenToday"), todayN],
+    ["weekend", t("whenWeekend"), weekendN],
+    ["week", t("whenWeek"), weekN],
+    ["month", t("whenMonth"), monthN],
+    ["upcoming", t("whenUpcoming"), upcomingN],
+    ["past", t("whenPast"), pastN],
+  ];
+  const current = items.find(([key]) => key === STATE.when);
+  const label = document.getElementById("when-dropdown-label");
+  if (label) label.textContent = current ? current[1] : t("whenUpcoming");
+
+  const menu = document.getElementById("when-dropdown-menu");
+  if (!menu) return;
+  menu.innerHTML = items.map(([key, itemLabel, n]) => {
+    const active = STATE.when === key;
+    return `<button type="button" class="menu-item${active ? " active" : ""}" data-when="${key}">
+      <span>${escapeHtml(itemLabel)}</span><span class="n">${n}</span>
+    </button>`;
+  }).join("");
+  menu.querySelectorAll(".menu-item").forEach((itemBtn) => {
+    itemBtn.onclick = () => { setState({ when: itemBtn.dataset.when }); closeAllDropdowns(); };
+  });
 }
+
+/* Categoría (DD-075, nuevo dropdown -- antes era la nube de pills de
+   colores). DD-055/DD-056: con 50+ categorías/tags posibles, mostrarlas
+   todas al mismo tamaño era caótico -- los tags con menos de
+   MIN_THEME_COUNT eventos simplemente no entran a la lista (el evento
+   sigue existiendo y filtrable por su categoría fija). DD-074: scopeado
+   por geo -- se recibe `geoScopedUpcoming` en vez de `upcomingEvents`, así
+   que si hay un país/ciudad elegido, las categorías y sus conteos
+   reflejan solo lo que hay ahí (pedido explícito de Diego: "las
+   categorías también están por debajo del nivel de país y ciudad").
+   Como al ser un dropdown ya no hay una nube de pills de colores a la
+   vista, cada ítem conserva un swatch de color (mismo CATEGORY_META) para
+   no perder la señal visual que antes daban los bordes/fondos de pill. */
+const MIN_THEME_COUNT = 3;
+function renderThemeDropdown(geoScopedUpcoming) {
+  const themeCounts = {};
+  geoScopedUpcoming.forEach((ev) => eventThemes(ev).forEach((th) => { themeCounts[th] = (themeCounts[th] || 0) + 1; }));
+  const mainThemes = Object.keys(themeCounts)
+    .map((theme) => ({ theme, count: themeCounts[theme] }))
+    .filter((e) => e.count >= MIN_THEME_COUNT)
+    .sort((a, b) => b.count - a.count);
+
+  const label = document.getElementById("theme-dropdown-label");
+  if (label) label.textContent = STATE.theme === "all" ? t("themeAll") : themeLabel(STATE.theme);
+
+  const menu = document.getElementById("theme-dropdown-menu");
+  if (!menu) return;
+  const allActive = STATE.theme === "all";
+  const allItem = `<button type="button" class="menu-item${allActive ? " active" : ""}" data-theme="all">
+      <span>${escapeHtml(t("themeAll"))}</span><span class="n">${geoScopedUpcoming.length}</span>
+    </button>`;
+  const themeItems = mainThemes.map(({ theme, count }) => {
+    const active = STATE.theme === theme;
+    const color = themeColor(theme).solid;
+    return `<button type="button" class="menu-item${active ? " active" : ""}" data-theme="${escapeHtml(theme)}">
+      <span class="menu-item-swatch" style="background:${color}" aria-hidden="true"></span>
+      <span>${escapeHtml(themeLabel(theme))}</span><span class="n">${count}</span>
+    </button>`;
+  }).join("");
+  menu.innerHTML = allItem + themeItems;
+  menu.querySelectorAll(".menu-item").forEach((itemBtn) => {
+    itemBtn.onclick = () => { setState({ theme: itemBtn.dataset.theme }); closeAllDropdowns(); };
+  });
+}
+
 function setState(patch) {
   Object.assign(STATE, patch);
   if (patch.theme) bumpPref(patch.theme === "all" ? null : patch.theme, null, 1);
@@ -861,6 +904,15 @@ function applyStaticI18n() {
   document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
     const val = t(el.dataset.i18nPlaceholder);
     if (val != null) el.placeholder = val;
+  });
+  // DD-075: nuevos botones de solo ícono (Gratis/Cerca de mí/Ordenar,
+  // comprimidos al rediseñar el filterbar) dependen del title/aria-label
+  // para explicar qué hacen -- sin esto quedaban fijos en español pase lo
+  // que pase con el botón ES/FR, mismo bug que ya existía para
+  // data-i18n/data-i18n-placeholder antes de que existieran (ver DD-054).
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+    const val = t(el.dataset.i18nTitle);
+    if (val != null) { el.title = val; el.setAttribute("aria-label", val); }
   });
 }
 
@@ -1125,13 +1177,6 @@ function initLangButtons() {
     };
   });
 }
-// DD-074: wireado una sola vez (no en cada render, a diferencia del
-// contenido del menú -- ver renderGeoDropdown()) porque el botón en sí es
-// estático, nunca se recrea.
-function initGeoDropdownButton() {
-  const btn = document.getElementById("geo-dropdown-btn");
-  if (btn) btn.onclick = (e) => { e.stopPropagation(); toggleGeoDropdown(); };
-}
 /* Deep-link de filtros iniciales (2026-08-29, Etapa 3, DD-072): las páginas
    estáticas de /categoria/ y /francia/ (6_generate_seo_pages.py) enlazan de
    vuelta al sitio interactivo con ?tema=/?geo=/?buscar= para que "ver estos
@@ -1178,7 +1223,7 @@ function applyInitialFiltersFromUrl() {
 
 async function init() {
   initLangButtons();
-  initGeoDropdownButton();
+  initDropdownButtons();
   document.getElementById("shelves").innerHTML = `<p style="color:var(--sub);font-size:13px">${t("loading")}</p>`;
   try {
     const res = await fetch("data.json", { cache: "no-store" });
