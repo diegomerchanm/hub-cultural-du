@@ -275,20 +275,21 @@ def event_html(ev) -> str:
 
 def render_listing_page(*, canonical: str, breadcrumb_html: str, h1: str,
                          meta_description: str, events: list, note: str,
-                         live_query: str) -> str:
+                         live_href: str) -> str:
     """Template compartido por páginas de categoría (DD-067) y de geo
-    (DD-072) -- misma estructura (HTML semántico + JSON-LD @graph), lo único
-    que cambia entre una y otra es breadcrumb/título/descripción/link de
-    vuelta al sitio interactivo. `live_query` (ej. "?tema=visual",
-    "?geo=ile-de-france", "?buscar=Paris") es el deep-link nuevo de DD-072
-    (ver GEO_SLUG_TO_ZONE/applyInitialFiltersFromUrl en site/app.js) --
-    string vacío cae al link genérico a "/" sin filtro (caso de "Otros",
-    donde no hay un único tema/zona que aplicarle al link)."""
+    (DD-072/DD-073) -- misma estructura (HTML semántico + JSON-LD @graph),
+    lo único que cambia entre una y otra es breadcrumb/título/descripción/
+    link de vuelta al sitio interactivo. `live_href` (ej. "/?tema=visual",
+    o -- desde DD-073 -- una URL bonita real como "/fr/ile-de-france/") es
+    el link de vuelta al sitio interactivo YA FILTRADO (ver
+    ROUTE_TO_GEO/applyInitialFiltersFromUrl en site/app.js) -- string vacío
+    cae al link genérico a "/" sin filtro (caso de "Otros", donde no hay un
+    único tema que aplicarle al link)."""
     jsonld = {"@context": "https://schema.org", "@graph": [event_jsonld(ev) for ev in events]}
     events_html = "\n".join(event_html(ev) for ev in events)
     note_html = f'<p class="subtitle">{escape(note)}</p>' if note else ""
-    live_link = f"/{live_query}" if live_query else "/"
-    live_link_text = "Ver estos eventos, con filtros y mapa, en el sitio interactivo →" if live_query else "Ver el sitio completo, con filtros y mapa →"
+    live_link = live_href if live_href else "/"
+    live_link_text = "Ver estos eventos, con filtros y mapa, en el sitio interactivo →" if live_href else "Ver el sitio completo, con filtros y mapa →"
     return f"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -317,24 +318,24 @@ def render_listing_page(*, canonical: str, breadcrumb_html: str, h1: str,
 
 
 def render_category_page(slug: str, label: str, events: list, note: str = "") -> str:
-    live_query = f"?tema={slug}" if slug != OTROS_SLUG else ""
+    live_href = f"/?tema={slug}" if slug != OTROS_SLUG else ""
     return render_listing_page(
         canonical=f"{BASE_URL}/categoria/{slug}/",
         breadcrumb_html=f'<a href="/">Inicio</a> › <a href="/categoria/">Categorías</a> › {escape(label)}',
         h1=f"{label} — eventos de la diáspora latinoamericana en Francia",
         meta_description=f"{len(events)} eventos próximos de {label.lower()} de la diáspora latinoamericana en Francia: fechas, lugares y precios.",
-        events=events, note=note, live_query=live_query,
+        events=events, note=note, live_href=live_href,
     )
 
 
 def render_geo_page(*, path: str, label: str, events: list, breadcrumb_html: str,
-                     live_query: str, note: str = "") -> str:
+                     live_href: str, note: str = "") -> str:
     return render_listing_page(
         canonical=f"{BASE_URL}/francia/{path}/",
         breadcrumb_html=breadcrumb_html,
         h1=f"{label} — eventos de la diáspora latinoamericana",
         meta_description=f"{len(events)} eventos próximos de la diáspora latinoamericana en {label}: fechas, lugares y precios.",
-        events=events, note=note, live_query=live_query,
+        events=events, note=note, live_href=live_href,
     )
 
 
@@ -528,8 +529,15 @@ def main(
         key=lambda e: e.get("eventDate") or "",
     )
 
+    # DD-073: cada zona/Paris tiene, además de su página SEO plana en
+    # /francia/..., una URL bonita real (/fr/...) que sirve la app
+    # interactiva ya filtrada (ver GEO_TO_ROUTE en site/app.js -- tiene que
+    # coincidir slug a slug con esto). El link "ver en vivo" de la página
+    # SEO apunta ahí en vez de a un query string, desde esta entrega.
+    FR_ROUTE = {"ile-de-france": "/fr/ile-de-france/", "fuera-de-ile-de-france": "/fr/fuera-de-ile-de-france/"}
+
     zone_events = {"ile-de-france": idf_events, "fuera-de-ile-de-france": fuera_events}
-    geo_pages = []  # (path, label, events, breadcrumb_html, live_query, note)
+    geo_pages = []  # (path, label, events, breadcrumb_html, live_href, note)
     for slug, label, _geo_value in FRANCIA_ZONES:
         evs = zone_events[slug]
         n = len(evs)
@@ -538,7 +546,7 @@ def main(
             continue
         print(f"✅ francia/{slug:<24} {n:>3} eventos — {'(dry-run, no escribe)' if dry_run else 'generando página'}")
         breadcrumb = f'<a href="/">Inicio</a> › <a href="/francia/">Francia</a> › {escape(label)}'
-        geo_pages.append((slug, label, evs, breadcrumb, f"?geo={slug}", ""))
+        geo_pages.append((slug, label, evs, breadcrumb, FR_ROUTE[slug], ""))
 
     n_paris = len(paris_events)
     if n_paris >= min_events and "ile-de-france" in {p[0] for p in geo_pages}:
@@ -548,15 +556,26 @@ def main(
             '<a href="/francia/ile-de-france/">Île-de-France</a> › Paris'
         )
         paris_note = "Subconjunto de Île-de-France específicamente en París — ver también todos los eventos de la región completa en la página de Île-de-France."
-        geo_pages.append(("ile-de-france/paris", PARIS_LABEL, paris_events, paris_breadcrumb, "?buscar=Paris", paris_note))
+        geo_pages.append(("ile-de-france/paris", PARIS_LABEL, paris_events, paris_breadcrumb, "/fr/ile-de-france/paris/", paris_note))
     elif n_paris:
         print(f"⏭️  francia/ile-de-france/paris     {n_paris:>3} eventos — por debajo del mínimo ({min_events}) o sin página de Île-de-France, sin página")
 
     geo_hub_entries = [(slug, label, len(evs)) for slug, label, evs, _, _, _ in geo_pages if slug in zone_events]
 
+    # Copias literales de site/index.html en las 4 URLs bonitas (DD-073) --
+    # siempre las 4, sin gating por --min-events: a diferencia de las
+    # páginas SEO planas de arriba (donde "contenido delgado" es una señal
+    # mala), estas son la app interactiva de siempre, que ya sabe mostrar
+    # "sin eventos" con gracia -- no hay riesgo de "página delgada" porque
+    # ni siquiera son indexables por los crawlers sin JS (ver docstring del
+    # módulo), son para visitantes humanos que llegan por link/menú/bookmark.
+    fr_routes = ["", "ile-de-france", "ile-de-france/paris", "fuera-de-ile-de-france"]
+    print(f"\n🔗 {'(dry-run, no escribe)' if dry_run else 'copiando'} site/index.html a {len(fr_routes)} rutas bonitas bajo /fr/")
+
     sitemap_urls = (
         [f"{BASE_URL}/", f"{BASE_URL}/categoria/"] + [f"{BASE_URL}/categoria/{slug}/" for slug, *_ in pages]
         + [f"{BASE_URL}/francia/"] + [f"{BASE_URL}/francia/{path}/" for path, *_ in geo_pages]
+        + [f"{BASE_URL}/fr/{r}/" if r else f"{BASE_URL}/fr/" for r in fr_routes]
     )
 
     written = 0
@@ -566,17 +585,23 @@ def main(
             out_dir.mkdir(parents=True, exist_ok=True)
             (out_dir / "index.html").write_text(render_category_page(slug, label, evs, note), encoding="utf-8")
             written += 1
-        for path, label, evs, breadcrumb, live_query, note in geo_pages:
+        for path, label, evs, breadcrumb, live_href, note in geo_pages:
             out_dir = SITE_DIR / "francia" / path
             out_dir.mkdir(parents=True, exist_ok=True)
             (out_dir / "index.html").write_text(
-                render_geo_page(path=path, label=label, events=evs, breadcrumb_html=breadcrumb, live_query=live_query, note=note),
+                render_geo_page(path=path, label=label, events=evs, breadcrumb_html=breadcrumb, live_href=live_href, note=note),
                 encoding="utf-8",
             )
             written += 1
+        app_html = (SITE_DIR / "index.html").read_text(encoding="utf-8")
+        for r in fr_routes:
+            out_dir = SITE_DIR / "fr" / r if r else SITE_DIR / "fr"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "index.html").write_text(app_html, encoding="utf-8")
+            written += 1
 
     if dry_run:
-        print(f"\n[dry-run] Generaría {len(pages)} páginas de categoría + {len(geo_pages)} páginas de geo + hubs + sitemap. Nada escrito.")
+        print(f"\n[dry-run] Generaría {len(pages)} páginas de categoría + {len(geo_pages)} páginas de geo + {len(fr_routes)} copias de la app en /fr/... + hubs + sitemap. Nada escrito.")
         return
 
     (SITE_DIR / "categoria").mkdir(exist_ok=True)
@@ -587,7 +612,7 @@ def main(
     update_index_links(hub_entries)
     update_index_geo_links([(path, label, len(evs)) for path, label, evs, _, _, _ in geo_pages])
 
-    print(f"\n✅ {written} páginas ({len(pages)} categoría + {len(geo_pages)} geo) + hubs (categoria/, francia/) + sitemap.xml + links actualizados en index.html")
+    print(f"\n✅ {written} páginas ({len(pages)} categoría + {len(geo_pages)} geo + {len(fr_routes)} copias /fr/...) + hubs (categoria/, francia/) + sitemap.xml + links actualizados en index.html")
 
 
 if __name__ == "__main__":

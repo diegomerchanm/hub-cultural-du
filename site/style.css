@@ -94,6 +94,14 @@ a { color: inherit; }
   flex-shrink: 0;
 }
 .pill-row { display: flex; gap: 6px; flex-wrap: wrap; }
+/* DD-073: subniveles del menú país→zona→ciudad -- indentados y sin el
+   filter-label a la izquierda (el filter-row-sub que los envuelve no tiene
+   uno, ver index.html) para que se lea como "parte de" la fila de arriba en
+   vez de un filtro nuevo e independiente. Vacíos (innerHTML = "") cuando el
+   nivel padre no está seleccionado -- sin display:none explícito porque un
+   div vacío ya no ocupa espacio visible. */
+.filter-row-sub { padding-left: 22px; }
+.pill-row-sub .pill { font-size: 12px; padding: 3px 10px; }
 .pill {
   font-family: var(--font-sans); font-size: 13px; color: var(--text);
   background: var(--card); border: 1px solid var(--border);

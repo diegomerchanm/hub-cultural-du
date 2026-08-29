@@ -347,9 +347,60 @@ function isUpcoming(ev) {
   const d = daysUntil(ev.eventDate);
   return d !== null && d >= 0;
 }
+
+/* ── Menú país→zona→ciudad en cascada (2026-08-29, DD-073) ──────────────
+   Reemplaza la comparación directa `ev.geoZone === STATE.geo` de antes --
+   esa solo podía filtrar por un valor de geoZone tal cual vive en los datos
+   ("Île-de-France", "Francia fuera de IDF", etc.), sin ningún nivel
+   agregado. Diego pidió explícitamente un menú tipo Meetup con país→ciudad;
+   con los datos reales (ver DD-072) el único país con volumen es Francia, y
+   dentro de Francia solo Paris tiene volumen a nivel ciudad -- de ahí este
+   árbol de 3 niveles en vez de uno genérico N-país/M-ciudad que hoy
+   quedaría casi vacío en la práctica. Cada entrada es un slug estable (no
+   cambia si el texto de geoZone en los datos cambia de redacción) con un
+   predicado propio -- "francia"/"paris" no son valores de geoZone reales,
+   son agregaciones. `parent` arma la cascada de visibilidad en
+   renderFilterBar(); GEO_TO_ROUTE es la URL bonita correspondiente (DD-073,
+   ver también ROUTE_TO_GEO en applyInitialFiltersFromUrl) -- "all" y
+   "fuera-de-francia" no tienen ruta propia todavía (esta última queda para
+   cuando exista una estructura por país, ver DD-072). */
+const GEO_FILTERS = {
+  "francia": { label: "Francia", parent: null,
+    match: (ev) => ev.geoZone === "Île-de-France" || ev.geoZone === "Francia fuera de IDF" },
+  "fuera-de-francia": { label: "Fuera de Francia", parent: null,
+    match: (ev) => ev.geoZone === "Fuera de Francia" },
+  "ile-de-france": { label: "Île-de-France", parent: "francia",
+    match: (ev) => ev.geoZone === "Île-de-France" },
+  "fuera-de-ile-de-france": { label: "Francia fuera de Île-de-France", parent: "francia",
+    match: (ev) => ev.geoZone === "Francia fuera de IDF" },
+  "paris": { label: "Paris", parent: "ile-de-france",
+    match: (ev) => ev.geoZone === "Île-de-France" && ev.cityName === "Paris" },
+};
+const GEO_TO_ROUTE = {
+  "francia": "/fr/",
+  "ile-de-france": "/fr/ile-de-france/",
+  "fuera-de-ile-de-france": "/fr/fuera-de-ile-de-france/",
+  "paris": "/fr/ile-de-france/paris/",
+};
+function geoMatches(ev, key) {
+  const f = GEO_FILTERS[key];
+  return !!(f && f.match(ev));
+}
+/* true si `key` es el nodo seleccionado o uno de sus descendientes --
+   ej. estar parado en "paris" también debe resaltar/expandir "ile-de-france"
+   y "francia" como parte activa de la cascada. */
+function geoIsActiveBranch(key) {
+  let cur = STATE.geo;
+  while (cur) {
+    if (cur === key) return true;
+    cur = GEO_FILTERS[cur] && GEO_FILTERS[cur].parent;
+  }
+  return false;
+}
+
 function applyFilters(events) {
   return events.filter((ev) => {
-    if (STATE.geo !== "all" && ev.geoZone !== STATE.geo) return false;
+    if (STATE.geo !== "all" && !geoMatches(ev, STATE.geo)) return false;
     if (STATE.when === "past") {
       if (isUpcoming(ev)) return false;
       // "Pasados" es un bucket sin clasificar por tema a propósito
@@ -402,14 +453,40 @@ function renderFilterBar() {
   // eso una categoría podía mostrar "Cine: 6" con los 6 ya pasados.
   const upcomingEvents = DATA.events.filter(isUpcoming);
 
-  const zoneCounts = {};
-  upcomingEvents.forEach((ev) => { if (ev.geoZone) zoneCounts[ev.geoZone] = (zoneCounts[ev.geoZone] || 0) + 1; });
+  // DD-073: 3 filas en cascada (país → zona → ciudad) en vez de una lista
+  // plana de geoZone. `countFor` sobre upcomingEvents, mismo criterio que ya
+  // usaba zoneCounts antes. `setGeo` centraliza el pushState de la URL
+  // bonita (DD-073) -- clickear un pill de geo navega a /fr/... cuando
+  // existe ruta, o vuelve a "/" para "all"/"fuera-de-francia" (que todavía
+  // no tienen ruta propia, ver GEO_TO_ROUTE).
+  const countFor = (key) => upcomingEvents.filter((ev) => geoMatches(ev, key)).length;
+  const setGeo = (key) => {
+    const route = GEO_TO_ROUTE[key];
+    if (route && location.pathname !== route) history.pushState(null, "", route + location.search);
+    else if (!route && Object.values(GEO_TO_ROUTE).includes(location.pathname)) history.pushState(null, "", "/" + location.search);
+    setState({ geo: key });
+  };
+
   const geoEl = document.getElementById("geo-pills");
   geoEl.innerHTML = "";
-  geoEl.appendChild(pillEl(t("geoAll"), upcomingEvents.length, STATE.geo === "all", () => setState({ geo: "all" })));
-  Object.keys(zoneCounts).sort((a, b) => zoneCounts[b] - zoneCounts[a]).forEach((zone) => {
-    geoEl.appendChild(pillEl(geoLabel(zone), zoneCounts[zone], STATE.geo === zone, () => setState({ geo: zone })));
-  });
+  geoEl.appendChild(pillEl(t("geoAll"), upcomingEvents.length, STATE.geo === "all", () => setGeo("all")));
+  geoEl.appendChild(pillEl(GEO_FILTERS.francia.label, countFor("francia"), geoIsActiveBranch("francia"), () => setGeo("francia")));
+  geoEl.appendChild(pillEl(GEO_FILTERS["fuera-de-francia"].label, countFor("fuera-de-francia"), STATE.geo === "fuera-de-francia", () => setGeo("fuera-de-francia")));
+
+  const subEl = document.getElementById("geo-subpills");
+  subEl.innerHTML = "";
+  if (geoIsActiveBranch("francia")) {
+    subEl.appendChild(pillEl(t("geoAll"), countFor("francia"), STATE.geo === "francia", () => setGeo("francia")));
+    subEl.appendChild(pillEl(GEO_FILTERS["ile-de-france"].label, countFor("ile-de-france"), geoIsActiveBranch("ile-de-france"), () => setGeo("ile-de-france")));
+    subEl.appendChild(pillEl(GEO_FILTERS["fuera-de-ile-de-france"].label, countFor("fuera-de-ile-de-france"), STATE.geo === "fuera-de-ile-de-france", () => setGeo("fuera-de-ile-de-france")));
+  }
+
+  const subsubEl = document.getElementById("geo-subsubpills");
+  subsubEl.innerHTML = "";
+  if (geoIsActiveBranch("ile-de-france")) {
+    subsubEl.appendChild(pillEl(t("geoAll"), countFor("ile-de-france"), STATE.geo === "ile-de-france", () => setGeo("ile-de-france")));
+    subsubEl.appendChild(pillEl(GEO_FILTERS.paris.label, countFor("paris"), STATE.geo === "paris", () => setGeo("paris")));
+  }
 
   // Pills de fecha, cada una con su propio conteo (independiente entre sí,
   // sobre el dataset completo) — "Pasados" es el complemento de "por venir".
@@ -937,6 +1014,26 @@ function closeDetail(opts = {}) {
    cambió el propio navegador al navegar -- solo hay que reflejarla en el
    panel. */
 window.addEventListener("popstate", () => {
+  // DD-073: atrás/adelante también tiene que revertir el filtro de geo si
+  // se navegó vía las URLs bonitas /fr/... (setGeo() en renderFilterBar()
+  // pushea a esas rutas) -- sin esto, un "atrás" cambiaría la URL de vuelta
+  // a "/" pero STATE.geo seguiría en lo que sea que estaba, mostrando
+  // contenido que ya no coincide con la barra de direcciones. OJO: no
+  // resetear geo a "all" incondicionalmente en cualquier "/" -- "/" también
+  // es la URL de "all"/"fuera-de-francia" (sin ruta propia, ver
+  // GEO_TO_ROUTE), que nunca empujaron una entrada de historial por sí
+  // solos. Solo se toca STATE.geo cuando el pathname actual mapea a una
+  // ruta conocida, o cuando el STATE.geo actual SÍ tenía una ruta y el
+  // "atrás" nos sacó de ella.
+  const routeGeo = ROUTE_TO_GEO[location.pathname];
+  if (routeGeo) {
+    STATE.geo = routeGeo;
+    render();
+  } else if (GEO_TO_ROUTE[STATE.geo]) {
+    STATE.geo = "all";
+    render();
+  }
+
   const id = new URLSearchParams(location.search).get("evento");
   const ev = id && DATA.events ? DATA.events.find((e) => e.id === id) : null;
   if (ev) openDetail(ev, { updateHistory: false });
@@ -971,14 +1068,31 @@ function initLangButtons() {
    visitante durante la sesión, no de dónde vino el link de entrada), y
    tampoco hace falta pushState -- es el estado inicial de la carga, no una
    navegación nueva que deba quedar en el historial. */
-const GEO_SLUG_TO_ZONE = {
-  "ile-de-france": "Île-de-France",
-  "fuera-de-ile-de-france": "Francia fuera de IDF",
+// Inverso de GEO_TO_ROUTE (definido más abajo junto a GEO_FILTERS) -- se
+// arma acá mismo en vez de esperar a que GEO_TO_ROUTE exista en el orden de
+// declaración del archivo, porque los `const` de nivel de módulo ya están
+// todos definidos para cuando esta función se ejecuta de verdad (recién en
+// init()); el orden textual entre ellos no importa.
+const ROUTE_TO_GEO = {
+  "/fr/": "francia",
+  "/fr/ile-de-france/": "ile-de-france",
+  "/fr/ile-de-france/paris/": "paris",
+  "/fr/fuera-de-ile-de-france/": "fuera-de-ile-de-france",
 };
 function applyInitialFiltersFromUrl() {
+  // DD-073: la ruta bonita (/fr/...) tiene prioridad sobre el query param
+  // ?geo= -- si alguien aterriza directo en /fr/ile-de-france/, eso define
+  // el filtro; ?geo= sigue existiendo como fallback para links que todavía
+  // no migraron a la ruta bonita (o para valores sin ruta propia, como
+  // "fuera-de-francia").
+  const routeGeo = ROUTE_TO_GEO[location.pathname];
   const params = new URLSearchParams(location.search);
-  const geoSlug = params.get("geo");
-  if (geoSlug && GEO_SLUG_TO_ZONE[geoSlug]) STATE.geo = GEO_SLUG_TO_ZONE[geoSlug];
+  if (routeGeo) {
+    STATE.geo = routeGeo;
+  } else {
+    const geoSlug = params.get("geo");
+    if (geoSlug && GEO_FILTERS[geoSlug]) STATE.geo = geoSlug;
+  }
   const tema = params.get("tema");
   if (tema && CATEGORY_META[tema]) STATE.theme = tema;
   const buscar = params.get("buscar");
