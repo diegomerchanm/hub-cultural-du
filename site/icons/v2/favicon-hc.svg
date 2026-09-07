@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <clipPath id="roundedIcon" clipPathUnits="userSpaceOnUse">
+      <rect x="0" y="0" width="200" height="200" rx="34" />
+    </clipPath>
+    <pattern id="halftone" width="14" height="14" patternUnits="userSpaceOnUse">
+      <circle cx="7" cy="7" r="2.6" fill="#ffffff" />
+    </pattern>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="200" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2c3140" />
+      <stop offset="1" stop-color="#5b3f9e" />
+    </linearGradient>
+    <filter id="softBlur" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3.5" />
+    </filter>
+  </defs>
+
+  <g clip-path="url(#roundedIcon)">
+    <rect width="200" height="200" fill="url(#bgGrad)" />
+    <circle cx="172" cy="28" r="70" fill="url(#halftone)" opacity="0.10" />
+  </g>
+
+  <!-- sombra suave del monograma -->
+  <g filter="url(#softBlur)" opacity="0.35" transform="translate(0,5)">
+    <rect x="34" y="58" width="14" height="86" rx="4" fill="#000000" />
+    <rect x="85" y="58" width="14" height="86" rx="4" fill="#000000" />
+    <rect x="34" y="94" width="65" height="14" rx="4" fill="#000000" />
+    <path d="M164.8,77.5 A35,35 0 1 0 164.8,122.5" stroke="#000000" stroke-width="14" fill="none" stroke-linecap="round" />
+  </g>
+
+  <!-- H -->
+  <rect x="34" y="58" width="14" height="86" rx="4" fill="#ece9e3" />
+  <rect x="85" y="58" width="14" height="86" rx="4" fill="#ece9e3" />
+  <rect x="34" y="94" width="65" height="14" rx="4" fill="#ece9e3" />
+
+  <!-- C -->
+  <path d="M164.8,77.5 A35,35 0 1 0 164.8,122.5" stroke="#ece9e3" stroke-width="14" fill="none" stroke-linecap="round" />
+</svg>
