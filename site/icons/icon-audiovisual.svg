@@ -1,0 +1,28 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+<defs xmlns="http://www.w3.org/2000/svg">
+    <clipPath id="roundedIcon" clipPathUnits="userSpaceOnUse">
+      <rect x="0" y="0" width="200" height="200" rx="34" />
+    </clipPath>
+    <pattern id="halftone" width="14" height="14" patternUnits="userSpaceOnUse">
+      <circle cx="7" cy="7" r="2.6" fill="#000000" />
+    </pattern>
+  </defs>
+
+  
+<g><g xmlns="http://www.w3.org/2000/svg" clip-path="url(#roundedIcon)">
+      <rect width="200" height="200" fill="#51659a" />
+      <circle cx="176" cy="170" r="66" fill="url(#halftone)" opacity="0.14" />
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" transform="translate(0,4)">
+      <rect x="40" y="70" width="120" height="80" rx="6" fill="#ece9e3" />
+      <path d="M40,70 L60,44 L86,44 L70,70 Z" fill="#ece9e3" />
+      <path d="M76,70 L96,44 L122,44 L106,70 Z" fill="#38466b" />
+      <path d="M112,70 L132,44 L158,58 L142,70 Z" fill="#ece9e3" />
+      <rect x="40" y="70" width="120" height="14" fill="#38466b" />
+      <circle cx="70" cy="112" r="14" fill="none" stroke="#38466b" stroke-width="4" />
+      <path d="M70,98 L70,126 M56,112 L84,112" stroke="#38466b" stroke-width="2" opacity="0.5" />
+      <line x1="100" y1="98" x2="145" y2="98" stroke="#38466b" stroke-width="4" />
+      <line x1="100" y1="118" x2="130" y2="118" stroke="#38466b" stroke-width="4" />
+    </g>
+    </g>
+</svg>

@@ -1,0 +1,52 @@
+\begin{thebibliography}{}
+
+\bibitem[{Digital Methods Initiative}, 2022]{zeeschuimer}
+{Digital Methods Initiative} (2022).
+\newblock Zeeschuimer: a browser extension to collect social media data with.
+\newblock \url{https://github.com/digitalmethodsinitiative/zeeschuimer}.
+\newblock Accessed 2026-08-30.
+
+\bibitem[Diminescu, 2012]{diminescu2012}
+Diminescu, D. (2012).
+\newblock Introduction: {D}igital methods for the exploration, analysis and
+  mapping of e-diasporas.
+\newblock {\em Social Science Information}, 51(4):451--458.
+
+\bibitem[{FMSH / e-Diasporas Atlas project}, 2012]{ediasporas}
+{FMSH / e-Diasporas Atlas project} (2012).
+\newblock e-{D}iasporas {A}tlas.
+\newblock \url{http://e-diasporas.fr/}.
+\newblock Accessed 2026-08-30.
+
+\bibitem[{International Organization for Migration}, 2022]{iom2022diaspora}
+{International Organization for Migration} (2022).
+\newblock Diaspora mapping toolkit.
+\newblock Technical report, IOM, Geneva.
+
+\bibitem[{International Organization for Migration}, nd]{idiaspora}
+{International Organization for Migration} (n.d.).
+\newblock i{D}iaspora.
+\newblock \url{https://www.idiaspora.org/}.
+\newblock Accessed 2026-08-30.
+
+\bibitem[Jacomy et~al., 2016]{jacomy2016hyphe}
+Jacomy, M., Girard, P., Ooghe-Tabanou, B., and Venturini, T. (2016).
+\newblock Hyphe, a curation-oriented approach to web crawling for the social
+  sciences.
+\newblock In {\em Proceedings of the Tenth International AAAI Conference on Web
+  and Social Media (ICWSM 2016)}. AAAI.
+
+\bibitem[Peeters and Hagen, 2022]{peeters2022}
+Peeters, S. and Hagen, S. (2022).
+\newblock The {4CAT} {C}apture and {A}nalysis {T}oolkit: {A} {M}odular {T}ool
+  for {T}ransparent and {T}raceable {S}ocial {M}edia {R}esearch.
+\newblock {\em Computational Communication Research}, 4(2):571--589.
+
+\bibitem[{XD-MHLOO}, nd]{osintgraph}
+{XD-MHLOO} (n.d.).
+\newblock Osintgraph: collects {I}nstagram data, followers, and followees,
+  storing them in {N}eo4j.
+\newblock \url{https://github.com/XD-MHLOO/Osintgraph}.
+\newblock Accessed 2026-08-30.
+
+\end{thebibliography}

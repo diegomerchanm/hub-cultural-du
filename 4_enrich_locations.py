@@ -113,6 +113,13 @@ def parse_address(raw: dict) -> dict:
         "quartier":       quartier,
         "arrondissement": arrondissement or "",
         "displayName":    raw.get("display_name", ""),
+        # postcode (2026-09-07): no se usaba para nada más que detectar
+        # arrondissement parisino (get_arrondissement, arriba) -- ahora
+        # también se persiste en el Location, porque es la señal más
+        # barata para decidir Île-de-France vs Francia-fuera-IDF fuera de
+        # Paris (ver derive_geozone), sin la cual solo se puede adivinar
+        # por nombre de ciudad (IDF_CITIES, heurística incompleta).
+        "postcode":       address.get("postcode", ""),
     }
 
 
@@ -194,6 +201,7 @@ def write_location_geo(session, loc_name: str, geo: dict):
             l.quartier         = $quartier,
             l.arrondissement   = $arrondissement,
             l.displayName      = $displayName,
+            l.postcode         = $postcode,
             l.geocodeConfidence = $confidence,
             l.geocodedAt       = $geocodedAt
     """,
@@ -201,8 +209,125 @@ def write_location_geo(session, loc_name: str, geo: dict):
         geocodedAt      = datetime.now().isoformat(timespec="seconds"),
         confidence      = geo.get("confidence", ""),
         **{k: geo[k] for k in ["lat", "lon", "city", "country", "countryCode",
-                                "quartier", "arrondissement", "displayName"]},
+                                "quartier", "arrondissement", "displayName", "postcode"]},
     )
+
+
+# ── 5b. geoZone por evento a partir del geocoding (2026-09-07) ────────────────
+# Por qué existe: hasta ahora e.geoZone se copiaba UNA vez desde la cuenta
+# curada al crear el evento (4_enrich_events_extract.py) y nunca se volvía a
+# tocar -- si la cuenta nunca pasó por load_manual_account_categorization.py,
+# el evento se queda sin geoZone para siempre, aunque su propia Location SÍ
+# tenga país/ciudad geocodificados acá. Diego pidió la opción "más precisa":
+# el geocoding por-evento manda cuando hay evidencia, en vez de depender por
+# completo de que la cuenta esté curada.
+#
+# Precedencia (asimétrica a propósito, ver DD-045 sobre el tier "name_only"
+# siendo bastante menos confiable que "city_combined"):
+#   - geoZone actual vacío         → se llena con lo geocodificado, CUALQUIER
+#                                     confianza (mejor que nada; nunca se
+#                                     inventa, solo se usa lo que Nominatim
+#                                     ya devolvió).
+#   - geoZone actual con valor,
+#     coincide con lo geocodificado → no se toca (ya está bien).
+#   - geoZone actual con valor,
+#     DISCREPA, confidence=city_combined → se sobreescribe (evidencia fuerte,
+#                                     ej. cuenta parisina que anunció un
+#                                     evento puntual en el extranjero).
+#   - geoZone actual con valor,
+#     DISCREPA, confidence=name_only → NO se toca (podría ser el geocoding
+#                                     el que se equivocó, no la cuenta) pero
+#                                     se deja registrado en geoZoneConflict
+#                                     para revisión manual -- nunca se pierde
+#                                     la discrepancia en silencio.
+# e.geoZoneSource guarda de dónde salió el valor final: "account_inherited"
+# (sin cambios, el comportamiento de siempre) o "geocoded" (lo puso este
+# paso). Ver también backfill_geozone_from_geocoding.py para el backlog de
+# Location ya geocodificadas antes de que este bloque existiera.
+IDF_POSTCODE_PREFIXES = ("75", "77", "78", "91", "92", "93", "94", "95")
+# Heurística de respaldo para Location viejas que ya tienen countryCode/city
+# pero nunca guardaron postcode (este campo es nuevo, ver parse_address) --
+# lista de comunas de Île-de-France con volumen conocido en este proyecto,
+# NO una lista exhaustiva de las ~1300 comunas de la región. Una ciudad de
+# IDF real que no esté acá cae en "Francia fuera IDF" en vez de perderse del
+# todo, así que el peor caso es una etiqueta imprecisa, no un dato inventado.
+IDF_CITIES = {
+    "paris", "boulogne-billancourt", "saint-denis", "argenteuil", "montreuil",
+    "nanterre", "vitry-sur-seine", "créteil", "creteil", "aubervilliers",
+    "aulnay-sous-bois", "colombes", "asnières-sur-seine", "asnieres-sur-seine",
+    "rueil-malmaison", "champigny-sur-marne", "saint-maur-des-fossés",
+    "saint-maur-des-fosses", "drancy", "issy-les-moulineaux", "levallois-perret",
+    "noisy-le-grand", "antony", "neuilly-sur-seine", "sarcelles",
+    "ivry-sur-seine", "villejuif", "clichy", "pantin", "meaux", "cergy",
+    "vincennes", "maisons-alfort", "versailles", "melun", "évry", "evry",
+    "corbeil-essonnes", "massy", "sartrouville", "fontenay-sous-bois", "bondy",
+    "bobigny", "épinay-sur-seine", "epinay-sur-seine", "le blanc-mesnil",
+    "villeneuve-saint-georges", "gennevilliers", "chelles", "suresnes",
+    "puteaux", "courbevoie", "montrouge", "vanves", "malakoff", "bagneux",
+    "chatou", "poissy", "mantes-la-jolie", "saint-germain-en-laye",
+}
+
+
+def derive_geozone(country_code: str, city: str, arrondissement: str, postcode: str) -> Optional[str]:
+    """Deriva geoZone puro a partir de lo que ya devolvió Nominatim -- nunca
+    inventa, solo devuelve None si no hay evidencia suficiente (sin country_code)."""
+    if not country_code:
+        return None
+    if country_code.upper() != "FR":
+        return "Fuera de Francia"
+    if arrondissement:
+        return "Île-de-France"
+    if postcode and postcode[:2] in IDF_POSTCODE_PREFIXES:
+        return "Île-de-France"
+    if city and city.strip().lower() in IDF_CITIES:
+        return "Île-de-France"
+    return "Francia fuera IDF"
+
+
+def apply_geozone_from_location(session, loc_name: str, geo: dict):
+    """Aplica la precedencia de arriba a todo :Event conectado a esta
+    Location vía LOCATED_AT. Se llama una vez por Location recién
+    geocodificada, dentro de la misma corrida de run_geocoding."""
+    derived = derive_geozone(geo.get("countryCode", ""), geo.get("city", ""),
+                              geo.get("arrondissement", ""), geo.get("postcode", ""))
+    if derived is None:
+        return {"filled": 0, "overridden": 0, "flagged": 0}
+    confidence = geo.get("confidence", "")
+    counts = {"filled": 0, "overridden": 0, "flagged": 0}
+    events = session.run("""
+        MATCH (e:Event)-[:LOCATED_AT]->(l:Location {name: $loc})
+        RETURN e.id AS id, e.geoZone AS geoZone
+    """, loc=loc_name).data()
+    for ev in events:
+        current = ev.get("geoZone")
+        if not current:
+            session.run("""
+                MATCH (e:Event {id: $id})
+                SET e.geoZone = $geoZone, e.geoZoneSource = 'geocoded',
+                    e.geoZoneUpdatedAt = datetime()
+                REMOVE e.geoZoneConflict
+            """, id=ev["id"], geoZone=derived)
+            counts["filled"] += 1
+        elif current == derived:
+            continue
+        elif confidence == "city_combined":
+            session.run("""
+                MATCH (e:Event {id: $id})
+                SET e.geoZone = $geoZone, e.geoZoneSource = 'geocoded',
+                    e.geoZonePrevious = $previous, e.geoZoneUpdatedAt = datetime()
+                REMOVE e.geoZoneConflict
+            """, id=ev["id"], geoZone=derived, previous=current)
+            counts["overridden"] += 1
+        else:
+            # confidence == "name_only": discrepancia real pero con evidencia
+            # floja -- se deja el geoZone heredado de la cuenta tal cual, solo
+            # se anota la discrepancia para que alguien la revise a mano.
+            session.run("""
+                MATCH (e:Event {id: $id})
+                SET e.geoZoneConflict = $derived
+            """, id=ev["id"], derived=derived)
+            counts["flagged"] += 1
+    return counts
 
 
 # ── 6. Neo4j — jerarquía [:LOCATED_IN] ───────────────────────────────────────
@@ -314,6 +439,9 @@ def run_geocoding(
 
     n_found  = 0
     n_failed = 0
+    gz_filled = 0
+    gz_overridden = 0
+    gz_flagged = 0
 
     for i in tqdm(range(0, len(rows), batch_size), desc="  geocoding"):
         batch = rows[i: i + batch_size]
@@ -341,6 +469,10 @@ def run_geocoding(
             with driver.session() as session:
                 write_location_geo(session, name, geo)
                 write_hierarchy(session, name, geo)
+                gz_counts = apply_geozone_from_location(session, name, geo)
+                gz_filled += gz_counts["filled"]
+                gz_overridden += gz_counts["overridden"]
+                gz_flagged += gz_counts["flagged"]
 
     if not dry_run:
         log_session(len(rows), n_found, n_failed)
@@ -348,6 +480,11 @@ def run_geocoding(
     print(f"\n  ✅ Geocodificadas : {n_found}")
     print(f"  ❌ No encontradas : {n_failed}")
     print(f"  💰 FinOps — {len(rows)} requests Nominatim (gratuito, ~1 req/s)")
+    if not dry_run:
+        print(f"\n  🗺️  geoZone por evento (derivado del geocoding, ver apply_geozone_from_location):")
+        print(f"      Vacíos llenados     : {gz_filled}")
+        print(f"      Heredados corregidos: {gz_overridden}  (confidence=city_combined)")
+        print(f"      Discrepancias flojas: {gz_flagged}  (name_only -- quedaron en e.geoZoneConflict para revisar a mano)")
 
 
 # ── 8. Resumen ────────────────────────────────────────────────────────────────

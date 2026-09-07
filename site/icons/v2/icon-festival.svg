@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+<defs>
+    <clipPath id="roundedIcon" clipPathUnits="userSpaceOnUse">
+      <rect x="0" y="0" width="200" height="200" rx="34" />
+    </clipPath>
+    <pattern id="halftone" width="14" height="14" patternUnits="userSpaceOnUse">
+      <circle cx="7" cy="7" r="2.6" fill="#000000" />
+    </pattern>
+  </defs>
+<g><g clip-path="url(#roundedIcon)">
+      <rect width="200" height="200" fill="#ddaf31" />
+      <circle cx="170" cy="30" r="66" fill="url(#halftone)" opacity="0.14" />
+    </g>
+    <g transform="translate(-30.731,-30.413) scale(1.2692)"><g stroke="#987922" stroke-width="5" stroke-linecap="round" opacity="0.6">
+      <line x1="100" y1="100" x2="100" y2="60" />
+      <line x1="100" y1="100" x2="132" y2="76" />
+      <line x1="100" y1="100" x2="68" y2="76" />
+      <line x1="100" y1="100" x2="140" y2="108" />
+      <line x1="100" y1="100" x2="60" y2="108" />
+    </g>
+    <path d="M100,100 C90,120 110,130 96,148" fill="none" stroke="#ece9e3" stroke-width="6" stroke-linecap="round" />
+    <path d="M120,96 C126,116 108,124 118,144" fill="none" stroke="#ece9e3" stroke-width="6" stroke-linecap="round" />
+    <path d="M80,96 C72,112 90,122 78,140" fill="none" stroke="#ece9e3" stroke-width="6" stroke-linecap="round" />
+    <circle cx="60" cy="70" r="6" fill="#ece9e3" />
+    <rect x="132" y="56" width="9" height="9" fill="#ece9e3" transform="rotate(30 136 60)" />
+    <circle cx="150" cy="90" r="5" fill="#ece9e3" />
+    <rect x="52" y="100" width="8" height="8" fill="#ece9e3" transform="rotate(15 56 104)" />
+    </g></g>
+</svg>

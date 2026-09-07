@@ -50,7 +50,8 @@
       "Bash(git config *)",
       "Bash(powershell -Command \"Get-ChildItem -Recurse .github | Select-Object FullName\")",
       "Bash(git check-ignore *)",
-      "Bash(grep -v \"^\\\\./\\\\.git/\")"
+      "Bash(grep -v \"^\\\\./\\\\.git/\")",
+      "Bash(echo \"exit code: $?\")"
     ]
   }
 }

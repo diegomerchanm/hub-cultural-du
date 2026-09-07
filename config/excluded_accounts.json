@@ -1,6 +1,10 @@
 {
   "accounts": [
     {
+      "username": "sortiraparis.officiel",
+      "reason": "SORTIRAPARIS.COM — guía/medio de agenda cultural de toda la región (659k seguidores), no una sede, colectivo o institución cultural propia. No encaja en el criterio de curación del proyecto (cuentas que SON el objeto cultural, no agregadores de prensa que hablan de otros). Decisión de Diego, 2026-09-07."
+    },
+    {
       "username": "alianzafrancesamanizalesoficia",
       "reason": "Alianza Francesa de Manizales, Colombia — fuera del área geográfica del proyecto (Île-de-France). No tiene manualDataCuratedAt; se coló por descubrimiento automático RELATED_TO."
     },
@@ -15,6 +19,374 @@
     {
       "username": "alianzafrancesacali",
       "reason": "Alianza Francesa de Cali, Colombia — mismo motivo que alianzafrancesamanizalesoficia."
+    },
+    {
+      "username": "calisabor_salsa_calena",
+      "reason": "Detectado por find_offscope_accounts.py — 11 evento(s) geocodificados en Argentina, Colombia, España, Estados Unidos de América, Panamá, Rumanía, fuera de Île-de-France."
+    },
+    {
+      "username": "alexjatetxea",
+      "reason": "Detectado por find_offscope_accounts.py — 9 evento(s) geocodificados en Colombia, España, fuera de Île-de-France."
+    },
+    {
+      "username": "educulturaco",
+      "reason": "Detectado por find_offscope_accounts.py — 8 evento(s) geocodificados en Brasil, Colombia, Costa de Marfil, España, México, Panamá, fuera de Île-de-France."
+    },
+    {
+      "username": "ivan_argote",
+      "reason": "Detectado por find_offscope_accounts.py — 8 evento(s) geocodificados en Brasil, Colombia, Estados Unidos de América, fuera de Île-de-France."
+    },
+    {
+      "username": "espacioafro",
+      "reason": "Detectado por find_offscope_accounts.py — 8 evento(s) geocodificados en España, fuera de Île-de-France."
+    },
+    {
+      "username": "colombianosune",
+      "reason": "Detectado por find_offscope_accounts.py — 7 evento(s) geocodificados en Argentina, Brasil, Colombia, España, Estados Unidos de América, fuera de Île-de-France."
+    },
+    {
+      "username": "el_man_de_los_chorizos",
+      "reason": "Detectado por find_offscope_accounts.py — 6 evento(s) geocodificados en Colombia, República Dominicana, fuera de Île-de-France."
+    },
+    {
+      "username": "sankofadanzafro",
+      "reason": "Detectado por find_offscope_accounts.py — 6 evento(s) geocodificados en Colombia, España, fuera de Île-de-France."
+    },
+    {
+      "username": "embcolghana",
+      "reason": "Detectado por find_offscope_accounts.py — 5 evento(s) geocodificados en Colombia, Estados Unidos de América, Ghana, fuera de Île-de-France."
+    },
+    {
+      "username": "francia_en_colombia",
+      "reason": "Detectado por find_offscope_accounts.py — 5 evento(s) geocodificados en Canadá, Colombia, España, Indonesia, fuera de Île-de-France."
+    },
+    {
+      "username": "iculturbolivar",
+      "reason": "Detectado por find_offscope_accounts.py — 5 evento(s) geocodificados en Colombia, Ecuador, Paraguay, fuera de Île-de-France."
+    },
+    {
+      "username": "afbogota",
+      "reason": "Detectado por find_offscope_accounts.py — 4 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "alex.mor.e",
+      "reason": "Detectado por find_offscope_accounts.py — 4 evento(s) geocodificados en Afganistán, Brasil, España, fuera de Île-de-France."
+    },
+    {
+      "username": "cancilleriacol",
+      "reason": "Detectado por find_offscope_accounts.py — 4 evento(s) geocodificados en Colombia, Estados Unidos de América, fuera de Île-de-France."
+    },
+    {
+      "username": "clmbiasays",
+      "reason": "Detectado por find_offscope_accounts.py — 4 evento(s) geocodificados en Colombia, Estados Unidos de América, Italia, fuera de Île-de-France."
+    },
+    {
+      "username": "colombiaalaire",
+      "reason": "Detectado por find_offscope_accounts.py — 4 evento(s) geocodificados en Colombia, España, México, fuera de Île-de-France."
+    },
+    {
+      "username": "ueencolombia",
+      "reason": "Detectado por find_offscope_accounts.py — 4 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "jovesolidescolombia",
+      "reason": "Detectado por find_offscope_accounts.py — 4 evento(s) geocodificados en Colombia, España, fuera de Île-de-France."
+    },
+    {
+      "username": "procolombiaco",
+      "reason": "Detectado por find_offscope_accounts.py — 4 evento(s) geocodificados en Brasil, Colombia, Países Bajos, fuera de Île-de-France."
+    },
+    {
+      "username": "arg_enfrancia",
+      "reason": "Detectado por find_offscope_accounts.py — 4 evento(s) geocodificados en China, España, Islas Malvinas, fuera de Île-de-France."
+    },
+    {
+      "username": "embajadadehondurasenfrancia",
+      "reason": "Detectado por find_offscope_accounts.py — 4 evento(s) geocodificados en Argentina, Honduras, México, Mónaco, fuera de Île-de-France."
+    },
+    {
+      "username": "festival_fil",
+      "reason": "Detectado por find_offscope_accounts.py — 4 evento(s) geocodificados en Canadá, México, fuera de Île-de-France."
+    },
+    {
+      "username": "saveurs_mexique",
+      "reason": "Detectado por find_offscope_accounts.py — 4 evento(s) geocodificados en Costa de Marfil, fuera de Île-de-France."
+    },
+    {
+      "username": "festivalamerica",
+      "reason": "Detectado por find_offscope_accounts.py — 4 evento(s) geocodificados en Canadá, México, fuera de Île-de-France."
+    },
+    {
+      "username": "daniel_giannone",
+      "reason": "Detectado por find_offscope_accounts.py — 3 evento(s) geocodificados en Polonia, Suecia, fuera de Île-de-France."
+    },
+    {
+      "username": "francy_barahona_calisabor",
+      "reason": "Detectado por find_offscope_accounts.py — 3 evento(s) geocodificados en Argentina, España, fuera de Île-de-France."
+    },
+    {
+      "username": "dichaparis",
+      "reason": "Detectado por find_offscope_accounts.py — 3 evento(s) geocodificados en Chile, Colombia, México, fuera de Île-de-France."
+    },
+    {
+      "username": "hellengomezoficial",
+      "reason": "Detectado por find_offscope_accounts.py — 3 evento(s) geocodificados en Colombia, España, Irán, fuera de Île-de-France."
+    },
+    {
+      "username": "infopresidencia",
+      "reason": "Detectado por find_offscope_accounts.py — 3 evento(s) geocodificados en Brasil, España, Nicaragua, fuera de Île-de-France."
+    },
+    {
+      "username": "interlatina.medellin",
+      "reason": "Detectado por find_offscope_accounts.py — 3 evento(s) geocodificados en Alemania, Filipinas, fuera de Île-de-France."
+    },
+    {
+      "username": "luisnunezz",
+      "reason": "Detectado por find_offscope_accounts.py — 3 evento(s) geocodificados en Brasil, México, Trinidad y Tobago, fuera de Île-de-France."
+    },
+    {
+      "username": "paris.avec.accent",
+      "reason": "Detectado por find_offscope_accounts.py — 3 evento(s) geocodificados en Colombia, México, Nigeria, fuera de Île-de-France."
+    },
+    {
+      "username": "yolandavillavicenciom",
+      "reason": "Detectado por find_offscope_accounts.py — 3 evento(s) geocodificados en Colombia, España, fuera de Île-de-France."
+    },
+    {
+      "username": "caroycuervo",
+      "reason": "Detectado por find_offscope_accounts.py — 3 evento(s) geocodificados en Colombia, México, fuera de Île-de-France."
+    },
+    {
+      "username": "perrotin",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Austria, Italia, fuera de Île-de-France."
+    },
+    {
+      "username": "ademarbritto",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Brasil, fuera de Île-de-France."
+    },
+    {
+      "username": "afsven",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Bélgica, Venezuela, fuera de Île-de-France."
+    },
+    {
+      "username": "alfonso_prada",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "eimicolombiaoficial",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "harolg.duque",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Colombia, Estados Unidos de América, fuera de Île-de-France."
+    },
+    {
+      "username": "if_colombie",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "innoba.dmc",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Argentina, Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "luismeyerp",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Bélgica, fuera de Île-de-France."
+    },
+    {
+      "username": "morcharpentier",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "prosantamartav",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "unadunioneuropea",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Colombia, España, fuera de Île-de-France."
+    },
+    {
+      "username": "embachilefrancia",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en España, México, fuera de Île-de-France."
+    },
+    {
+      "username": "embajadademexicoenfrancia",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en España, México, fuera de Île-de-France."
+    },
+    {
+      "username": "grulacunesco",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Corea del Sur, México, fuera de Île-de-France."
+    },
+    {
+      "username": "pac_colibri",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Costa de Marfil, fuera de Île-de-France."
+    },
+    {
+      "username": "terres_amerique",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Canadá, México, fuera de Île-de-France."
+    },
+    {
+      "username": "cinemalepeedebois",
+      "reason": "Detectado por find_offscope_accounts.py — 2 evento(s) geocodificados en Afganistán, fuera de Île-de-France."
+    },
+    {
+      "username": "carlitos1cat",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "cmariodavila",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "aecidcolombia",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "assascolombie_",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Estados Unidos de América, fuera de Île-de-France."
+    },
+    {
+      "username": "efmapu",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "embsuizacolombia",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "estoescambio",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en España, fuera de Île-de-France."
+    },
+    {
+      "username": "imt_colombia",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en México, fuera de Île-de-France."
+    },
+    {
+      "username": "inmobicolombia",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "minigualdadcol",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en España, fuera de Île-de-France."
+    },
+    {
+      "username": "registraduria",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "remaxmariavillasmil02",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Ecuador, fuera de Île-de-France."
+    },
+    {
+      "username": "rosayolandavillavicencio",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "royec212",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "scamacho31",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Marruecos, fuera de Île-de-France."
+    },
+    {
+      "username": "wesleyrunner",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Ecuador, fuera de Île-de-France."
+    },
+    {
+      "username": "williamsanchezinmobiliaria",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en España, fuera de Île-de-France."
+    },
+    {
+      "username": "consuladodelperuenparis",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Colombia, fuera de Île-de-France."
+    },
+    {
+      "username": "costaricafrance",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Estados Unidos de América, fuera de Île-de-France."
+    },
+    {
+      "username": "eecufrancia",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Venezuela, fuera de Île-de-France."
+    },
+    {
+      "username": "embacubafrancia",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Cuba, fuera de Île-de-France."
+    },
+    {
+      "username": "embfrancia_ve",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Principado de Andorra, fuera de Île-de-France."
+    },
+    {
+      "username": "embpanamafra",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Austria, fuera de Île-de-France."
+    },
+    {
+      "username": "festivalclap",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Brasil, fuera de Île-de-France."
+    },
+    {
+      "username": "iheal_creda",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Reino Unido, fuera de Île-de-France."
+    },
+    {
+      "username": "latinograff",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Brasil, fuera de Île-de-France."
+    },
+    {
+      "username": "redcomunitariatrans",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Alemania, fuera de Île-de-France."
+    },
+    {
+      "username": "festivalvovf",
+      "reason": "Detectado por find_offscope_accounts.py — 1 evento(s) geocodificados en Luxemburgo, fuera de Île-de-France."
+    },
+    {
+      "username": "campusfrancecolombia",
+      "reason": "Campus France Colombia — agencia francesa pero orientada al mercado/público colombiano, no un actor cultural en Francia. Mismo patrón que las Alianzas Francesas de Colombia ya excluidas. Decisión de Diego, 2026-09-07."
+    },
+    {
+      "username": "transfugemagazine",
+      "reason": "Revista de actualidad cultural (medio de prensa), no una institución cultural propia. Mismo criterio que sortiraparis.officiel. Decisión de Diego, 2026-09-07."
+    },
+    {
+      "username": "connaissancedesarts",
+      "reason": "Revista de arte (medio de prensa), no una institución cultural propia. Mismo criterio que sortiraparis.officiel/transfugemagazine. Decisión de Diego, 2026-09-07."
+    },
+    {
+      "username": "alejam09",
+      "reason": "Cuenta personal, no institución cultural. Decisión de Diego, 2026-09-07."
+    },
+    {
+      "username": "la.coach.naty",
+      "reason": "Cuenta personal de coaching de idiomas, no institución cultural. Decisión de Diego, 2026-09-07."
+    },
+    {
+      "username": "santoguichon888",
+      "reason": "Cuenta artística/personal (multi-handle vinculados), no institución. Decisión de Diego, 2026-09-07."
+    },
+    {
+      "username": "wenacosta91",
+      "reason": "Cuenta personal, perfil privado, no institución. Decisión de Diego, 2026-09-07."
+    },
+    {
+      "username": "hemisferioderecholegal",
+      "reason": "Colectivo creativo con dominio .co y sin evidencia de sede en Francia en su bio — parece operar desde Colombia. Decisión de Diego, 2026-09-07."
+    },
+    {
+      "username": "lesarchescitoyennes",
+      "reason": "Tiers-lieu que anuncia cierre permanente en su bio ('[FERMÉ]', abierto 2023-2025) — ya no genera eventos futuros. Decisión de Diego, 2026-09-07."
+    },
+    {
+      "username": "dr.art_mariaalexandragabriele",
+      "reason": "Artista/coleccionista individual, no institución — mismo criterio que abasehmirvali. Decisión de Diego, 2026-09-07."
+    },
+    {
+      "username": "abasehmirvali",
+      "reason": "Curador/estratega de arte individual, no institución. Decisión de Diego, 2026-09-07."
+    },
+    {
+      "username": "idyllesculturelles",
+      "reason": "Influencer personal de literatura/cultura en París ('Marine BD'), no institución. Decisión de Diego, 2026-09-07."
     }
   ]
 }

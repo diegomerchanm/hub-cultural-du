@@ -15,18 +15,42 @@
 // activa (15 eventos en la última corrida, a diferencia de político con 0),
 // se le dio un tono propio (rosa/magenta) en vez de simplemente vivificar
 // el mismo gris para los dos.
+// iconImg (2026-09-07): set de iconos ilustrados a medida (estilo "Vox
+// Explainer", ver site/icons/*.svg) que reemplaza el glifo genérico de
+// Tabler Icons (`icon`, abajo) para las 11 categorías -- cada SVG ya trae
+// horneado el mismo color de fondo que `color` de abajo (coinciden a
+// propósito), así que el <img> reemplaza limpiamente al glifo sin cambiar
+// el rectángulo de color detrás (ver imageBlockHtml/attachImageFallback/
+// detailMediaHtml). `politico` llegó en un segundo lote (2026-09-07) con su
+// propio color (#1c7a72, verde/teal de urna electoral) -- se actualizó
+// `color` acá para que coincida, reemplazando el gris "sin identidad
+// propia" que DD-075 le había puesto de relleno (0 eventos en esa corrida,
+// nunca tuvo tono propio hasta ahora).
+// icons/v2/ (2026-09-07): el lote original tenía el "ink" del dibujo -- lo
+// que va DENTRO del fondo de color, no el cuadro en sí -- en proporciones
+// muy distintas entre íconos (ej. el micrófono de académico ocupaba ~70%
+// del lienzo de 200x200, la careta de escénico y el confeti de festival
+// ~50%), así que a igual tamaño de caja en CSS (60/80/96px) se veían de
+// tamaño visualmente distinto. Se re-centró y re-escaló el dibujo de cada
+// SVG (todo lo que sigue después del <g> del fondo/halftone) a una caja
+// común de 132x132 dentro del lienzo de 200x200 (66%, mismo margen que el
+// radio de esquina rx=34 del propio clipPath) -- mismo color/trazo/forma,
+// solo normalizados de tamaño. Los .svg viejos en icons/ (sin /v2/) quedan
+// de respaldo/no se tocan porque el conector de esta carpeta no deja
+// sobrescribir archivos que ya estaban ahí de una carga anterior; Diego
+// puede borrarlos a mano cuando quiera, no se usan en ningún lado del código.
 const CATEGORY_META = {
-  gastronomico:  { label: "Gastronomía",            color: "#c8203a", icon: "ti-tools-kitchen-2" },
-  institucional: { label: "Institucional",           color: "#1e55b9", icon: "ti-building-bank" },
-  visual:        { label: "Artes visuales",          color: "#774cb9", icon: "ti-palette" },
-  comunitario:   { label: "Comunidad",               color: "#3a9c71", icon: "ti-users" },
-  musical:       { label: "Música",                  color: "#bc5923", icon: "ti-music" },
-  formacion:     { label: "Talleres",                color: "#ce9f22", icon: "ti-school" },
-  audiovisual:   { label: "Cine",                    color: "#51659a", icon: "ti-movie" },
-  escenico:      { label: "Teatro y danza",          color: "#be5587", icon: "ti-masks-theater" },
-  festival:      { label: "Festivales",              color: "#ddaf31", icon: "ti-confetti" },
-  academico:     { label: "Charlas y conferencias",  color: "#6b9c3a", icon: "ti-microphone-2" },
-  politico:      { label: "Cívico",                  color: "#98937b", icon: "ti-flag" },
+  gastronomico:  { label: "Gastronomía",            color: "#c8203a", icon: "ti-tools-kitchen-2", iconImg: "icons/v2/icon-gastronomico.svg" },
+  institucional: { label: "Institucional",           color: "#1e55b9", icon: "ti-building-bank",  iconImg: "icons/v2/icon-institucional.svg" },
+  visual:        { label: "Artes visuales",          color: "#774cb9", icon: "ti-palette",         iconImg: "icons/v2/icon-visual.svg" },
+  comunitario:   { label: "Comunidad",               color: "#3a9c71", icon: "ti-users",           iconImg: "icons/v2/icon-comunitario.svg" },
+  musical:       { label: "Música",                  color: "#bc5923", icon: "ti-music",           iconImg: "icons/v2/icon-musical.svg" },
+  formacion:     { label: "Talleres",                color: "#ce9f22", icon: "ti-school",          iconImg: "icons/v2/icon-formacion.svg" },
+  audiovisual:   { label: "Cine",                    color: "#51659a", icon: "ti-movie",           iconImg: "icons/v2/icon-audiovisual.svg" },
+  escenico:      { label: "Teatro y danza",          color: "#be5587", icon: "ti-masks-theater",   iconImg: "icons/v2/icon-escenico.svg" },
+  festival:      { label: "Festivales",              color: "#ddaf31", icon: "ti-confetti",        iconImg: "icons/v2/icon-festival.svg" },
+  academico:     { label: "Charlas y conferencias",  color: "#6b9c3a", icon: "ti-microphone-2",    iconImg: "icons/v2/icon-academico.svg" },
+  politico:      { label: "Cívico",                  color: "#1c7a72", icon: "ti-flag",            iconImg: "icons/v2/icon-politico.svg" },
 };
 const TAG_ICONS = {
   "Literatura": "ti-book", "Circo": "ti-balloon", "Fotografía": "ti-camera",
@@ -746,17 +770,25 @@ function distanceLabel(ev) {
 function hasPhotoPermission(ev) {
   return ev.photoPermission === true && !!ev.imageUrl;
 }
+/* Ícono de respaldo para una categoría: la ilustración custom (iconImg) si
+   existe, si no el glifo de Tabler de siempre (ver nota junto a
+   CATEGORY_META). Un solo lugar para esta decisión -- lo usan
+   imageBlockHtml, attachImageFallback y detailMediaHtml/topMedia más abajo. */
+function categoryIconHtml(meta) {
+  if (meta.iconImg) return `<img src="${meta.iconImg}" alt="" class="category-fallback-icon" loading="lazy">`;
+  return `<i class="ti ${meta.icon}" aria-hidden="true"></i>`;
+}
 function imageBlockHtml(ev, meta, imgClass) {
-  if (!hasPhotoPermission(ev)) return `<i class="ti ${meta.icon}" aria-hidden="true"></i>`;
+  if (!hasPhotoPermission(ev)) return categoryIconHtml(meta);
   return `<img src="${escapeHtml(ev.imageUrl)}" alt="" class="${imgClass}" loading="lazy">`;
 }
 function attachImageFallback(container, meta) {
-  const img = container && container.querySelector("img");
+  const img = container && container.querySelector("img:not(.category-fallback-icon)");
   if (!img) return;
   img.onerror = () => {
     img.remove();
     container.style.background = meta.color;
-    container.insertAdjacentHTML("afterbegin", `<i class="ti ${meta.icon}" aria-hidden="true"></i>`);
+    container.insertAdjacentHTML("afterbegin", categoryIconHtml(meta));
   };
 }
 
@@ -879,7 +911,7 @@ function detailMediaHtml(ev, meta) {
       </blockquote>`,
     };
   }
-  return { kind: "icon", html: `<i class="ti ${meta.icon}" aria-hidden="true"></i>` };
+  return { kind: "icon", html: categoryIconHtml(meta) };
 }
 
 /* ── Render: tarjeta de evento ───────────────────────────────────────── */
@@ -1076,7 +1108,7 @@ function openDetail(ev, opts = {}) {
   // que el caso "sin foto"), y el <blockquote> real se inserta al final del
   // tab "Resumen", después del link "Ver original". La foto real (cuando hay
   // permiso) sigue arriba, ahí sí funciona como imagen destacada.
-  const topMedia = media.kind === "embed" ? { kind: "icon", html: `<i class="ti ${meta.icon}" aria-hidden="true"></i>` } : media;
+  const topMedia = media.kind === "embed" ? { kind: "icon", html: categoryIconHtml(meta) } : media;
   panel.innerHTML = `
     <button class="detail-close" data-close aria-label="Cerrar"><i class="ti ti-x" aria-hidden="true"></i></button>
     <div class="detail-img" style="${topMedia.kind === "icon" ? `background:${meta.color}` : ""}">${topMedia.html}</div>

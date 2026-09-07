@@ -19,4 +19,4 @@
 
    Si se deja YOUR_KEY_HERE (o se borra el archivo), el sitio simplemente no
    muestra el mapa -- no rompe nada más. */
-window.GOOGLE_MAPS_EMBED_KEY = "YOUR_KEY_HERE";
+window.GOOGLE_MAPS_EMBED_KEY = "AIzaSyBPnmDk2aMUeqFhe2BhKxbV9rBLP6w0T6E";
