@@ -227,8 +227,20 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 
 /* ── Event card ──────────────────────────────────────────────────── */
 .event-card {
-  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-card);
+  background: var(--card); border-radius: var(--radius-card);
   overflow: hidden; cursor: pointer; text-align: left;
+  /* 2026-09-08 (fix aparte, mismo día): border:1px con --border (#ded9cf)
+     contra el fondo de página --bg (#ece9e3) -- son dos tonos casi
+     idénticos, así que el borde horizontal de arriba (donde el
+     anti-aliasing diluye más una línea de 1px) prácticamente desaparecía,
+     mientras el de los lados verticales sí se alcanzaba a ver -- no era
+     una asimetría real en el CSS (border aplica parejo a los 4 lados),
+     era falta de contraste, no un lado "sin borde". Reemplazado por un
+     anillo vía box-shadow con --text semitransparente (contraste real
+     contra --bg, no un tono casi igual) + una sombra suave -- se ve
+     parejo en los 4 lados sin depender de qué tan bien antialiasee cada
+     navegador una línea de 1px. */
+  box-shadow: 0 0 0 1px rgba(35,39,48,0.16), 0 1px 3px rgba(35,39,48,0.08);
   /* 2026-09-08: .shelf-scroll es flex, así que estira cada .event-card al
      alto de la más alta de la fila (align-items:stretch, default) -- sin
      esto, esa altura extra quedaba como espacio muerto DEBAJO del texto en
@@ -240,7 +252,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
      al fondo siempre, sin importar cuánto texto haya arriba. */
   display: flex; flex-direction: column;
 }
-.event-card:hover { border-color: var(--sub); }
+.event-card:hover { box-shadow: 0 0 0 1px var(--sub), 0 2px 6px rgba(35,39,48,0.12); }
 .event-card-img { height: 110px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
 .event-card-img i { font-size: 26px; opacity: 0.55; color: #fff; }
 .event-card-img .category-fallback-icon { width: 60px; height: 60px; border-radius: 17%; object-fit: contain; }
