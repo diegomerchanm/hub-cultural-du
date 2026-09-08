@@ -229,9 +229,19 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 .event-card {
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-card);
   overflow: hidden; cursor: pointer; text-align: left;
+  /* 2026-09-08: .shelf-scroll es flex, así que estira cada .event-card al
+     alto de la más alta de la fila (align-items:stretch, default) -- sin
+     esto, esa altura extra quedaba como espacio muerto DEBAJO del texto en
+     las tarjetas con menos contenido (ej. sin dirección, @mep.paris),
+     mientras las de dirección larga (@culture_gouv) llenaban justo y se
+     veían "pegadas" abajo -- Diego lo notó comparando tarjetas una al lado
+     de otra. display:flex column acá + flex:1 en .event-card-body +
+     margin-top:auto en .event-card-foot empuja el pie (cuenta/acciones)
+     al fondo siempre, sin importar cuánto texto haya arriba. */
+  display: flex; flex-direction: column;
 }
 .event-card:hover { border-color: var(--sub); }
-.event-card-img { height: 110px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+.event-card-img { height: 110px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
 .event-card-img i { font-size: 26px; opacity: 0.55; color: #fff; }
 .event-card-img .category-fallback-icon { width: 60px; height: 60px; border-radius: 17%; object-fit: contain; }
 .event-card-photo { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -239,7 +249,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
   position: absolute; top: 8px; right: 8px; font-size: 11px; padding: 2px 8px;
   border-radius: var(--radius); background: var(--card); color: var(--text);
 }
-.event-card-body { padding: 10px 12px; }
+.event-card-body { padding: 10px 12px; flex: 1; display: flex; flex-direction: column; }
 .event-card-date { font-size: 12px; color: var(--sub); margin: 0 0 2px; }
 .event-card-title {
   font-size: 14px; font-weight: 600; margin: 0 0 4px; line-height: 1.3;
@@ -248,7 +258,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 .event-card-loc { font-size: 12px; color: var(--sub); margin: 0 0 8px; display: flex; align-items: center; gap: 4px; }
 .event-card-foot {
   display: flex; align-items: center; justify-content: space-between;
-  border-top: 1px solid var(--border); padding-top: 8px;
+  border-top: 1px solid var(--border); padding-top: 8px; margin-top: auto;
 }
 .event-card-author { font-size: 12px; color: var(--sub); }
 .badge-row { display: flex; gap: 4px; }
