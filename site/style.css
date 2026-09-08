@@ -39,6 +39,24 @@ body {
 
 a { color: inherit; }
 
+/* 2026-09-08: reset de <button> -- el navegador aplica un padding por
+   defecto asimétrico (Chrome: 1px 6px, es decir casi nada arriba/abajo
+   pero notable a los lados) que nunca se había reseteado acá. En
+   .event-card esto empujaba la imagen de color ~6px+borde hacia adentro
+   en los lados pero solo ~1px+borde arriba, produciendo exactamente el
+   hueco blanco asimétrico que Diego reportó varias veces (visible a los
+   lados, ausente arriba) -- no era falta de contraste de borde (ver
+   intento revertido más abajo) ni un problema de una tarjeta puntual: es
+   el mismo <button> subyacente en las 5 tarjetas de "Destacados", por
+   eso no cambiaba comparando tarjeta contra tarjeta. .icon-toggle y
+   .detail-close tienen el mismo padding sin resetear, pero su tamaño fijo
+   (width/height) más box-sizing:border-box lo enmascara -- este reset
+   también los deja explícitos y correctos hacia adelante. */
+button {
+  margin: 0; padding: 0; border: 0; background: none;
+  font: inherit; color: inherit; text-align: inherit;
+}
+
 /* ── Top nav ─────────────────────────────────────────────────────── */
 .topnav {
   background: var(--bg);
@@ -227,20 +245,15 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
 
 /* ── Event card ──────────────────────────────────────────────────── */
 .event-card {
-  background: var(--card); border-radius: var(--radius-card);
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-card);
   overflow: hidden; cursor: pointer; text-align: left;
-  /* 2026-09-08 (fix aparte, mismo día): border:1px con --border (#ded9cf)
-     contra el fondo de página --bg (#ece9e3) -- son dos tonos casi
-     idénticos, así que el borde horizontal de arriba (donde el
-     anti-aliasing diluye más una línea de 1px) prácticamente desaparecía,
-     mientras el de los lados verticales sí se alcanzaba a ver -- no era
-     una asimetría real en el CSS (border aplica parejo a los 4 lados),
-     era falta de contraste, no un lado "sin borde". Reemplazado por un
-     anillo vía box-shadow con --text semitransparente (contraste real
-     contra --bg, no un tono casi igual) + una sombra suave -- se ve
-     parejo en los 4 lados sin depender de qué tan bien antialiasee cada
-     navegador una línea de 1px. */
-  box-shadow: 0 0 0 1px rgba(35,39,48,0.16), 0 1px 3px rgba(35,39,48,0.08);
+  /* 2026-09-08: se probó (y se revirtió) un box-shadow de mayor contraste
+     acá pensando que el borde superior "invisible" era un problema de
+     contraste de color -- Diego confirmó con captura que persistía igual
+     incluso con un borde más fuerte. Causa real encontrada: .event-card
+     es un <button>, y el padding por defecto del navegador nunca se
+     había reseteado (ver el reset `button { padding:0; ... }` arriba).
+     Resuelto ahí, no acá. */
   /* 2026-09-08: .shelf-scroll es flex, así que estira cada .event-card al
      alto de la más alta de la fila (align-items:stretch, default) -- sin
      esto, esa altura extra quedaba como espacio muerto DEBAJO del texto en
@@ -252,7 +265,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; }
      al fondo siempre, sin importar cuánto texto haya arriba. */
   display: flex; flex-direction: column;
 }
-.event-card:hover { box-shadow: 0 0 0 1px var(--sub), 0 2px 6px rgba(35,39,48,0.12); }
+.event-card:hover { border-color: var(--sub); }
 .event-card-img { height: 110px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
 .event-card-img i { font-size: 26px; opacity: 0.55; color: #fff; }
 .event-card-img .category-fallback-icon { width: 60px; height: 60px; border-radius: 17%; object-fit: contain; }
