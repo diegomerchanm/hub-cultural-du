@@ -1,0 +1,46 @@
+name: Neo4j keep-alive
+
+# AuraDB Free se pausa tras 72 h de inactividad y BORRA la instancia si queda
+# pausada más de 30 días (doc de Neo4j Aura, verificado 29/09/2026).
+# Este workflow hace una escritura mínima todos los días para que la base
+# nunca llegue a pausarse. Si la instancia ya está pausada, el job FALLA y
+# GitHub te manda un correo: en ese caso hay que entrar a console.neo4j.io y
+# pulsar "Resume" (una consulta no despierta una instancia pausada).
+#
+# Usa los mismos secretos que pipeline.yml (NEO4J_URI / NEO4J_USERNAME /
+# NEO4J_PASSWORD). Costo: 0 (minutos gratis de Actions, sin APIs pagas).
+# Ojo: GitHub desactiva los workflows programados si el repo pasa 60 días
+# sin commits; avisa por correo y se reactiva con un clic en la pestaña Actions.
+
+on:
+  schedule:
+    - cron: "17 5 * * *"   # todos los días, 05:17 UTC
+  workflow_dispatch: {}
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      NEO4J_URI: ${{ secrets.NEO4J_URI }}
+      NEO4J_USERNAME: ${{ secrets.NEO4J_USERNAME }}
+      NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install "neo4j==6.2.0"
+      - name: Escritura mínima (nodo :Heartbeat único)
+        shell: python
+        run: |
+          import os
+          from neo4j import GraphDatabase
+          driver = GraphDatabase.driver(os.environ["NEO4J_URI"],
+                                        auth=(os.environ["NEO4J_USERNAME"], os.environ["NEO4J_PASSWORD"]))
+          driver.verify_connectivity()
+          with driver.session() as s:
+              rec = s.run("MERGE (h:Heartbeat {id: 'keepalive'}) "
+                          "SET h.at = datetime(), h.count = coalesce(h.count, 0) + 1 "
+                          "RETURN h.count AS n").single()
+          driver.close()
+          print(f"Neo4j activa. Latido n.º {rec['n']}")
