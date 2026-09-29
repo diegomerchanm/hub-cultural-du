@@ -1353,5 +1353,32 @@ Costo estimado del scrape de 50 perfiles: trivial (~$0.03-0.20 según el precio 
 
 ---
 
-*Última actualización: 2026-08-29 (noche, DD-075)*
+**DD-076 — Migración completa de Apify a HikerAPI (2026-09-26).** Tras cerrar la tesis, Diego decidió pasar el scraping 100 % a HikerAPI (pago por uso, sin mensualidad) y dejar Apify.
+
+- **Cliente compartido nuevo, `hikerapi_client.py`:** clave por variable de entorno, reintentos en 429/5xx, conteo real de requests (header `x-hiker-info`), tope de gasto duro por corrida (`BudgetExceeded` antes de pasarse), caché `username → user_id` en `data_raw/hikerapi_user_ids.json` y log por corrida en `.hikerapi_cost_log.json`. El precio por request (0,0006 USD, DD-049) sigue siendo un supuesto, ajustable con `HIKERAPI_PRICE_PER_REQUEST`.
+- **Perfiles, `1_harvest_ig_profiles_hikerapi.py` (nuevo):** `/v1/user/by/username`, 1 request por cuenta. Escribe `profile_<u>.json` con el shape de Apify, así que `2_build_graph.py` no cambia. `--pending-from-neo4j` reemplaza a `extract_profiles.py`; de paso se corrigió la precedencia del `WHERE` de aquel script, donde el `AND` solo aplicaba a la segunda condición. Tiene `--dry-run`, `--max-usd` y `--force`.
+- **Posts, `1_harvest_ig_posts_hikerapi.py` (reescrito, ahora por defecto):** se portó el comportamiento del scraper de Apify (DD-029): ventana dinámica por cuenta, fusión con el archivo existente (dedup por id, gana el nuevo) y tope deslizante de 50. La versión exploratoria de DD-059, en cambio, saltaba toda cuenta que ya tuviera archivo, lo que habría congelado las cuentas existentes. Además: caché de `user_id`, `--dry-run`, `--max-usd`, timestamps normalizados a `...000Z` y usertags/coautores llevados a la forma que lee `2_build_graph.py`.
+- **Archivados en `old/`:** `1_harvest_ig_profiles.py`, `1_harvest_ig_posts.py`, `extract_profiles.py`. Se actualizaron `control_panel.py`, el workflow de GitHub Actions (el secreto pasa de `APIFY_TOKEN` a `HIKERAPI_ACCESS_KEY`, con topes `--max-usd` en CI) y `CLAUDE.md`.
+- **Pérdidas conocidas frente a Apify:**
+  - **`relatedProfiles`:** HikerAPI no tiene endpoint de perfiles relacionados (`gql/user/related/profiles` figura como deprecado). Se conservan los del archivo anterior al refrescar, pero las cuentas nuevas no traen ninguno. El descubrimiento vía `RELATED_TO` deja de crecer y lo reemplaza la Fase 2 del roadmap.
+  - `highlightReelCount`.
+  - `musicInfo`/`latestComments` (la extracción de eventos no los lee).
+  - hashtags/menciones: se reconstruyen por regex.
+- **Verificado:** `py_compile`, y `testing/test_hikerapi_offline.py`, que simula las respuestas según la doc de HikerAPI sin red ni gasto. La prueba cubre:
+  - exclusiones y deduplicación de seeds;
+  - normalización de perfil y post;
+  - uso de la caché de `user_id` (0 llamadas extra);
+  - ventana y paginación que corta;
+  - fusión en la que gana el nuevo;
+  - tope de gasto;
+  - `load_profile`/`load_posts` reales de `2_build_graph.py` ejecutados sobre los archivos generados.
+- **No verificado contra la API real:** el entorno de Claude no tiene salida de red a `api.hikerapi.com` (proxy 403). **Pendiente, bloqueante antes de cualquier harvest real:**
+  1. `calibrate` de perfiles.
+  2. `calibrate` de posts.
+  3. `compare` contra 2 o 3 cuentas con posts de Apify.
+  4. Agregar el secreto `HIKERAPI_ACCESS_KEY` en GitHub.
+
+---
+
+*Última actualización: 2026-09-26 (DD-076)*
 *Próximas decisiones a documentar: DD-023 (clasificador NLP de cuentas), SetFit para v2, integración TikTok, human-in-the-loop para revisión de eventos, resolución de DD-035 (exposiciones en curso), normalización de dígitos Unicode estilizados si se confirma que es frecuente, validación de los fixes DD-038/DD-039 en corridas reales, y si la muestra de "conflicto geográfico" (DD-041) revela falsos positivos del gazetteer. También pendiente: limpieza de basura preexistente en eventos legacy (fecha `1492-11-01`, emoji como `locationName`, texto no-geográfico como `locationName`). Validación en vivo de DD-042 (`eventArtTags`) contra output real del LLM, y decisión sobre si vale la pena un backfill de los eventos existentes. Los 8 puntos de DD-045 son ahora el punchlist activo — arrancar por el 1 y el 2 (ya diagnosticados, sin trabajo de investigación adicional).*

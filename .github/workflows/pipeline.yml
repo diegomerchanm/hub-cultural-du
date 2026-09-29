@@ -1,13 +1,13 @@
 name: Pipeline Hub Cultural DU
 
 # Disparo manual únicamente (botón "Run workflow" en la pestaña Actions de
-# GitHub) — a propósito, para no gastar presupuesto de Apify/Groq/Cerebras
+# GitHub) — a propósito, para no gastar presupuesto de HikerAPI/Groq/Cerebras
 # sin que alguien lo decida explícitamente cada vez.
 on:
   workflow_dispatch:
     inputs:
       run_extraction_and_ingestion:
-        description: "Fase 1+2 — Scraping Apify + ingestión a Neo4j (acopladas: data_raw/ está en .gitignore, no persiste entre corridas, así que ingestión solo tiene sentido si se acaba de scrapear en esta misma corrida)"
+        description: "Fase 1+2 — Scraping HikerAPI + ingestión a Neo4j (acopladas: data_raw/ está en .gitignore, no persiste entre corridas, así que ingestión solo tiene sentido si se acaba de scrapear en esta misma corrida)"
         type: boolean
         default: false
       run_analysis:
@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
-      APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+      HIKERAPI_ACCESS_KEY: ${{ secrets.HIKERAPI_ACCESS_KEY }}
       NEO4J_URI: ${{ secrets.NEO4J_URI }}
       NEO4J_USERNAME: ${{ secrets.NEO4J_USERNAME }}
       NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
@@ -60,9 +60,13 @@ jobs:
         run: pip install -r requirements.txt
 
       # ── Fase 1+2 ────────────────────────────────────────────────────────
-      - name: "Fase 1 — Extracción Instagram (Apify)"
+      - name: "Fase 1 — Extracción Instagram (HikerAPI, DD-076)"
         if: inputs.run_extraction_and_ingestion == 'true'
-        run: python extract_profiles.py
+        # Topes de gasto duros por corrida (--max-usd). data_raw/ no persiste
+        # entre corridas de CI, así que cada corrida parte de cero.
+        run: |
+          python 1_harvest_ig_profiles_hikerapi.py harvest --seeds config/seeds_idf.json --yes --max-usd 0.5
+          python 1_harvest_ig_posts_hikerapi.py harvest --seeds config/seeds_idf.json --max-days 10 --yes --max-usd 1.5
 
       - name: "Fase 2 — Ingestión a Neo4j"
         if: inputs.run_extraction_and_ingestion == 'true'

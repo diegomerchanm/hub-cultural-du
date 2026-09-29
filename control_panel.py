@@ -69,16 +69,12 @@ HISTORY_FILE = RUNS_DIR / "history.jsonl"
 # habilita --dry-run para esos por ahora; la corrida real todavía se hace a
 # mano en una terminal.
 SCRIPT_REGISTRY = [
-    {"phase": "1. Extracción", "path": "extract_profiles.py",
-     "label": "Scrapear perfiles pendientes (Apify, cost-aware)",
-     "interactive_only": True,
-     "note": "Pide confirmar el costo estimado por teclado antes de gastar en Apify, siempre, sin --dry-run que lo evite. No se puede correr sin colgarse desde acá — corré `python extract_profiles.py` en tu propia terminal."},
-    {"phase": "1. Extracción", "path": "1_harvest_ig_profiles.py",
-     "label": "Scrapear perfiles (seeds curados)"},
-    {"phase": "1. Extracción", "path": "1_harvest_ig_posts.py",
-     "label": "Scrapear posts (seeds curados)"},
+    {"phase": "1. Extracción", "path": "1_harvest_ig_profiles_hikerapi.py",
+     "label": "Perfiles vía HikerAPI (seeds o pendientes de Neo4j, DD-076)"},
     {"phase": "1. Extracción", "path": "1_harvest_ig_posts_hikerapi.py",
-     "label": "Posts vía HikerAPI (exploratorio, DD-059)"},
+     "label": "Posts vía HikerAPI (ventana dinámica + fusión, DD-076)"},
+    {"phase": "1. Extracción", "path": "1_harvest_ig_network_hikerapi.py",
+     "label": "Red 'following' vía HikerAPI (descubrimiento, DD-049)"},
     {"phase": "2. Ingestión", "path": "2_build_graph.py",
      "label": "Cargar data_raw/*.json a Neo4j",
      "no_args": True,
